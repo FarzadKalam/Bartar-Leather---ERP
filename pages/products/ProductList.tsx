@@ -19,7 +19,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { MOCK_PRODUCTS } from '../../mockData';
-import { Product } from '../../types';
+import { Product } from '../../src/types';
 
 const getStockStatus = (stock: number, reorderPoint: number) => {
   const max = reorderPoint * 5;

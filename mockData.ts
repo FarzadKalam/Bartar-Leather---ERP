@@ -1,5 +1,5 @@
 
-import { Product, BOM, ProductionOrder } from './types';
+import { Product, BOM, ProductionOrder } from './src/types';
 
 export const MOCK_PRODUCTS: Product[] = [
   {

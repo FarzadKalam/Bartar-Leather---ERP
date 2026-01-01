@@ -17,7 +17,7 @@ import { Button, Timeline, Checkbox, Tag, List, Avatar, Input, Breadcrumb } from
 import { MOCK_PRODUCTS } from '../../mockData';
 import { MODULES } from '../../moduleRegistry';
 import SmartFieldRenderer from '../../components/SmartFieldRenderer';
-import { FieldType, FieldLocation, FieldDefinition, UserRole, LogicOperator } from '../../types';
+import { FieldType, FieldLocation, FieldDefinition, UserRole, LogicOperator } from '../../src/types';
 
 const CURRENT_USER = { name: 'علی رضایی', role: UserRole.ADMIN };
 

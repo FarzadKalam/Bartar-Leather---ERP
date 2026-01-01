@@ -75,8 +75,18 @@ const SmartForm: React.FC<SmartFormProps> = ({
       const relOpts: Record<string, any[]> = {};
       for (const field of relFields) {
         if (field.relationConfig) {
-          const { targetModule, targetField } = field.relationConfig;
-          const { data } = await supabase.from(targetModule).select(`id, ${targetField}, system_code`).limit(100);
+            const { targetModule, targetField, filter } = field.relationConfig; // filter اضافه شد
+            
+            let query = supabase.from(targetModule).select(`id, ${targetField}, system_code`);
+            
+            // --- اعمال فیلتر ---
+            if (filter) {
+                Object.keys(filter).forEach(key => {
+                    query = query.eq(key, filter[key]);
+                });
+            }
+            
+            const { data } = await query.limit(200);
           if (data) {
               const options = data.map(i => ({ label: `${i[targetField]} ${i.system_code ? `(${i.system_code})` : ''}`, value: i.id }));
               relOpts[field.key] = options;
@@ -161,6 +171,15 @@ const SmartForm: React.FC<SmartFormProps> = ({
     try {
       const cleanValues = { ...values };
       
+      // --- فیکس: تبدیل مقادیر خالی به null برای فیلدهای UUID ---
+      Object.keys(cleanValues).forEach(key => {
+          if (cleanValues[key] === '' || cleanValues[key] === undefined) {
+              cleanValues[key] = null;
+          }
+      });
+
+      if (imageUrl) cleanValues.image_url = imageUrl;
+      
       // حذف مقادیر خالی یا undefined در حالت بالک (فقط چیزهایی که پر شده ارسال شود)
       if (mode === 'bulk') {
           Object.keys(cleanValues).forEach(key => {
@@ -185,16 +204,21 @@ const SmartForm: React.FC<SmartFormProps> = ({
           message.success(`${batchIds.length} رکورد با موفقیت ویرایش شد`);
       } 
       else if (mode === 'edit' && recordId) {
-          // ویرایش تکی
           const { error } = await supabase.from(moduleConfig.id).update(cleanValues).eq('id', recordId);
           if (error) throw error;
           message.success('ویرایش انجام شد');
-      } 
+      }
+      
       else {
           // ایجاد جدید
-          if (moduleConfig.fields.find(f => f.key === 'system_code')) {
-              cleanValues.system_code = await generateSystemCode();
-          }
+        if (moduleConfig.fields.find(f => f.key === 'system_code') && !cleanValues.system_code) {
+          cleanValues.system_code = await generateSystemCode();
+      }
+        
+        Object.keys(tableData).forEach(key => {
+          cleanValues[key] = tableData[key];
+      });
+
           const { error } = await supabase.from(moduleConfig.id).insert([cleanValues]);
           if (error) throw error;
           message.success('ثبت شد');
@@ -207,6 +231,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
     } finally {
       setSubmitting(false);
     }
+
   };
 
   const renderInput = (field: any) => {

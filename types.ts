@@ -49,7 +49,14 @@ export enum FieldType {
   USER = 'user',         
   STATUS = 'status',  
   PHONE = 'phone',
-  JSON = 'json'
+  JSON = 'json',
+  READONLY_LOOKUP = 'readonly_lookup' // <--- جدید برای ستون‌های نمایشی جدول
+}
+
+export interface RelationConfig {
+  targetModule: string;
+  targetField: string;
+  filter?: Record<string, any>; // <--- جدید برای فیلتر کردن لیست (مثلا فقط چرم‌ها)
 }
 
 export enum FieldNature {
@@ -150,6 +157,7 @@ export interface FieldDefinition {
   relationConfig?: {
     targetModule: string;   
     targetField: string;    
+    filter?: Record<string, any>; // <--- این خط جدید اضافه شود
   };
 }
 
@@ -184,6 +192,13 @@ export interface ModuleDefinition {
     displayMode: RelatedDisplayMode;
     label: string;
   }[];
+}
+
+export interface RelatedTabConfig {
+  title: string;
+  icon: string; // نام آیکون
+  targetModule: string; // ماژول هدف (مثلا products)
+  foreignKey: string; // نام فیلدی در ماژول هدف که به این رکورد اشاره دارد (مثلا production_bom_id)
 }
 
 // --- DB ENTITY INTERFACES (Matching Supabase Schema) ---

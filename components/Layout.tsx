@@ -61,13 +61,22 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
     { key: '/', icon: <DashboardOutlined />, label: 'داشبورد' },
     { key: '/products', icon: <SkinOutlined />, label: 'محصولات' },
     { key: '/warehouses', icon: <GoldOutlined />, label: 'انبارها' },
-    { key: '/production', icon: <ExperimentOutlined />, label: 'تولید' },
+    { 
+        key: 'production', 
+        icon: <ExperimentOutlined />, 
+        label: 'تولید',
+        children: [
+            { key: '/production_boms', label: 'شناسنامه‌های تولید (BOM)' },
+            { key: '/production_orders', label: 'سفارشات تولید' },
+        ] 
+    },
     { key: '/suppliers', icon: <BankOutlined />, label: 'تامین کنندگان' },
     { key: '/invoices', icon: <FileTextOutlined />, label: 'فاکتورها' },
     { key: '/tasks', icon: <CheckSquareOutlined />, label: 'وظایف' },
     { key: '/customers', icon: <ShopOutlined />, label: 'مشتریان' },
     { key: '/hr', icon: <TeamOutlined />, label: 'منابع انسانی' },
     { key: '/settings', icon: <SettingOutlined />, label: 'تنظیمات' },
+    
   ];
 
   const userMenu = {
