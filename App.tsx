@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { ConfigProvider, App as AntApp } from 'antd'; // <--- تغییر اینجاست
+import { ConfigProvider, App as AntApp, theme } from 'antd'; // <--- `theme` اینجا اضافه شد
 import Layout from './components/Layout';
 import ModuleList from './pages/ModuleList';
 import ModuleShow from './pages/ModuleShow';
@@ -22,8 +22,8 @@ function App() {
       direction="rtl"
       theme={{
         token: { fontFamily: 'Vazirmatn' },
-        // تنظیمات دارک مود برای antd
-        algorithm: isDarkMode ? require('antd').theme.darkAlgorithm : require('antd').theme.defaultAlgorithm,
+        // اصلاح خطای require: استفاده مستقیم از آبجکت theme
+        algorithm: isDarkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
       }}
     >
       {/* اضافه کردن کامپوننت App برای مدیریت مسیج‌ها و مودال‌ها */}
