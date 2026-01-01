@@ -36,10 +36,13 @@ const PRODUCT_FIELDS: any[] = [
   { key: 'name', labels: { fa: 'نام محصول', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 1, validation: { required: true } },
   { key: 'system_code', labels: { fa: 'کد سیستمی', en: 'Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, readonly: true },
   
+  { key: 'custom_code', labels: { fa: 'کد دستی', en: 'CustomCode' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 4},
+
+  
   // *** فیلد فراموش شده وضعیت ***
   { 
     key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 3, 
-    options: [{label:'فعال', value:'active', color:'green'}, {label:'پیش‌نویس', value:'draft', color:'orange'}],
+    options: [{label:'فعال', value:'active', color:'green'}, {label:'پیش‌نویس', value:'draft', color:'orange'}], validation: { required: true },
     defaultValue: 'active'
   },
 
@@ -48,7 +51,7 @@ const PRODUCT_FIELDS: any[] = [
     key: 'product_type', 
     labels: { fa: 'نوع محصول', en: 'Product Type' }, 
     type: FieldType.SELECT, 
-    location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1,
+    location: FieldLocation.HEADER, order: 5,
     options: [
       { label: 'مواد اولیه', value: 'raw' },
       { label: 'بسته نیمه آماده', value: 'semi' },
@@ -60,15 +63,13 @@ const PRODUCT_FIELDS: any[] = [
     key: 'category', 
     labels: { fa: 'دسته بندی ', en: 'Category' }, 
     type: FieldType.SELECT, 
-    location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 2,
+    location: FieldLocation.HEADER, order: 6,
     options: [
        { label: 'چرم', value: 'leather' },
        { label: 'آستر', value: 'lining' },
        { label: 'فوم', value: 'foam' },
        { label: 'خرجکار', value: 'accessory' },
        { label: 'یراق', value: 'fitting' },
-       { label: 'کیف پول', value: 'wallet' },
-       { label: 'کیف اداری', value: 'office_bag' },
     ],
     // نکته: این فیلد همیشه هست، اما مقادیرش بسته به نوع محصول معنا پیدا میکنه
     // فعلا شرط نمایش نمیذاریم تا کاربر بتونه انتخاب کنه
@@ -76,7 +77,8 @@ const PRODUCT_FIELDS: any[] = [
   { key: 'calculation_method', labels: { fa: 'روش محاسبه', en: 'Calc Method' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 3, options: [{label:'متراژ', value:'area'}, {label:'تعدادی', value:'count'}] },
   { key: 'waste_rate', labels: { fa: 'نرخ پرت (%)', en: 'Waste Rate' }, type: FieldType.PERCENTAGE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 4 },
   { key: 'stock', labels: { fa: 'موجودی فعلی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5 },
-  { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 6 },
+  { key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 6 },
+  { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7 },
 
 
   // --- فیلدهای اختصاصی چرم ---

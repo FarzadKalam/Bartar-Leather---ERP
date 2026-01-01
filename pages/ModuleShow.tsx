@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Descriptions, Tag, Spin, Image, Breadcrumb, Tabs, message, App, Upload, Input, InputNumber, Select, Tooltip, Popover, QRCode, Divider, Space, Table, Empty } from 'antd'; // <--- Empty اضافه شد
+import { Button, Descriptions, Tag, Spin, Image, Breadcrumb, Tabs, message, App, Upload, Input, InputNumber, Select, Tooltip, Popover, QRCode, Divider, Space, Table, Empty, Drawer } from 'antd';
 import { 
   ArrowRightOutlined, DeleteOutlined, HomeOutlined, EditOutlined, 
   CheckOutlined, CloseOutlined, UploadOutlined, LoadingOutlined, 
@@ -10,6 +10,8 @@ import {
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import { FieldType, BlockType, LogicOperator, FieldLocation } from '../types';
+import EditableTable from '../components/EditableTable';
+import SmartForm from '../components/SmartForm';
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -20,20 +22,27 @@ const ModuleShow: React.FC = () => {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
-  // استیت‌های ویرایش Inline
+  // استیت برای دراور ویرایش کامل
+  const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
+
+  // استیت‌های ویرایش سریع (Inline)
   const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
   const [tempValues, setTempValues] = useState<Record<string, any>>({});
   const [savingField, setSavingField] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   
-  // استیت آپشن‌های داینامیک
+  // استیت آپشن‌ها و ریلیشن‌ها
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
     fetchRecord();
-    fetchOptions();
   }, [moduleId, id]);
+
+  // وقتی دیتا لود شد، آپشن‌ها را بر اساس دیتای موجود فچ کن (برای حل مشکل نمایش نام در جدول)
+  useEffect(() => {
+    if (data) fetchOptions(data);
+  }, [data]);
 
   const fetchRecord = async () => {
     if (!id || !moduleConfig) return;
@@ -44,10 +53,10 @@ const ModuleShow: React.FC = () => {
     setLoading(false);
   };
 
-  const fetchOptions = async () => {
+  const fetchOptions = async (recordData: any = null) => {
     if (!moduleConfig) return;
 
-    // 1. دریافت آپشن‌های داینامیک
+    // 1. دریافت آپشن‌های داینامیک (رنگ، جنس و...)
     const dynFields = moduleConfig.fields.filter(f => (f as any).dynamicOptionsCategory);
     const dynOpts: Record<string, any[]> = {};
     for (const field of dynFields) {
@@ -57,14 +66,47 @@ const ModuleShow: React.FC = () => {
     }
     setDynamicOptions(dynOpts);
 
-    // 2. دریافت ریلیشن‌ها
-    const relFields = moduleConfig.fields.filter(f => f.type === FieldType.RELATION);
+    // 2. دریافت ریلیشن‌ها (برای فیلدهای فرم + ستون‌های جدول)
+    const relFields = [...moduleConfig.fields.filter(f => f.type === FieldType.RELATION)];
+    
+    // اضافه کردن ستون‌های ریلیشن جداول به لیست درخواست
+    moduleConfig.blocks?.forEach(b => {
+        if (b.type === BlockType.TABLE && b.tableColumns) {
+            b.tableColumns.forEach(c => {
+                if (c.type === FieldType.RELATION) {
+                    // کلید اختصاصی برای ستون جدول
+                    relFields.push({ ...c, key: `${b.id}_${c.key}` }); 
+                }
+            });
+        }
+    });
+
     const relOpts: Record<string, any[]> = {};
     for (const field of relFields) {
         if (field.relationConfig) {
             const { targetModule, targetField } = field.relationConfig;
-            const { data } = await supabase.from(targetModule).select(`id, ${targetField}`).limit(50);
-            if (data) relOpts[field.key] = data.map(i => ({ label: i[targetField], value: i.id })).filter(i => i.value !== null);
+            
+            // کوئری هوشمند: دریافت نام و کد برای نمایش بهتر
+            const { data: relData } = await supabase
+                .from(targetModule)
+                .select(`id, ${targetField}, system_code`)
+                .limit(200); // لیمیت برای جلوگیری از سنگین شدن
+            
+            if (relData) {
+                const options = relData.map(i => ({ 
+                    label: `${i[targetField]} ${i.system_code ? `(${i.system_code})` : ''}`, 
+                    value: i.id 
+                })).filter(i => i.value !== null);
+                
+                // ذخیره با کلید اصلی
+                relOpts[field.key] = options;
+                
+                // اگر کلید ترکیبی بود (مثلا bundleItems_item_id)، با کلید ساده هم ذخیره کن که EditableTable پیدا کند
+                if (field.key.includes('_')) {
+                    const originalKey = field.key.split('_').pop(); 
+                    if (originalKey) relOpts[originalKey] = options; 
+                }
+            }
         }
     }
     setRelationOptions(relOpts);
@@ -72,16 +114,12 @@ const ModuleShow: React.FC = () => {
 
   const handleAddOption = async (category: string, newValue: string) => {
       if(!newValue) return;
-      const payload = { category, label: newValue, value: newValue };
-      const { error } = await supabase.from('option_sets').insert([payload]);
+      const { error } = await supabase.from('option_sets').insert([{ category, label: newValue, value: newValue }]);
       if(!error) {
           msg.success('گزینه اضافه شد');
-          setDynamicOptions(prev => ({ 
-              ...prev, 
-              [category]: [...(prev[category] || []), { label: newValue, value: newValue }] 
-          }));
+          setDynamicOptions(prev => ({ ...prev, [category]: [...(prev[category] || []), { label: newValue, value: newValue }] }));
       } else {
-          msg.error('خطا در افزودن گزینه');
+          msg.error('خطا در افزودن');
       }
   };
 
@@ -104,14 +142,10 @@ const ModuleShow: React.FC = () => {
       const fileName = `${Math.random()}.${file.name.split('.').pop()}`;
       const { error: upErr } = await supabase.storage.from('images').upload(fileName, file);
       if (upErr) throw upErr;
-      
       const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
-      const publicUrl = urlData.publicUrl;
-
-      const { error: updateErr } = await supabase.from(moduleId).update({ image_url: publicUrl }).eq('id', id);
-      if (updateErr) throw updateErr;
-
-      setData((prev: any) => ({ ...prev, image_url: publicUrl }));
+      
+      await supabase.from(moduleId).update({ image_url: urlData.publicUrl }).eq('id', id);
+      setData((prev: any) => ({ ...prev, image_url: urlData.publicUrl }));
       msg.success('تصویر بروزرسانی شد');
     } catch (e: any) {
       msg.error('خطا: ' + e.message);
@@ -121,6 +155,7 @@ const ModuleShow: React.FC = () => {
     return false;
   };
 
+  // --- Inline Edit Functions ---
   const startEdit = (key: string, value: any) => {
     setEditingFields(prev => ({ ...prev, [key]: true }));
     setTempValues(prev => ({ ...prev, [key]: value }));
@@ -170,10 +205,12 @@ const ModuleShow: React.FC = () => {
       }
 
       if (field.type === FieldType.RELATION) {
-          opt = relationOptions[field.key]?.find((o: any) => o.value === value);
-          if (opt) return opt.label;
+          // جستجو در تمام لیست‌های ریلیشن
+          for (const key in relationOptions) {
+              const found = relationOptions[key]?.find((o: any) => o.value === value);
+              if (found) return found.label;
+          }
       }
-
       return value;
   };
 
@@ -185,9 +222,10 @@ const ModuleShow: React.FC = () => {
     if (isEditing) {
       let inputNode;
       let options = field.options;
+      if ((field as any).dynamicOptionsCategory) options = dynamicOptions[(field as any).dynamicOptionsCategory];
+      else if (field.type === FieldType.RELATION) options = relationOptions[field.key];
+
       if ((field as any).dynamicOptionsCategory) {
-          const cat = (field as any).dynamicOptionsCategory;
-          // حالت داینامیک با قابلیت افزودن گزینه
           inputNode = (
             <Select
                 value={tempValue}
@@ -196,39 +234,17 @@ const ModuleShow: React.FC = () => {
                 showSearch
                 placeholder="انتخاب یا تایپ..."
                 filterOption={(input, option) => (option?.label as string ?? '').includes(input)}
-                options={dynamicOptions[cat]?.map(o => ({ label: o.label, value: o.value }))}
-                dropdownRender={(menu) => (
-                    <>
-                        {menu}
-                        <Divider style={{ margin: '8px 0' }} />
-                        <Space style={{ padding: '0 8px 4px' }}>
-                            <Input placeholder="جدید..." onPressEnter={(e) => handleAddOption(cat, e.currentTarget.value)} />
-                        </Space>
-                    </>
-                )}
+                options={options}
+                dropdownRender={(menu) => (<><>{menu}</><Divider style={{ margin: '8px 0' }} /><Space style={{ padding: '0 8px 4px' }}><Input placeholder="جدید..." onPressEnter={(e) => handleAddOption((field as any).dynamicOptionsCategory, e.currentTarget.value)} /></Space></>)}
             />
           );
-      } 
-      else if (field.type === FieldType.SELECT || field.type === FieldType.STATUS || field.type === FieldType.RELATION) {
-           if (field.type === FieldType.RELATION) options = relationOptions[field.key];
-
-           inputNode = (
-             <Select 
-                value={tempValue} 
-                onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} 
-                className="w-full" 
-                options={options} 
-                showSearch
-                filterOption={(input, option) => (option?.label as string ?? '').includes(input)}
-             />
-           );
-      } 
-      else if (field.type === FieldType.PRICE) {
+      } else if (field.type === FieldType.SELECT || field.type === FieldType.STATUS || field.type === FieldType.RELATION) {
+           inputNode = <Select value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" options={options} showSearch filterOption={(input, option) => (option?.label as string ?? '').includes(input)} />;
+      } else if (field.type === FieldType.PRICE) {
            inputNode = <InputNumber formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={value => value!.replace(/\$\s?|(,*)/g, '')} value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
       } else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
            inputNode = <InputNumber value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
-      } 
-      else {
+      } else {
            inputNode = <Input value={tempValue} onChange={e => setTempValues(prev => ({ ...prev, [field.key]: e.target.value }))} />;
       }
 
@@ -241,7 +257,6 @@ const ModuleShow: React.FC = () => {
       );
     }
 
-    // --- حالت نمایش ---
     let displayContent;
     if (value === null || value === undefined || value === '') {
        displayContent = <span className="text-gray-300 text-xs italic">---</span>;
@@ -295,17 +310,19 @@ const ModuleShow: React.FC = () => {
             <Popover content={<QRCode value={window.location.href} bordered={false} />} trigger="click">
                 <Button icon={<QrcodeOutlined />}>QR</Button>
             </Popover>
+            {/* دکمه ویرایش کامل */}
+            <Button icon={<EditOutlined />} onClick={() => setIsEditDrawerOpen(true)}>ویرایش کامل</Button>
             <Button icon={<DeleteOutlined />} danger onClick={handleDelete} className="hidden md:flex">حذف رکورد</Button>
         </div>
       </div>
 
       {/* Hero Section */}
-      <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6 flex flex-col lg:flex-row gap-8 items-start relative overflow-hidden">
+      <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6 flex flex-col lg:flex-row gap-8 items-stretch relative overflow-hidden">
          <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-leather-500 to-leather-800 opacity-80"></div>
 
          <div className="w-40 h-40 lg:w-56 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
              {data.image_url ? (
-                 <Image src={data.image_url} className="w-full h-full object-cover" />
+                 <Image src={data.image_url} className="w-full h-full" style={{objectFit: 'cover', width: '100%', height: '100%'}} />
              ) : (
                  <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-2">
                     <LoadingOutlined className="text-3xl opacity-20" />
@@ -337,7 +354,11 @@ const ModuleShow: React.FC = () => {
                      )}
                      
                      {moduleConfig.fields.find(f => f.key === 'status') && renderSmartField(moduleConfig.fields.find(f => f.key === 'status'), true)}
-                     {data.system_code && <Tag className="font-mono dir-ltr bg-gray-100 dark:bg-white/10 border-none text-gray-500 px-2 py-1">{data.system_code}</Tag>}
+                     {(data.system_code || data.custom_code) && (
+                        <Tag className="font-mono dir-ltr bg-gray-100 dark:bg-white/10 border-none text-gray-500 px-2 py-1">
+                            {data.system_code || data.custom_code}
+                        </Tag>
+                     )}
                  </div>
 
                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mt-8">
@@ -353,8 +374,16 @@ const ModuleShow: React.FC = () => {
              </div>
 
              <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-800 flex gap-2">
-                 {data.category && <Tag icon={<AppstoreOutlined />} className="rounded-full px-3 py-1 bg-gray-50 dark:bg-white/5 border-none text-gray-600 dark:text-gray-300">{data.category}</Tag>}
-                 {data.product_type && <Tag className="rounded-full px-3 py-1 bg-leather-50 text-leather-600 border-none">{data.product_type === 'raw' ? 'مواد اولیه' : data.product_type === 'semi' ? 'نیمه آماده' : 'محصول نهایی'}</Tag>}
+                 {data.category && (
+                    <Tag icon={<AppstoreOutlined />} className="rounded-full px-3 py-1 bg-gray-50 dark:bg-white/5 border-none text-gray-600 dark:text-gray-300">
+                        {getOptionLabel(moduleConfig.fields.find(f => f.key === 'category'), data.category)}
+                    </Tag>
+                 )}
+                 {data.product_type && (
+                    <Tag className="rounded-full px-3 py-1 bg-leather-50 text-leather-600 border-none">
+                        {getOptionLabel(moduleConfig.fields.find(f => f.key === 'product_type'), data.product_type)}
+                    </Tag>
+                 )}
              </div>
          </div>
       </div>
@@ -384,39 +413,45 @@ const ModuleShow: React.FC = () => {
           </div>
       )}
 
+      {/* --- Editable Tables --- */}
       {tableBlocks && tableBlocks.length > 0 && (
           <div className="space-y-6">
-              {tableBlocks.map(block => {
-                  const tableData = data[block.id] || []; 
-                  const columns = block.tableColumns?.map((col: any) => ({
-                      title: col.title,
-                      dataIndex: col.key,
-                      key: col.key,
-                      render: (text: any) => <span className="text-gray-700 dark:text-gray-300">{text}</span>
-                  })) || [];
-
-                  return (
-                      <div key={block.id} className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800">
-                          <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
-                              <h3 className="font-bold text-lg text-gray-700 dark:text-white m-0 flex items-center gap-2">
-                                  <span className="w-1 h-6 bg-leather-500 rounded-full inline-block"></span>
-                                  {block.titles.fa}
-                              </h3>
-                          </div>
-                          <Table 
-                            dataSource={tableData} 
-                            columns={columns} 
-                            pagination={false} 
-                            size="middle"
-                            rowKey={(record: any) => record.item_id || Math.random()} 
-                            locale={{ emptyText: <Empty description="لیست خالی است" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-                            className="custom-erp-table"
-                          />
-                      </div>
-                  );
-              })}
+              {tableBlocks.map(block => (
+                  <EditableTable 
+                    key={block.id}
+                    block={block}
+                    initialData={data[block.id] || []} 
+                    moduleId={moduleId}
+                    recordId={id!}
+                    relationOptions={relationOptions} 
+                    onSaveSuccess={(newData) => setData(prev => ({ ...prev, [block.id]: newData }))}
+                  />
+              ))}
           </div>
       )}
+
+      {/* --- Full Edit Drawer --- */}
+      <Drawer
+        title={`ویرایش ${data.name}`}
+        width={720}
+        onClose={() => setIsEditDrawerOpen(false)}
+        open={isEditDrawerOpen}
+        styles={{ body: { paddingBottom: 80 } }}
+        destroyOnClose
+        zIndex={5000}
+      >
+        <SmartForm 
+            moduleConfig={moduleConfig}
+            mode="edit"
+            recordId={id}
+            initialValues={data}
+            onSuccess={() => {
+                setIsEditDrawerOpen(false);
+                fetchRecord();
+            }}
+            onCancel={() => setIsEditDrawerOpen(false)}
+        />
+      </Drawer>
 
       <style>{`
         .custom-erp-table .ant-table-thead > tr > th { background: #f9fafb !important; color: #6b7280 !important; font-size: 12px !important; }

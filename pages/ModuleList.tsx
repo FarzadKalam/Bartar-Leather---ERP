@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Tag, Progress, Checkbox, Dropdown, Menu, Space, InputNumber, Empty, Spin, message, Drawer, Select, Tooltip, App } from 'antd';
+import { Table, Button, Tag, Progress, Checkbox, Dropdown, Menu, Space, InputNumber, Empty, Spin, message, Drawer, Select, Tooltip, App, Modal } from 'antd';
 import { 
   PlusOutlined, AppstoreOutlined, BarsOutlined, MoreOutlined,
   ExportOutlined, ImportOutlined, DeploymentUnitOutlined, BarChartOutlined,
-  ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined
+  ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ClearOutlined
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
@@ -33,14 +33,25 @@ const ModuleList: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   
+  // Drawer States
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false); // For Create
+  const [isBulkEditDrawerOpen, setIsBulkEditDrawerOpen] = useState(false); // For Bulk Edit
+  
+  // View Manager States
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [isViewManagerOpen, setIsViewManagerOpen] = useState(false);
   const [viewToEdit, setViewToEdit] = useState<SavedView | null>(null);
-  
   const [activeColumns, setActiveColumns] = useState<string[]>([]);
+
+  // تابع کمکی برای پیدا کردن لیبل فارسی آپشن‌ها
+  const getOptionLabel = (fieldKey: string, value: any) => {
+      const field = moduleConfig.fields.find(f => f.key === fieldKey);
+      if (!field || !field.options) return value;
+      const opt = field.options.find((o: any) => o.value === value);
+      return opt ? opt.label : value;
+  };
 
   const fetchViews = async () => {
     const { data } = await supabase.from('views').select('*').eq('module_id', moduleId);
@@ -77,19 +88,14 @@ const ModuleList: React.FC = () => {
     }
   };
 
-  // --- منطق انتخاب ستون‌های پیش‌فرض (اصلاح شده) ---
   const getDefaultColumns = () => {
       return moduleConfig.fields
         .filter(f => 
-            // شرط ۱: فیلد هدر باشد
             f.location === 'header' || 
-            // شرط ۲: یا فیلد کلیدی باشد (مثل قیمت، موجودی، کد)
             f.isKey === true ||
-            // شرط ۳: یا صراحتاً در این لیست باشند
             ['stock', 'sell_price', 'status', 'category'].includes(f.key)
         )
-        // حذف موارد تکراری یا ناخواسته مثل عکس و کد سیستمی (چون در ستون نام نمایش داده می‌شوند)
-        .filter(f => !(f.key === 'image_url' || f.key === 'system_code'))
+        .filter(f => !(f.key === 'image_url')) // عکس و کد رو در نام ادغام میکنیم
         .map(f => f.key);
   };
 
@@ -98,6 +104,7 @@ const ModuleList: React.FC = () => {
       fetchViews();
       setActiveColumns(getDefaultColumns());
       setActiveViewId(null);
+      setSelectedRowKeys([]); // Reset selection on module change
     }
   }, [moduleId]);
 
@@ -134,6 +141,26 @@ const ModuleList: React.FC = () => {
     setIsViewManagerOpen(true);
   };
 
+  // --- عملیات حذف گروهی ---
+  const handleBulkDelete = () => {
+      modal.confirm({
+          title: `حذف ${selectedRowKeys.length} رکورد`,
+          content: 'آیا مطمئن هستید؟ این عملیات غیرقابل بازگشت است.',
+          okType: 'danger',
+          okText: 'بله، حذف کن',
+          cancelText: 'انصراف',
+          onOk: async () => {
+              const { error } = await supabase.from(moduleId).delete().in('id', selectedRowKeys);
+              if (error) messageApi.error(error.message);
+              else {
+                  messageApi.success('رکوردها حذف شدند');
+                  setSelectedRowKeys([]);
+                  fetchData();
+              }
+          }
+      });
+  };
+
   if (!moduleConfig) return <div>ماژول یافت نشد</div>;
 
   const dynamicColumns = moduleConfig.fields
@@ -153,10 +180,16 @@ const ModuleList: React.FC = () => {
                  {record.image_url && <img src={record.image_url} className="w-8 h-8 rounded-md object-cover border border-gray-200 dark:border-gray-700 hidden md:block" alt="" />}
                  <div className="flex flex-col leading-tight overflow-hidden">
                     <span className="font-bold text-gray-900 dark:text-gray-200 text-[11px] md:text-sm cursor-pointer hover:text-leather-500 transition-colors truncate" onClick={() => navigate(`/${moduleId}/${record.id}`)}>{val}</span>
-                    <span className="text-[9px] text-gray-500 dark:text-gray-500 font-mono tracking-tighter uppercase">{record.sku || record.custom_code || record.system_code}</span>
+                    <span className="text-[9px] text-gray-500 dark:text-gray-500 font-mono tracking-tighter uppercase">
+                        {record.system_code || record.custom_code}
+                    </span>
                  </div>
               </div>
             );
+          }
+          // نمایش کد سیستمی اگر ستون جداگانه باشد
+          if (field.key === 'system_code') {
+              return <span className="font-mono text-xs">{val}</span>;
           }
           if (field.type === FieldType.STOCK) {
              const { percent, color } = getStockStatus(val || 0, record.reorder_point || 10);
@@ -172,9 +205,9 @@ const ModuleList: React.FC = () => {
              const opt = field.options?.find(o => o.value === val);
              return <Tag color={opt?.color || 'default'} className="border-none text-[9px] font-bold">{opt?.label || val}</Tag>;
           }
+          // اصلاح نمایش لیبل فارسی برای Select
           if (field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT) {
-             const opt = field.options?.find(o => o.value === val);
-             return <span>{opt?.label || val}</span>;
+             return <span>{getOptionLabel(field.key, val)}</span>;
           }
           return <span className="text-gray-500 dark:text-gray-400 text-[11px]">{val}</span>;
         }
@@ -183,15 +216,15 @@ const ModuleList: React.FC = () => {
       return col;
     });
 
-    const toolItems = [
+  const toolItems = [
       { key: 'export', label: 'خروجی اکسل', icon: <ExportOutlined /> },
       { key: 'import', label: 'وارد کردن داده‌ها', icon: <ImportOutlined /> },
       { key: 'workflow', label: 'گردش کار', icon: <DeploymentUnitOutlined /> },
       { key: 'reports', label: 'گزارشات آماری', icon: <BarChartOutlined /> },
-    ];
+  ];
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 md:px-8 py-4 space-y-4 w-full">
+    <div className="max-w-[1600px] mx-auto px-4 md:px-8 py-4 space-y-4 w-full pb-24">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-center bg-white/80 dark:bg-dark-surface/90 backdrop-blur-xl p-4 md:p-6 rounded-[2rem] border border-gray-300 dark:border-gray-800 shadow-lg gap-4">
         <div className="flex items-center gap-3">
@@ -259,32 +292,71 @@ const ModuleList: React.FC = () => {
         </div>
       </div>
 
+      {/* Body */}
       <div className="min-h-[60vh] w-full relative">
         {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-black/50 z-20 backdrop-blur-sm rounded-[2rem]"><Spin size="large" /></div>}
+
         {!loading && data.length === 0 && (
              <div className="flex items-center justify-center h-64 border border-gray-200 dark:border-gray-800 rounded-[2rem] bg-white/50 dark:bg-dark-surface/50">
                 <Empty description="داده‌ای موجود نیست" />
                 <Button type="primary" onClick={() => setIsDrawerOpen(true)} className="mt-4 bg-leather-500">افزودن اولین رکورد</Button>
              </div>
         )}
+
         {data.length > 0 && viewMode === 'table' && (
           <div className="bg-white dark:bg-dark-surface rounded-[2rem] border border-gray-300 dark:border-gray-800 shadow-xl overflow-hidden">
-            <Table rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }} columns={dynamicColumns} dataSource={data} rowKey="id" pagination={{ pageSize: 12, position: ['bottomCenter'], size: 'small' }} className="custom-erp-table-compact" scroll={{ x: 900 }} />
+            <Table 
+              rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
+              columns={dynamicColumns} 
+              dataSource={data} 
+              rowKey="id"
+              pagination={{ pageSize: 12, position: ['bottomCenter'], size: 'small' }}
+              className="custom-erp-table-compact" 
+              scroll={{ x: 900 }} 
+            />
           </div>
         )}
+
+        {/* Grid View */}
         {data.length > 0 && viewMode === 'grid' && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-8">
             {data.map(item => {
               const isSelected = selectedRowKeys.includes(item.id);
               return (
-                <div key={item.id} onClick={() => navigate(`/${moduleId}/${item.id}`)} className={`bg-white dark:bg-dark-surface border rounded-[1.5rem] p-3 md:p-5 relative group transition-all duration-300 hover:shadow-2xl cursor-pointer ${isSelected ? 'border-leather-500 bg-leather-500/5' : 'border-gray-300 dark:border-gray-800'}`}>
-                  <div className="absolute top-3 left-3 z-10" onClick={(e) => e.stopPropagation()}><Checkbox checked={isSelected} onChange={(e) => { e.target.checked ? setSelectedRowKeys([...selectedRowKeys, item.id]) : setSelectedRowKeys(selectedRowKeys.filter(k => k !== item.id)) }} /></div>
-                  <div className="aspect-[4/3] rounded-xl overflow-hidden mb-3 border border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-black/20">
-                    {item.image_url ? <img src={item.image_url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={item.name} /> : <div className="flex items-center justify-center w-full h-full text-gray-400"><AppstoreOutlined className="text-3xl" /></div>}
+                <div 
+                    key={item.id} 
+                    onClick={() => navigate(`/${moduleId}/${item.id}`)}
+                    className={`bg-white dark:bg-dark-surface border rounded-[1.5rem] p-3 md:p-5 relative group transition-all duration-300 hover:shadow-2xl cursor-pointer ${isSelected ? 'border-leather-500 bg-leather-500/5' : 'border-gray-300 dark:border-gray-800'}`}
+                >
+                  <div className="absolute top-3 left-3 z-10" onClick={(e) => e.stopPropagation()}>
+                     <Checkbox 
+                        checked={isSelected} 
+                        onChange={(e) => { e.target.checked ? setSelectedRowKeys([...selectedRowKeys, item.id]) : setSelectedRowKeys(selectedRowKeys.filter(k => k !== item.id)) }}
+                     />
                   </div>
+                  
+                  <div className="aspect-[4/3] rounded-xl overflow-hidden mb-3 border border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-black/20">
+                    {item.image_url ? (
+                        <img src={item.image_url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={item.name} />
+                    ) : (
+                        <div className="flex items-center justify-center w-full h-full text-gray-400"><AppstoreOutlined className="text-3xl" /></div>
+                    )}
+                  </div>
+                    
                   <div className="px-1">
-                      <Tag className="bg-gray-100 dark:bg-dark-bg border-none text-gray-600 dark:text-gray-400 text-[8px] font-black mb-1 uppercase tracking-tighter">{item.category || item.status}</Tag>
+                      {/* اصلاح نمایش لیبل فارسی در گرید */}
+                      <div className="flex gap-1 mb-1">
+                          <Tag className="bg-gray-100 dark:bg-dark-bg border-none text-gray-600 dark:text-gray-400 text-[8px] font-black uppercase tracking-tighter">
+                              {getOptionLabel('category', item.category) || getOptionLabel('status', item.status)}
+                          </Tag>
+                          {item.system_code && (
+                              <Tag className="bg-blue-50 text-blue-600 border-none text-[8px] font-mono">
+                                  {item.system_code}
+                              </Tag>
+                          )}
+                      </div>
                       <h3 className="text-gray-900 dark:text-gray-200 font-bold text-[11px] md:text-sm mb-3 line-clamp-1 group-hover:text-leather-500 transition-colors">{item.name}</h3>
+                      
                       <div className="flex justify-between items-center border-t border-gray-200 dark:border-gray-800/50 pt-3">
                          {item.sell_price ? <span className="text-leather-500 font-black text-[11px] md:text-sm">{item.sell_price.toLocaleString()}</span> : <span className="text-[10px] text-gray-500">بدون قیمت</span>}
                       </div>
@@ -296,9 +368,33 @@ const ModuleList: React.FC = () => {
         )}
       </div>
 
+      {/* --- Bulk Actions Bar (نوار عملیات گروهی) --- */}
+      {selectedRowKeys.length > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-[#1f1f1f] border border-gray-200 dark:border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 animate-slideUp">
+              <span className="font-bold text-gray-700 dark:text-gray-300 ml-2">{selectedRowKeys.length} انتخاب شده</span>
+              <div className="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-2"></div>
+              <Button type="text" icon={<EditOutlined />} onClick={() => setIsBulkEditDrawerOpen(true)}>ویرایش گروهی</Button>
+              <Button type="text" danger icon={<DeleteOutlined />} onClick={handleBulkDelete}>حذف</Button>
+              <Button type="text" icon={<ClearOutlined />} onClick={() => setSelectedRowKeys([])}>لغو انتخاب</Button>
+          </div>
+      )}
+
       <ViewManager moduleConfig={moduleConfig} isOpen={isViewManagerOpen} onClose={() => setIsViewManagerOpen(false)} viewToEdit={viewToEdit} onViewSaved={(newView) => { fetchViews(); setActiveViewId(newView.id); }} />
+      
+      {/* Create Drawer */}
       <Drawer title={`افزودن ${moduleConfig.titles.fa} جدید`} width={720} onClose={() => setIsDrawerOpen(false)} open={isDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={5000}>
-        <SmartForm moduleConfig={moduleConfig} onSuccess={() => { setIsDrawerOpen(false); fetchData(); }} onCancel={() => setIsDrawerOpen(false)} />
+        <SmartForm moduleConfig={moduleConfig} mode="create" onSuccess={() => { setIsDrawerOpen(false); fetchData(); }} onCancel={() => setIsDrawerOpen(false)} />
+      </Drawer>
+
+      {/* Bulk Edit Drawer */}
+      <Drawer title={`ویرایش گروهی ${selectedRowKeys.length} رکورد`} width={720} onClose={() => setIsBulkEditDrawerOpen(false)} open={isBulkEditDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={5000}>
+        <SmartForm 
+            moduleConfig={moduleConfig} 
+            mode="bulk" 
+            batchIds={selectedRowKeys}
+            onSuccess={() => { setIsBulkEditDrawerOpen(false); setSelectedRowKeys([]); fetchData(); }} 
+            onCancel={() => setIsBulkEditDrawerOpen(false)} 
+        />
       </Drawer>
 
       <style>{`
@@ -308,6 +404,8 @@ const ModuleList: React.FC = () => {
         .dark .ant-drawer-header { border-bottom: 1px solid #303030; }
         .dark .ant-drawer-title { color: white; }
         .ant-select-dropdown .ant-select-item-option-content { font-size: 12px !important; }
+        @keyframes slideUp { from { transform: translate(-50%, 100%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+        .animate-slideUp { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
       `}</style>
     </div>
   );
