@@ -283,3 +283,37 @@ export interface ProductionOrder extends BaseEntity {
   status: string;
   items?: any[];
 }
+
+// ... کدهای قبلی ...
+
+// انواع عملگرهای فیلتر
+export enum FilterOperator {
+  EQUALS = 'eq',
+  CONTAINS = 'ilike', // برای جستجوی متنی
+  GREATER_THAN = 'gt',
+  LESS_THAN = 'lt',
+  BETWEEN = 'between', // برای تاریخ و قیمت
+  IN = 'in', // برای لیست‌های انتخابی
+}
+
+// ساختار یک شرط فیلتر
+export interface FilterCondition {
+  field: string;
+  operator: FilterOperator;
+  value: any;
+}
+
+// ساختار ذخیره شده در دیتابیس برای هر نما
+export interface ViewConfig {
+  columns: string[]; // کلید فیلدهایی که باید نمایش داده شوند
+  filters: FilterCondition[]; // فیلترهای اعمال شده
+  sort?: { field: string; order: 'asc' | 'desc' };
+}
+
+export interface SavedView {
+  id: string;
+  module_id: string;
+  name: string;
+  is_default: boolean;
+  config: ViewConfig;
+}
