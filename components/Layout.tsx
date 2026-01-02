@@ -81,7 +81,11 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
 
   const userMenu = {
     items: [
-      { key: 'profile', label: 'پروفایل کاربری', icon: <UserOutlined /> },
+      {
+  key: 'profile',
+  label: <span onClick={() => navigate('/profile')}>پروفایل کاربری</span>, // لینک به پروفایل
+  icon: <UserOutlined />,
+},
       { key: 'logout', label: 'خروج', icon: <LogoutOutlined />, danger: true },
     ],
   };
@@ -96,7 +100,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
 
   const mobileNavItems: MobileNavItem[] = [
     { key: '/products', icon: <SkinOutlined />, label: 'محصولات' },
-    { key: '/tasks', icon: <CheckSquareOutlined />, label: 'وظایف' },
+    { key: '/production_orders', icon: <CheckSquareOutlined />, label: 'تولید' },
     { key: '/', icon: <HomeOutlined />, label: 'خانه', isCenter: true },
     { key: '/invoices', icon: <FileTextOutlined />, label: 'فاکتورها' },
     { key: 'more', icon: <MenuFoldOutlined />, label: 'بیشتر', isMenu: true },
@@ -134,7 +138,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
         {/* لوگو */}
         <div className="h-16 flex items-center justify-center border-b border-gray-200 dark:border-gray-800 overflow-hidden px-4 sticky top-0 bg-inherit z-10">
           <div className={`transition-all duration-300 font-black text-lg text-leather-500 tracking-tighter whitespace-nowrap ${collapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
-            BARTAR <span className="text-gray-800 dark:text-white">LEATHER</span>
+            MEHRBANOO <span className="text-gray-800 dark:text-white">LEATHER</span>
           </div>
           {collapsed && !isMobile && <div className="text-leather-500 font-black text-2xl absolute">B</div>}
         </div>
@@ -181,9 +185,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
             backgroundColor: isDarkMode ? 'rgba(20, 20, 20, 0.8)' : 'rgba(255, 255, 255, 0.8)',
           }}
         >
-          <div className="flex items-center gap-4">
-             {/* دکمه‌ی قبلی اینجا بود که حذف شد */}
-             
+          <div className="flex items-center gap-4">          
              <div className="flex items-center bg-gray-100 dark:bg-[#1a1a1a] rounded-xl px-3 py-1.5 border border-gray-200 dark:border-gray-800 w-40 sm:w-64 transition-colors">
               <SearchOutlined className="text-gray-400" />
               <input type="text" placeholder="جستجو..." className="bg-transparent border-none outline-none text-xs text-gray-700 dark:text-gray-200 w-full mr-2 placeholder-gray-400" />

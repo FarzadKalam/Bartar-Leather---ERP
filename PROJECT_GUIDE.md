@@ -1,114 +1,137 @@
+# Bartar Leather ERP - Architecture & Technical Guide
 
-# Bartar Leather ERP - Technical Specification & Architecture Guide
+**Version:** 3.0 (CRM, SCM, & Advanced Views)
+**Stack:** React + TypeScript + Vite + Ant Design + Tailwind CSS + Supabase
 
-**Version:** 2.1 (Master-Detail Support)
-**Framework:** React + TypeScript + Ant Design + Tailwind CSS
-
-This document defines the architectural standards for the Bartar Leather ERP. This project has evolved from a standard React app into a **Meta-Driven Platform**. The frontend acts primarily as a rendering engine for configurations defined in a central registry.
-
----
-
-## 1. Core Architecture: The "Meta-Driven" Engine
-
-Instead of hardcoding pages for every entity (Customer, Product, Order), we define the **structure, logic, and behavior** of modules in configuration files. The UI components then interpret these configs to render the interface.
-
-### Key Components
-
-1.  **The DNA (`types.ts`):**
-    *   Contains all Enums (`FieldType`, `ModuleNature`, `UserRole`, `LogicOperator`).
-    *   Defines the strict interfaces for `ModuleDefinition`, `FieldDefinition`, and `FieldLogic`.
-    *   **New in 2.1:** `BlockType` (FIELD_GROUP vs TABLE) and `TableColumnDefinition`.
-
-2.  **The Registry (`moduleRegistry.ts`):**
-    *   This is the "Database of UI/Logic".
-    *   It exports a `MODULES` object where every key (e.g., `products`, `boms`) maps to a full `ModuleDefinition`.
-    *   **Rule:** Do not hardcode field logic in components. Define it here.
-
-3.  **The Rendering Engine (`pages/ModuleShow.tsx`):**
-    *   This component is the generic entity renderer.
-    *   It parses the configuration to handle visibility rules, access control, and layout.
-    *   It switches between `SmartFieldRenderer` (for standard fields) and `SmartTableRenderer` (for BOM/Invoice items).
-
-4.  **Atomic UI Components:**
-    *   `SmartFieldRenderer.tsx`: Handles View/Edit state of a single data point.
-    *   `SmartTableRenderer.tsx`: **(New)** Handles Master-Detail lists (BOM items, Invoice rows). Displays as Table on Desktop, Cards on Mobile.
+This document outlines the architectural standards and codebase structure for the Bartar Leather ERP. The system is designed as a **Meta-Driven Platform**, meaning the UI is dynamically generated based on JSON-like configuration files rather than hardcoded layouts.
 
 ---
 
-## 2. Business Logic Specifications
+## 1. Project Structure (No `src` folder)
 
-The system supports advanced business logic directly within the frontend configuration.
+The project uses a flat structure tailored for Vite. All source code resides in the root or specific feature folders.
 
-### A. Master-Detail (BOMs & Invoices)
-For entities that contain a list of items (rows), use the `BlockType.TABLE` configuration.
-*   **Structure:**
-    ```typescript
-    {
-      id: 'items',
-      type: BlockType.TABLE,
-      tableColumns: [
-         { key: 'product_id', title: 'Product', type: FieldType.RELATION, ... },
-         { key: 'qty', title: 'Quantity', type: FieldType.NUMBER, ... }
-      ]
-    }
-    ```
-*   **Behavior:** The renderer automatically passes the `record.items` array to the `SmartTableRenderer`.
+```text
+/
+├── components/          # Reusable UI Atoms (SmartForm, TagInput, etc.)
+│   ├── renderers/       # Specific renderers like BomStructureRenderer
+│   ├── Sidebar/         # Layout specific sidebars
+│   └── ...
+├── modules/             # Configuration files for each entity
+│   ├── productsConfig.ts
+│   ├── customerConfig.ts
+│   ├── supplierConfig.ts
+│   └── ...
+├── pages/               # Main Route Components
+│   ├── ModuleList.tsx   # The "All Records" view (List/Grid/Kanban)
+│   ├── ModuleShow.tsx   # The "Single Record" view (Tabs/Forms)
+│   └── Settings/        # Settings & Admin pages
+├── App.tsx              # Main Entry & Routing
+├── moduleRegistry.ts    # Central registry linking configs to ID strings
+├── supabaseClient.ts    # Database connection instance
+├── types.ts             # TypeScript Interfaces & Enums (The DNA of the app)
+└── ...
 
-### B. Conditional Visibility (`visibleIf`)
-Fields can depend on the value of other fields.
-*   **Structure:**
-    ```typescript
-    visibleIf: {
-      field: 'hasWarranty',    // Key of the parent field
-      operator: LogicOperator.IS_TRUE, // Logic: eq, neq, gt, lt, contains, is_true
-      value: undefined         // Optional value for comparison
-    }
-    ```
-
-### C. Formula Engine (`formula`)
-Fields can be calculated automatically.
-*   **Syntax:** Use `{fieldKey}` variables inside strings.
-*   **Supported Operations:** Basic Math (`*`, `/`, `+`, `-`) and String concatenation (`CONCAT`).
-*   **Example:**
-    ```typescript
-    formula: "{price} * {stock}" // Inventory Value
-    formula: "CONCAT({firstName}, ' ', {lastName})" // Full Name
-    ```
-*   **Behavior:** Calculated fields are automatically set to `readonly`.
+```
 
 ---
 
-## 3. Design System & Theming
+## 2. Core Architecture: The "Meta-Driven" Engine
 
-The UI follows a "Premium Leather" aesthetic optimized for industrial ERP environments.
+### A. The Configuration (`modules/*.ts`)
 
-### Core Color Palette:
-- **Main App Navigation:** `#c58f60` (Leather Orange).
-- **Background Layer 0:** `#141414` (Deep Black).
-- **Surface Layer 1 (Cards, Tables):** `#1f1f1f`.
-- **Inputs/Borders:** `#303030`.
-- **Text Primary:** `#e5e5e5`.
+Instead of writing HTML/JSX for every page, we define the "Metadata" of a module.
 
-### Typography:
-- **Font:** `Vazirmatn` (RTL Optimized).
-- **Numbers:** Persian digits for display (`toLocaleString('fa-IR')`), English for Inputs/Codes.
+* **Example:** To add a "Phone Number" field to Customers, we add a generic object to `customerConfig.ts`:
+```typescript
+{ key: 'mobile', type: FieldType.PHONE, location: FieldLocation.HEADER, ... }
+
+```
+
+
+
+### B. The Registry (`moduleRegistry.ts`)
+
+This file imports all individual configs and exports a single `MODULES` object. The application reads from this registry to know which routes exist (e.g., `/customers`, `/products`).
+
+### C. The Rendering Engines
+
+1. **`ModuleList.tsx`:**
+* Handles data fetching for collections.
+* Supports **3 View Modes**:
+* **List:** Standard table with sorting/filtering.
+* **Grid:** Visual cards (great for products).
+* **Kanban:** Grouped columns (by Status, Category, or Rank).
+
+
+* Includes `ViewManager` for saving custom filters.
+
+
+2. **`ModuleShow.tsx`:**
+* Handles the single record view.
+* Manages **Tabs**, **Field Groups**, and **Master-Detail** relationships.
+* Integrates the **Tagging System** and **Assignee** logic.
+
+
 
 ---
 
-## 4. File Structure Reference
+## 3. Key Components & Features
 
-*   `src/types.ts` -> **(Critical)** All TypeScript interfaces and Enums.
-*   `src/moduleRegistry.ts` -> **(Critical)** Configuration for all modules.
-*   `src/components/SmartFieldRenderer.tsx` -> The UI component for fields.
-*   `src/components/SmartTableRenderer.tsx` -> The UI component for tables/lists.
-*   `src/pages/ModuleShow.tsx` -> The main logic engine.
-*   `src/components/Layout.tsx` -> Main Application Shell (Sidebar/Header).
+### Smart Components
+
+* **`SmartForm.tsx`:** A dynamic form builder that handles validation, file uploads, date picking (Jalali), and Select options based on the `FieldType`.
+* **`SmartTableRenderer.tsx`:** A dynamic table that handles searching inside columns, custom rendering (Tags, Avatars, Prices), and row selection.
+
+### Tagging System
+
+A flexible, many-to-many tagging system implemented via Supabase.
+
+* **Tables:** `tags` (definitions) + `record_tags` (links).
+* **UI:** Managed by `components/TagInput.tsx`. Allows creating and assigning colored tags to any record type.
+
+### Master-Detail Logic (BOMs)
+
+For entities like **Production BOM**, the system renders a hierarchical tree or a nested table.
+
+* **Config:** Defined using `BlockType.TABLE` in the module config.
+* **Renderer:** `BomStructureRenderer` handles the recursive tree visualization.
 
 ---
 
-## 5. Development Roadmap
+## 4. Database Schema (Supabase/PostgreSQL)
 
-1.  **Formula Parser:** Replace the current `Function` based formula evaluation with a safer library like `mathjs`.
-2.  **Visual Builder:** Create a "Settings" page that allows Admins to modify `moduleRegistry` JSON via a GUI.
-3.  **Database Sync:** Map the `specs` object in JSONB columns in Supabase/Postgres.
-4.  **Production Orders:** Duplicate the BOM structure for Production Orders, adding 'Batch Number' and 'Date'.
+The backend relies on Supabase. Key tables include:
+
+* **Core Entities:** `products`, `customers`, `suppliers`, `production_boms`.
+* **System Tables:**
+* `profiles`: Extended user data (connected to Auth).
+* `org_roles`: Role-Based Access Control (RBAC) definitions.
+* `tags` & `record_tags`: Universal tagging.
+* `saved_views`: Stores user-defined filters for `ModuleList`.
+* `company_settings`: Global settings (Logo, Name).
+
+
+
+**Security:** Row Level Security (RLS) is enabled. Currently set to allow authenticated access, but ready for granular policies.
+
+---
+
+## 5. Design System & Theming
+
+* **Theme:** Fully supports **Dark/Light** modes via Tailwind classes (`dark:bg-black`) and Ant Design ConfigProvider.
+* **Color Palette:**
+* Primary: Leather Orange (`#c58f60`).
+* Dark Backgrounds: Deep Black (`#141414`) and Dark Grey (`#1f1f1f`).
+
+
+* **Responsiveness:** Mobile-first design. Sidebar collapses on mobile, tables become scrollable, and headers adapt.
+
+---
+
+## 6. Development Roadmap
+
+1. **Financial Module:** Implement `Invoices` (Sales/Purchase) with calculation logic (Tax, Discount, Total).
+2. **Dashboard:** Create a widget-based dashboard (`pages/Dashboard.tsx`) to visualize key metrics using Recharts.
+3. **Advanced Formula:** Implement a parser to handle field dependencies (e.g., `Total = Qty * Price`) in real-time within `SmartForm`.
+4. **Printing:** Generate PDF templates for Invoices and BOMs.

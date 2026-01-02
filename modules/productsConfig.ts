@@ -82,7 +82,12 @@ export const productsModule: ModuleDefinition = {
         isKey: false
       },
       {
-        key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 6,
+        key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 6,
+        nature: FieldNature.PREDEFINED,
+        isKey: false
+      },
+      {
+        key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7,
         nature: FieldNature.PREDEFINED,
         isKey: false
       },
@@ -94,8 +99,11 @@ export const productsModule: ModuleDefinition = {
         isKey: false
       },
       { key: 'leather_color_1', labels: { fa: 'رنگ چرم ۱', en: 'Color 1' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 2, dynamicOptionsCategory: 'leather_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
-      { key: 'leather_finish_1', labels: { fa: 'فینیش/صفحه ۱', en: 'Finish 1' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 3, dynamicOptionsCategory: 'leather_finish', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
-      { key: 'leather_sort', labels: { fa: 'سورت چرم', en: 'Sort' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 4, dynamicOptionsCategory: 'leather_sort', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
+      { key: 'leather_color_2', labels: { fa: 'رنگ چرم ۲', en: 'Color 2' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 3, dynamicOptionsCategory: 'leather_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
+      { key: 'leather_finish_1', labels: { fa: 'صفحه چرم  ۱', en: 'Finish 1' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 4, dynamicOptionsCategory: 'leather_finish', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
+      { key: 'leather_finish_2', labels: { fa: 'صفحه چرم ۲', en: 'Finish 2' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 5, dynamicOptionsCategory: 'leather_finish', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
+
+      { key: 'leather_sort', labels: { fa: 'سورت چرم', en: 'Sort' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 6, dynamicOptionsCategory: 'leather_sort', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
       
       { key: 'lining_material', labels: { fa: 'جنس آستر', en: 'Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 1, dynamicOptionsCategory: 'lining_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
       { key: 'lining_color', labels: { fa: 'رنگ آستر', en: 'Color' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 2, dynamicOptionsCategory: 'general_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },

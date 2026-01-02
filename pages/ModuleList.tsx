@@ -1,412 +1,318 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Tag, Progress, Checkbox, Dropdown, Menu, Space, InputNumber, Empty, Spin, message, Drawer, Select, Tooltip, App, Modal } from 'antd';
+import { 
+  Table, Button, Tag, Dropdown, Space, Empty, Spin, 
+  message, Drawer, Segmented, Input, Avatar, Badge, Tooltip, App, Checkbox 
+} from 'antd';
 import { 
   PlusOutlined, AppstoreOutlined, BarsOutlined, MoreOutlined,
-  ExportOutlined, ImportOutlined, DeploymentUnitOutlined, BarChartOutlined,
-  ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ClearOutlined
+  ReloadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, 
+  UserOutlined, ProjectOutlined, ShopOutlined
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
-import { FieldType, SavedView } from '../types';
+import { FieldType, SavedView, ViewMode } from '../types';
 import SmartForm from '../components/SmartForm';
-import { getColumnSearchProps } from '../utils/filterUtils';
 import ViewManager from '../components/ViewManager';
-
-const getStockStatus = (stock: number, reorderPoint: number) => {
-  const max = (reorderPoint * 5) || 100;
-  const percent = Math.min((stock / max) * 100, 100);
-  let color = '#52c41a';
-  if (stock <= reorderPoint) color = '#ff4d4f';
-  else if (stock <= (reorderPoint * 2)) color = '#faad14';
-  return { percent, color };
-};
+import SmartTableRenderer from '../components/SmartTableRenderer';
 
 const ModuleList: React.FC = () => {
   const { moduleId = 'products' } = useParams();
   const navigate = useNavigate();
-  const { message: messageApi, modal } = App.useApp();
-  
-  const moduleConfig = MODULES[moduleId] || MODULES['products'];
-  
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>(moduleConfig?.defaultViewMode === 'grid' ? 'grid' : 'table');
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const { message: msg, modal } = App.useApp();
+  const moduleConfig = MODULES[moduleId];
+
+  // --- States ---
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.LIST);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [searchText, setSearchText] = useState('');
   
-  // Drawer States
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false); // For Create
-  const [isBulkEditDrawerOpen, setIsBulkEditDrawerOpen] = useState(false); // For Bulk Edit
-  
-  // View Manager States
-  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
-  const [activeViewId, setActiveViewId] = useState<string | null>(null);
-  const [isViewManagerOpen, setIsViewManagerOpen] = useState(false);
-  const [viewToEdit, setViewToEdit] = useState<SavedView | null>(null);
-  const [activeColumns, setActiveColumns] = useState<string[]>([]);
+  // Drawers
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isBulkEditDrawerOpen, setIsBulkEditDrawerOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<SavedView | null>(null);
 
-  // تابع کمکی برای پیدا کردن لیبل فارسی آپشن‌ها
-  const getOptionLabel = (fieldKey: string, value: any) => {
-      const field = moduleConfig.fields.find(f => f.key === fieldKey);
-      if (!field || !field.options) return value;
-      const opt = field.options.find((o: any) => o.value === value);
-      return opt ? opt.label : value;
-  };
+  useEffect(() => {
+    if (moduleConfig) {
+      fetchData();
+      setViewMode(moduleConfig.defaultViewMode || ViewMode.LIST);
+      setSelectedRowKeys([]);
+    }
+  }, [moduleId, moduleConfig]);
 
-  const fetchViews = async () => {
-    const { data } = await supabase.from('views').select('*').eq('module_id', moduleId);
-    if (data) setSavedViews(data);
-  };
-
+  // --- Optimized Fetch Function ---
   const fetchData = async () => {
+    if (!moduleConfig) return;
     setLoading(true);
     try {
-      let query = supabase.from(moduleId).select('*').order('created_at', { ascending: false });
+      // 1. دریافت رکوردهای اصلی
+      let query = supabase
+        .from(moduleId)
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      if (activeViewId) {
-          const view = savedViews.find(v => v.id === activeViewId);
-          if (view && view.config.filters) {
-              view.config.filters.forEach(f => {
-                  if (f.value !== undefined && f.value !== null && f.value !== '') {
-                      if(f.operator === 'ilike') query = query.ilike(f.field, `%${f.value}%`);
-                      else if(f.operator === 'gt') query = query.gt(f.field, f.value);
-                      else if(f.operator === 'lt') query = query.lt(f.field, f.value);
-                      else query = query.eq(f.field, f.value);
-                  }
-              });
-          }
+      const { data: records, error } = await query;
+      if (error) throw error;
+      
+      if (!records || records.length === 0) {
+          setData([]);
+          setLoading(false);
+          return;
       }
 
-      const { data: result, error } = await query;
-      if (error) throw error;
-      if (result) setData(result);
+      // 2. دریافت تگ‌ها برای این رکوردها (در یک کوئری جداگانه برای پرفورمنس بهتر)
+      const recordIds = records.map(r => r.id);
+      const { data: tagsData } = await supabase
+        .from('record_tags')
+        .select(`
+            record_id,
+            tags ( title, color )
+        `)
+        .in('record_id', recordIds)
+        .eq('module_id', moduleId);
+
+      // 3. ترکیب رکوردها با تگ‌ها
+      const formattedRecords = records.map(record => {
+        const relatedTags = tagsData
+            ?.filter((rt: any) => rt.record_id === record.id)
+            .map((rt: any) => rt.tags) || [];
+
+        return {
+            ...record,
+            tags: relatedTags
+        };
+      });
+
+      setData(formattedRecords);
+
     } catch (error: any) {
-      console.error('Error fetching:', error);
-      messageApi.error('خطا در دریافت اطلاعات'); 
+      console.error('Fetch Error:', error);
+      msg.error('خطا در دریافت اطلاعات');
     } finally {
       setLoading(false);
     }
   };
 
-  const getDefaultColumns = () => {
-      return moduleConfig.fields
-        .filter(f => 
-            f.location === 'header' || 
-            f.isKey === true ||
-            ['stock', 'sell_price', 'status', 'category'].includes(f.key)
-        )
-        .filter(f => !(f.key === 'image_url')) // عکس و کد رو در نام ادغام میکنیم
-        .map(f => f.key);
-  };
-
-  useEffect(() => {
-    if (moduleConfig) {
-      fetchViews();
-      setActiveColumns(getDefaultColumns());
-      setActiveViewId(null);
-      setSelectedRowKeys([]); // Reset selection on module change
-    }
-  }, [moduleId]);
-
-  useEffect(() => {
-    fetchData();
-    if (activeViewId) {
-        const view = savedViews.find(v => v.id === activeViewId);
-        if (view) setActiveColumns(view.config.columns);
-    } else {
-        setActiveColumns(getDefaultColumns());
-    }
-  }, [activeViewId, moduleId]);
-
-  const handleDeleteView = (viewId: string, viewName: string) => {
+  // --- Delete Handler ---
+  const handleDelete = async (ids: React.Key[]) => {
     modal.confirm({
-      title: `حذف لیست "${viewName}"`,
-      content: 'آیا از حذف این لیست اطمینان دارید؟',
-      okType: 'danger',
+      title: `حذف ${ids.length} رکورد`, content: 'آیا اطمینان دارید؟', okType: 'danger',
       onOk: async () => {
-        const { error } = await supabase.from('views').delete().eq('id', viewId);
-        if (!error) {
-          messageApi.success('لیست حذف شد');
-          if (activeViewId === viewId) setActiveViewId(null);
-          fetchViews();
-        } else {
-          messageApi.error(error.message);
-        }
+        try {
+          // حذف تگ‌های وابسته (اگر Cascade در دیتابیس تنظیم نشده باشد)
+          await supabase.from('record_tags').delete().in('record_id', ids);
+          
+          const { error } = await supabase.from(moduleId).delete().in('id', ids);
+          if (error) throw error;
+          msg.success('حذف شد'); setSelectedRowKeys([]); fetchData();
+        } catch (e: any) { msg.error(e.message); }
       }
     });
   };
 
-  const handleEditView = (view: SavedView | null) => {
-    setViewToEdit(view);
-    setIsViewManagerOpen(true);
+  // --- Card Component (Shared for Grid & Kanban) ---
+  const CardItem = ({ item }: { item: any }) => {
+    const isSelected = selectedRowKeys.includes(item.id);
+
+    const toggleSelect = (e: any) => {
+        e.stopPropagation(); 
+        const newSelected = isSelected 
+            ? selectedRowKeys.filter(k => k !== item.id)
+            : [...selectedRowKeys, item.id];
+        setSelectedRowKeys(newSelected);
+    };
+
+    return (
+        <div 
+            onClick={() => navigate(`/${moduleId}/${item.id}`)}
+            className={`
+                bg-white dark:bg-[#1e1e1e] p-3 rounded-xl border shadow-sm cursor-pointer transition-all whitespace-normal group relative flex flex-col
+                ${isSelected ? 'border-leather-500 ring-1 ring-leather-500' : 'border-gray-200 dark:border-gray-700 hover:shadow-md hover:border-leather-400'}
+            `}
+        >
+            <div className="absolute top-2 left-2 z-10" onClick={e => e.stopPropagation()}>
+                <Checkbox checked={isSelected} onChange={toggleSelect} className="scale-110" />
+            </div>
+
+            <div className="flex gap-3 mb-2">
+                <div className="shrink-0">
+                    {item.image_url ? (
+                        <Avatar shape="square" size={48} src={item.image_url} className="rounded-lg bg-gray-50 border border-gray-100" />
+                    ) : (
+                        <Avatar shape="square" size={48} icon={moduleId === 'customers' ? <UserOutlined /> : moduleId === 'suppliers' ? <ShopOutlined /> : <AppstoreOutlined />} className="rounded-lg bg-gray-50 dark:bg-white/5 text-gray-300" />
+                    )}
+                </div>
+                
+                <div className="flex-1 min-w-0 pt-0.5">
+                    <h4 className="font-bold text-sm text-gray-800 dark:text-white truncate mb-1 group-hover:text-leather-600 transition-colors">
+                        {item.name || item.business_name || `${item.first_name || ''} ${item.last_name}`}
+                    </h4>
+                    <div className="text-xs text-gray-400 font-mono truncate">
+                        {item.system_code || item.mobile_1 || '---'}
+                    </div>
+                </div>
+            </div>
+
+            {/* Tags Section */}
+            {item.tags && item.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                    {item.tags.map((tag: any, idx: number) => (
+                        <Tag key={idx} color={tag.color} style={{ fontSize: '10px', margin: 0, padding: '0 4px', lineHeight: '18px', border: 'none' }}>
+                            {tag.title}
+                        </Tag>
+                    ))}
+                </div>
+            )}
+
+            <div className="mt-auto pt-2 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                <div className="flex items-center gap-1">
+                     {item.rank && <Tag className="m-0 text-[10px] px-1">{item.rank}</Tag>}
+                     
+                     {(item.sell_price || item.total_spend) ? (
+                        <span className="font-bold text-xs text-gray-700 dark:text-gray-300">
+                            {Number(item.sell_price || item.total_spend).toLocaleString()} <span className="text-[9px] font-normal text-gray-400">تومان</span>
+                        </span>
+                     ) : null}
+                </div>
+
+                {item.assignee_id && (
+                    <Tooltip title="مسئول"><Avatar size={18} className="bg-leather-100 text-leather-600 border border-white" icon={<UserOutlined />} /></Tooltip>
+                )}
+            </div>
+        </div>
+    );
   };
 
-  // --- عملیات حذف گروهی ---
-  const handleBulkDelete = () => {
-      modal.confirm({
-          title: `حذف ${selectedRowKeys.length} رکورد`,
-          content: 'آیا مطمئن هستید؟ این عملیات غیرقابل بازگشت است.',
-          okType: 'danger',
-          okText: 'بله، حذف کن',
-          cancelText: 'انصراف',
-          onOk: async () => {
-              const { error } = await supabase.from(moduleId).delete().in('id', selectedRowKeys);
-              if (error) messageApi.error(error.message);
-              else {
-                  messageApi.success('رکوردها حذف شدند');
-                  setSelectedRowKeys([]);
-                  fetchData();
-              }
-          }
-      });
+  // --- Filter Logic ---
+  const filteredData = data.filter(item => {
+      const term = searchText.toLowerCase();
+      const title = (item.name || item.business_name || item.last_name || '').toLowerCase();
+      const code = (item.system_code || '').toLowerCase();
+      return title.includes(term) || code.includes(term);
+  });
+
+  // --- Kanban Grouping Logic ---
+  const getKanbanGroupingField = () => {
+      const statusField = moduleConfig?.fields.find(f => f.type === FieldType.STATUS);
+      if (statusField) return statusField;
+      if (moduleId === 'products') return moduleConfig?.fields.find(f => f.key === 'category');
+      // Fallback: اگر هیچ فیلدی پیدا نشد، null برمیگرداند
+      return null;
   };
+  const kanbanField = getKanbanGroupingField();
+  const kanbanColumns = kanbanField?.options || [];
 
-  if (!moduleConfig) return <div>ماژول یافت نشد</div>;
-
-  const dynamicColumns = moduleConfig.fields
-    .filter(f => activeColumns.includes(f.key))
-    .sort((a, b) => activeColumns.indexOf(a.key) - activeColumns.indexOf(b.key))
-    .map(field => {
-       const col: any = {
-        title: field.labels.fa,
-        dataIndex: field.key,
-        key: field.key,
-        width: field.key === 'name' ? 200 : 120,
-        ...getColumnSearchProps(field, (keys, confirm) => confirm(), (clear) => clear()),
-        render: (val: any, record: any) => {
-          if (field.key === 'name') {
-            return (
-              <div className="flex items-center gap-2 py-0.5">
-                 {record.image_url && <img src={record.image_url} className="w-8 h-8 rounded-md object-cover border border-gray-200 dark:border-gray-700 hidden md:block" alt="" />}
-                 <div className="flex flex-col leading-tight overflow-hidden">
-                    <span className="font-bold text-gray-900 dark:text-gray-200 text-[11px] md:text-sm cursor-pointer hover:text-leather-500 transition-colors truncate" onClick={() => navigate(`/${moduleId}/${record.id}`)}>{val}</span>
-                    <span className="text-[9px] text-gray-500 dark:text-gray-500 font-mono tracking-tighter uppercase">
-                        {record.system_code || record.custom_code}
-                    </span>
-                 </div>
-              </div>
-            );
-          }
-          // نمایش کد سیستمی اگر ستون جداگانه باشد
-          if (field.key === 'system_code') {
-              return <span className="font-mono text-xs">{val}</span>;
-          }
-          if (field.type === FieldType.STOCK) {
-             const { percent, color } = getStockStatus(val || 0, record.reorder_point || 10);
-             return (
-              <div className="flex flex-col w-full gap-0.5">
-                 <span style={{ color }} className="text-[10px] font-black">{val}</span>
-                 <Progress percent={percent} strokeColor={color} showInfo={false} size={2} trailColor="#404040" />
-              </div>
-             );
-          }
-          if (field.type === FieldType.PRICE) return <span className="font-black text-gray-800 dark:text-gray-300 text-[11px]">{val?.toLocaleString('fa-IR')} <span className="text-[8px] text-gray-400">ت</span></span>;
-          if (field.type === FieldType.STATUS) {
-             const opt = field.options?.find(o => o.value === val);
-             return <Tag color={opt?.color || 'default'} className="border-none text-[9px] font-bold">{opt?.label || val}</Tag>;
-          }
-          // اصلاح نمایش لیبل فارسی برای Select
-          if (field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT) {
-             return <span>{getOptionLabel(field.key, val)}</span>;
-          }
-          return <span className="text-gray-500 dark:text-gray-400 text-[11px]">{val}</span>;
-        }
-      };
-      if (field.key === 'name') col.fixed = 'right';
-      return col;
-    });
-
-  const toolItems = [
-      { key: 'export', label: 'خروجی اکسل', icon: <ExportOutlined /> },
-      { key: 'import', label: 'وارد کردن داده‌ها', icon: <ImportOutlined /> },
-      { key: 'workflow', label: 'گردش کار', icon: <DeploymentUnitOutlined /> },
-      { key: 'reports', label: 'گزارشات آماری', icon: <BarChartOutlined /> },
-  ];
+  if (!moduleConfig) return <div className="p-10 text-center">ماژول یافت نشد</div>;
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 md:px-8 py-4 space-y-4 w-full pb-24">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-center bg-white/80 dark:bg-dark-surface/90 backdrop-blur-xl p-4 md:p-6 rounded-[2rem] border border-gray-300 dark:border-gray-800 shadow-lg gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 md:w-14 md:h-14 rounded-2xl bg-gradient-to-br from-leather-500 to-leather-800 flex items-center justify-center text-white text-lg shadow-lg">
-             <AppstoreOutlined />
-          </div>
-          <div className="flex flex-col">
-              <h1 className="text-base md:text-2xl font-black text-gray-900 dark:text-white m-0 tracking-tighter">{moduleConfig.titles.fa}</h1>
-              <span className="text-xs text-gray-500">{activeViewId ? savedViews.find(v => v.id === activeViewId)?.name : 'نمای پیش‌فرض'}</span>
-          </div>
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-2 justify-end">
-          <div className="flex items-center gap-1 bg-white dark:bg-dark-bg border border-gray-300 dark:border-gray-700 rounded-xl px-2 py-1 h-10">
-              <EyeOutlined className="text-gray-400" />
-              <Select 
-                variant="borderless"
-                value={activeViewId}
-                onChange={setActiveViewId}
-                placeholder="انتخاب نما"
-                style={{ width: 180 }}
-                className="text-xs"
-                optionRender={(option) => {
-                    const view = savedViews.find(v => v.id === option.value);
-                    if (option.value === null) {
-                        return (
-                            <div className="flex justify-between items-center group w-full">
-                                <span>{option.label}</span>
-                                <Button type="text" size="small" icon={<EditOutlined />} className="hidden group-hover:flex text-gray-400" onClick={(e) => { e.stopPropagation(); handleEditView(null); }} />
-                            </div>
-                        );
-                    }
-                    if (!view) return <span>{option.label}</span>;
-                    return (
-                        <div className="flex justify-between items-center group w-full">
-                            <span>{view.name}</span>
-                            <Space className="hidden group-hover:flex" size={0}>
-                                <Button type="text" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditView(view); }} />
-                                <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleDeleteView(view.id, view.name); }} />
-                            </Space>
-                        </div>
-                    );
-                }}
-                options={[{ label: 'نمای پیش‌فرض', value: null }, ...savedViews.map(v => ({ label: v.name, value: v.id }))]}
-                dropdownRender={(menu) => (
-                    <>
-                      {menu}
-                      <Space style={{ padding: '8px', width: '100%' }}>
-                        <Button type="dashed" size="small" block icon={<PlusOutlined />} onClick={() => { setViewToEdit(null); setIsViewManagerOpen(true); }}>ساخت نمای جدید</Button>
-                      </Space>
-                    </>
-                  )}
-              />
-          </div>
-
-          <Tooltip title="بروزرسانی"><Button type="text" onClick={fetchData} icon={<ReloadOutlined className={loading ? 'animate-spin' : ''} />} /></Tooltip>
-          
-          <div className="flex items-center p-0.5 bg-gray-200 dark:bg-dark-surface rounded-xl">
-             <Button size="small" type={viewMode === 'table' ? 'primary' : 'text'} icon={<BarsOutlined />} onClick={() => setViewMode('table')} className={viewMode === 'table' ? 'bg-leather-500' : ''} />
-             <Button size="small" type={viewMode === 'grid' ? 'primary' : 'text'} icon={<AppstoreOutlined />} onClick={() => setViewMode('grid')} className={viewMode === 'grid' ? 'bg-leather-500' : ''} />
-          </div>
-          
-          <Dropdown menu={{ items: toolItems }} trigger={['click']}><Button shape="circle" icon={<MoreOutlined rotate={90} />} /></Dropdown>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsDrawerOpen(true)} className="bg-leather-500 border-none font-black rounded-2xl px-4 md:px-6 h-10 md:h-12 hidden md:flex items-center">جدید</Button>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="min-h-[60vh] w-full relative">
-        {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-black/50 z-20 backdrop-blur-sm rounded-[2rem]"><Spin size="large" /></div>}
-
-        {!loading && data.length === 0 && (
-             <div className="flex items-center justify-center h-64 border border-gray-200 dark:border-gray-800 rounded-[2rem] bg-white/50 dark:bg-dark-surface/50">
-                <Empty description="داده‌ای موجود نیست" />
-                <Button type="primary" onClick={() => setIsDrawerOpen(true)} className="mt-4 bg-leather-500">افزودن اولین رکورد</Button>
-             </div>
-        )}
-
-        {data.length > 0 && viewMode === 'table' && (
-          <div className="bg-white dark:bg-dark-surface rounded-[2rem] border border-gray-300 dark:border-gray-800 shadow-xl overflow-hidden">
-            <Table 
-              rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
-              columns={dynamicColumns} 
-              dataSource={data} 
-              rowKey="id"
-              pagination={{ pageSize: 12, position: ['bottomCenter'], size: 'small' }}
-              className="custom-erp-table-compact" 
-              scroll={{ x: 900 }} 
-            />
-          </div>
-        )}
-
-        {/* Grid View */}
-        {data.length > 0 && viewMode === 'grid' && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-8">
-            {data.map(item => {
-              const isSelected = selectedRowKeys.includes(item.id);
-              return (
-                <div 
-                    key={item.id} 
-                    onClick={() => navigate(`/${moduleId}/${item.id}`)}
-                    className={`bg-white dark:bg-dark-surface border rounded-[1.5rem] p-3 md:p-5 relative group transition-all duration-300 hover:shadow-2xl cursor-pointer ${isSelected ? 'border-leather-500 bg-leather-500/5' : 'border-gray-300 dark:border-gray-800'}`}
-                >
-                  <div className="absolute top-3 left-3 z-10" onClick={(e) => e.stopPropagation()}>
-                     <Checkbox 
-                        checked={isSelected} 
-                        onChange={(e) => { e.target.checked ? setSelectedRowKeys([...selectedRowKeys, item.id]) : setSelectedRowKeys(selectedRowKeys.filter(k => k !== item.id)) }}
-                     />
-                  </div>
-                  
-                  <div className="aspect-[4/3] rounded-xl overflow-hidden mb-3 border border-gray-200 dark:border-gray-800 bg-gray-100 dark:bg-black/20">
-                    {item.image_url ? (
-                        <img src={item.image_url} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={item.name} />
-                    ) : (
-                        <div className="flex items-center justify-center w-full h-full text-gray-400"><AppstoreOutlined className="text-3xl" /></div>
-                    )}
-                  </div>
-                    
-                  <div className="px-1">
-                      {/* اصلاح نمایش لیبل فارسی در گرید */}
-                      <div className="flex gap-1 mb-1">
-                          <Tag className="bg-gray-100 dark:bg-dark-bg border-none text-gray-600 dark:text-gray-400 text-[8px] font-black uppercase tracking-tighter">
-                              {getOptionLabel('category', item.category) || getOptionLabel('status', item.status)}
-                          </Tag>
-                          {item.system_code && (
-                              <Tag className="bg-blue-50 text-blue-600 border-none text-[8px] font-mono">
-                                  {item.system_code}
-                              </Tag>
-                          )}
-                      </div>
-                      <h3 className="text-gray-900 dark:text-gray-200 font-bold text-[11px] md:text-sm mb-3 line-clamp-1 group-hover:text-leather-500 transition-colors">{item.name}</h3>
-                      
-                      <div className="flex justify-between items-center border-t border-gray-200 dark:border-gray-800/50 pt-3">
-                         {item.sell_price ? <span className="text-leather-500 font-black text-[11px] md:text-sm">{item.sell_price.toLocaleString()}</span> : <span className="text-[10px] text-gray-500">بدون قیمت</span>}
-                      </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* --- Bulk Actions Bar (نوار عملیات گروهی) --- */}
-      {selectedRowKeys.length > 0 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-[#1f1f1f] border border-gray-200 dark:border-gray-700 shadow-2xl rounded-full px-6 py-3 flex items-center gap-4 animate-slideUp">
-              <span className="font-bold text-gray-700 dark:text-gray-300 ml-2">{selectedRowKeys.length} انتخاب شده</span>
-              <div className="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-2"></div>
-              <Button type="text" icon={<EditOutlined />} onClick={() => setIsBulkEditDrawerOpen(true)}>ویرایش گروهی</Button>
-              <Button type="text" danger icon={<DeleteOutlined />} onClick={handleBulkDelete}>حذف</Button>
-              <Button type="text" icon={<ClearOutlined />} onClick={() => setSelectedRowKeys([])}>لغو انتخاب</Button>
-          </div>
-      )}
-
-      <ViewManager moduleConfig={moduleConfig} isOpen={isViewManagerOpen} onClose={() => setIsViewManagerOpen(false)} viewToEdit={viewToEdit} onViewSaved={(newView) => { fetchViews(); setActiveViewId(newView.id); }} />
+    <div className="p-4 md:p-6 max-w-[1600px] mx-auto animate-fadeIn pb-20 h-[calc(100vh-64px)] flex flex-col">
       
-      {/* Create Drawer */}
-      <Drawer title={`افزودن ${moduleConfig.titles.fa} جدید`} width={720} onClose={() => setIsDrawerOpen(false)} open={isDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={5000}>
+      {/* Header */}
+      <div className="flex flex-wrap md:flex-nowrap justify-between items-center mb-4 gap-4 shrink-0">
+        <div className="w-full md:w-auto">
+            <h1 className="text-2xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
+                <span className="w-2 h-8 bg-leather-500 rounded-full inline-block"></span>
+                {moduleConfig.titles.fa}
+                <span className="text-sm font-normal text-gray-400 bg-gray-100 dark:bg-white/10 px-2 py-1 rounded-lg mr-2">{filteredData.length}</span>
+            </h1>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <Input prefix={<SearchOutlined className="text-gray-300" />} placeholder="جستجو..." className="rounded-xl border-none bg-white dark:bg-[#1a1a1a] shadow-sm h-10 grow md:grow-0 md:w-64" value={searchText} onChange={e => setSearchText(e.target.value)} allowClear />
+            
+            <Segmented
+                options={[
+                    { value: ViewMode.LIST, icon: <BarsOutlined /> },
+                    { value: ViewMode.GRID, icon: <AppstoreOutlined /> },
+                    { value: ViewMode.KANBAN, icon: <ProjectOutlined /> },
+                ]}
+                value={viewMode}
+                onChange={(v) => setViewMode(v as ViewMode)}
+                className="bg-white dark:bg-[#1a1a1a] shadow-sm p-1 rounded-xl"
+            />
+
+            <div className="flex gap-2 mr-auto md:mr-0">
+                {selectedRowKeys.length > 0 && (
+                    <Dropdown menu={{ items: [{ key: 'edit', label: 'ویرایش گروهی', icon: <EditOutlined />, onClick: () => setIsBulkEditDrawerOpen(true) }, { key: 'delete', label: 'حذف', icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(selectedRowKeys) }] }}>
+                        <Button className="h-10 rounded-xl border-leather-500 text-leather-600 px-3">
+                            <span className="hidden md:inline">عملیات</span> ({selectedRowKeys.length}) <MoreOutlined />
+                        </Button>
+                    </Dropdown>
+                )}
+                <Button icon={<ReloadOutlined />} onClick={fetchData} className="h-10 w-10 rounded-xl border-none shadow-sm" />
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsDrawerOpen(true)} className="h-10 px-4 md:px-6 rounded-xl bg-leather-600 hover:!bg-leather-500 border-none">
+                     <span className="hidden md:inline">افزودن</span><span className="md:hidden">جدید</span>
+                </Button>
+            </div>
+        </div>
+      </div>
+
+      <div className="mb-2 shrink-0"><ViewManager moduleId={moduleId} currentView={currentView} onViewChange={setCurrentView} /></div>
+
+      <div className="flex-1 overflow-hidden relative rounded-[2rem]">
+          {loading ? <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem]"><Spin size="large" /></div> : 
+           filteredData.length === 0 ? <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem]"><Empty description="رکوردی یافت نشد" /></div> : 
+           
+           /* === VIEW MODES === */
+           viewMode === ViewMode.LIST ? (
+              <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 h-full flex flex-col">
+                  <SmartTableRenderer 
+                      moduleConfig={moduleConfig} data={filteredData} loading={loading}
+                      rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
+                      onRow={(record: any) => ({ onClick: () => navigate(`/${moduleId}/${record.id}`), style: { cursor: 'pointer' } })}
+                  />
+              </div>
+
+           ) : viewMode === ViewMode.GRID ? (
+              <div className="h-full overflow-y-auto p-1 scroll-smooth">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 pb-20">
+                      {filteredData.map(record => (
+                          <CardItem key={record.id} item={record} />
+                      ))}
+                  </div>
+              </div>
+
+           ) : ( /* KANBAN */
+              <div className="h-full overflow-x-auto overflow-y-hidden whitespace-nowrap pb-4 px-1">
+                  {kanbanField && kanbanColumns.length > 0 ? (
+                      <div className="flex gap-4 h-full">
+                          {kanbanColumns.map((col: any) => {
+                              const colItems = filteredData.filter(item => item[kanbanField.key] === col.value);
+                              return (
+                                  <div key={col.value} className="w-72 min-w-[280px] flex flex-col max-h-full bg-gray-100 dark:bg-[#121212] rounded-2xl border border-gray-200 dark:border-gray-800">
+                                      {/* Header */}
+                                      <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-white dark:bg-[#1a1a1a] rounded-t-2xl sticky top-0 z-10">
+                                          <div className="flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-full`} style={{ backgroundColor: col.color || '#ccc' }}></span><span className="font-bold text-sm text-gray-700 dark:text-gray-200">{col.label}</span></div>
+                                          <Badge count={colItems.length} style={{ backgroundColor: '#f0f0f0', color: '#999', boxShadow: 'none' }} />
+                                      </div>
+                                      
+                                      {/* Cards Area - اصلاح شده: max-h-full و flex-1 */}
+                                      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                                          {colItems.map(item => (
+                                              <CardItem key={item.id} item={item} />
+                                          ))}
+                                          {colItems.length === 0 && <div className="text-center py-10 text-gray-300 text-xs">خالی</div>}
+                                      </div>
+                                  </div>
+                              );
+                          })}
+                      </div>
+                  ) : <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem]"><Empty description="فیلد گروه‌بندی (وضعیت/دسته‌بندی) یافت نشد" /></div>}
+              </div>
+           )
+          }
+      </div>
+
+      <Drawer title={`افزودن ${moduleConfig.titles.fa}`} width={720} onClose={() => setIsDrawerOpen(false)} open={isDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={1000}>
         <SmartForm moduleConfig={moduleConfig} mode="create" onSuccess={() => { setIsDrawerOpen(false); fetchData(); }} onCancel={() => setIsDrawerOpen(false)} />
       </Drawer>
-
-      {/* Bulk Edit Drawer */}
-      <Drawer title={`ویرایش گروهی ${selectedRowKeys.length} رکورد`} width={720} onClose={() => setIsBulkEditDrawerOpen(false)} open={isBulkEditDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={5000}>
-        <SmartForm 
-            moduleConfig={moduleConfig} 
-            mode="bulk" 
-            batchIds={selectedRowKeys}
-            onSuccess={() => { setIsBulkEditDrawerOpen(false); setSelectedRowKeys([]); fetchData(); }} 
-            onCancel={() => setIsBulkEditDrawerOpen(false)} 
-        />
+      <Drawer title={`ویرایش گروهی`} width={720} onClose={() => setIsBulkEditDrawerOpen(false)} open={isBulkEditDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={1000}>
+        <SmartForm moduleConfig={moduleConfig} mode="edit" recordId={selectedRowKeys[0] as string} onSuccess={() => { setIsBulkEditDrawerOpen(false); setSelectedRowKeys([]); fetchData(); }} onCancel={() => setIsBulkEditDrawerOpen(false)} />
       </Drawer>
-
-      <style>{`
-        .custom-erp-table-compact .ant-table-thead > tr > th { background: #f3f4f6 !important; font-size: 10px !important; }
-        .dark .custom-erp-table-compact .ant-table-thead > tr > th { background: #262626 !important; color: #bbb; }
-        .dark .ant-drawer-content { background-color: #141414; }
-        .dark .ant-drawer-header { border-bottom: 1px solid #303030; }
-        .dark .ant-drawer-title { color: white; }
-        .ant-select-dropdown .ant-select-item-option-content { font-size: 12px !important; }
-        @keyframes slideUp { from { transform: translate(-50%, 100%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
-        .animate-slideUp { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-      `}</style>
+      
+      <style>{`.custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; } .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; }`}</style>
     </div>
   );
 };

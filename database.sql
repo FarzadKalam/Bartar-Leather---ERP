@@ -322,3 +322,133 @@ BEGIN
     ALTER TABLE public.products ADD COLUMN IF NOT EXISTS "finalProductBOM" jsonb;
   END IF;
 END $$;
+
+-- ۱. جدول تنظیمات شرکت (فقط یک رکورد خواهد داشت)
+CREATE TABLE public.company_settings (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  company_name text,
+  ceo_name text,
+  national_id text,
+  mobile text,
+  phone text,
+  address text,
+  website text,
+  email text,
+  logo_url text,
+  updated_at timestamptz DEFAULT now()
+);
+
+-- ۲. جدول نقش‌ها / چارت سازمانی
+CREATE TABLE public.org_roles (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  title text NOT NULL, -- عنوان جایگاه (مثلا: مدیر فروش)
+  parent_id uuid REFERENCES public.org_roles(id), -- برای ساختار درختی
+  permissions jsonb DEFAULT '{}', -- دسترسی‌ها به صورت JSON ذخیره می‌شود
+  created_at timestamptz DEFAULT now()
+);
+
+-- ۳. آپدیت جدول پروفایل‌ها (اتصال کاربر به نقش)
+ALTER TABLE public.profiles 
+ADD COLUMN IF NOT EXISTS role_id uuid REFERENCES public.org_roles(id);
+
+ALTER TABLE public.profiles 
+ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
+
+-- فعال‌سازی RLS
+ALTER TABLE public.company_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Company" ON public.company_settings FOR ALL USING (true);
+
+ALTER TABLE public.org_roles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Roles" ON public.org_roles FOR ALL USING (true);
+
+-- ۱. تنظیم تولید خودکار ID (اگر قبلاً ست نشده باشد)
+ALTER TABLE public.profiles 
+ALTER COLUMN id SET DEFAULT gen_random_uuid();
+
+-- ۲. حذف محدودیت اتصال اجباری به جدول auth (این اجازه می‌دهد پروفایل کارمند بسازید بدون اینکه هنوز ثبت نام کرده باشد)
+-- نگران نباشید، بعداً می‌توان با ایمیل آنها را مچ کرد.
+ALTER TABLE public.profiles 
+DROP CONSTRAINT IF EXISTS profiles_id_fkey;
+
+-- ۳. اجازه دادن به ادمین برای افزودن کاربر (رفع خطای RLS)
+-- ابتدا پالیسی‌های قبلی اینزرت را پاک می‌کنیم تا تداخل پیش نیاید
+DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON public.profiles;
+DROP POLICY IF EXISTS "Enable insert for users based on user_id" ON public.profiles;
+
+-- حالا اجازه درج را به همه (یا حداقل کسانی که لاگین هستند) می‌دهیم
+CREATE POLICY "Enable insert for authenticated users" 
+ON public.profiles 
+FOR INSERT 
+TO authenticated 
+WITH CHECK (true);
+
+-- (اختیاری) اگر باز هم اذیت کرد، کلا امنیت این جدول را موقت خاموش کن:
+-- ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+
+-- تابع کمکی برای آپدیت خودکار زمان ویرایش
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    -- سعی میکنیم یوزر جاری را بگیریم (اگر از طریق API کال شده باشد)
+    NEW.updated_by = auth.uid(); 
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- ایجاد ستون‌های سیستمی برای جدول محصولات
+ALTER TABLE public.products 
+ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id),
+ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id),
+ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now(),
+ADD COLUMN IF NOT EXISTS assignee_id uuid, -- آیدی کاربر یا نقش
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user'; -- 'user' یا 'role'
+
+-- ایجاد ستون‌های سیستمی برای جدول BOM
+ALTER TABLE public.production_boms 
+ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id),
+ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id),
+ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now(),
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+-- تریگر برای آپدیت خودکار زمان ویرایش (محصولات)
+DROP TRIGGER IF EXISTS update_products_modtime ON public.products;
+CREATE TRIGGER update_products_modtime BEFORE UPDATE ON public.products FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+
+-- تریگر برای آپدیت خودکار زمان ویرایش (BOM)
+DROP TRIGGER IF EXISTS update_boms_modtime ON public.production_boms;
+CREATE TRIGGER update_boms_modtime BEFORE UPDATE ON public.production_boms FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+
+-- 1. جدول مرجع تگ‌ها (Tags)
+CREATE TABLE public.tags (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  title text NOT NULL, -- عنوان تگ (مثلا: "فوری"، "پروژه آلفا")
+  color text DEFAULT 'blue', -- رنگ تگ (blue, red, gold, #ff0000)
+  created_at timestamptz DEFAULT now()
+);
+
+-- 2. جدول رابط (برای اتصال تگ به رکوردها در ماژول‌های مختلف)
+CREATE TABLE public.record_tags (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  record_id uuid NOT NULL, -- آیدی رکورد (محصول، مشتری و...)
+  tag_id uuid REFERENCES public.tags(id) ON DELETE CASCADE,
+  module_id text NOT NULL, -- نام ماژول (products, customers...)
+  created_at timestamptz DEFAULT now()
+);
+
+-- افزودن چند تگ نمونه برای تست
+INSERT INTO public.tags (title, color) VALUES 
+('ویژه', 'gold'),
+('بدهکار', 'red'),
+('همکار تجاری', 'cyan'),
+('پروژه نوروز', 'purple');
+
+-- فعال‌سازی دسترسی (RLS)
+ALTER TABLE public.tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Tags" ON public.tags FOR ALL USING (true);
+
+ALTER TABLE public.record_tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Record Tags" ON public.record_tags FOR ALL USING (true);

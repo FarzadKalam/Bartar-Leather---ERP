@@ -1,9 +1,11 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { ConfigProvider, App as AntApp, theme } from 'antd'; // <--- `theme` اینجا اضافه شد
+import { ConfigProvider, App as AntApp, theme } from 'antd';
 import Layout from './components/Layout';
 import ModuleList from './pages/ModuleList';
 import ModuleShow from './pages/ModuleShow';
+import SettingsPage from './pages/Settings/SettingsPage';
+import ProfilePage from './pages/ProfilePage';
 
 function App() {
   const [isDarkMode, setIsDarkMode] = React.useState(false);
@@ -22,13 +24,12 @@ function App() {
       direction="rtl"
       theme={{
         token: { fontFamily: 'Vazirmatn' },
-        // اصلاح خطای require: استفاده مستقیم از آبجکت theme
         algorithm: isDarkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
       }}
     >
-      {/* اضافه کردن کامپوننت App برای مدیریت مسیج‌ها و مودال‌ها */}
       <AntApp> 
         <BrowserRouter>
+          {/* این Layout اصلی است و شامل هدر می‌شود */}
           <Layout isDarkMode={isDarkMode} toggleTheme={toggleTheme}>
             <Routes>
               <Route path="/" element={<div className="p-10">داشبورد (به زودی)</div>} />
@@ -36,6 +37,12 @@ function App() {
               {/* مسیریابی داینامیک */}
               <Route path="/:moduleId" element={<ModuleList />} />
               <Route path="/:moduleId/:id" element={<ModuleShow />} />
+              
+              {/* --- اصلاح شد: حذف Layout اضافه از اینجا --- */}
+              <Route path="/settings" element={<SettingsPage />} />
+              
+              {/* --- اصلاح شد: حذف Layout اضافه از اینجا --- */}
+              <Route path="/profile/:id?" element={<ProfilePage />} />
             </Routes>
           </Layout>
         </BrowserRouter>
