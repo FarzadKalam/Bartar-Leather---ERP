@@ -19,6 +19,7 @@ export enum ViewMode {
   GRID = 'grid',
   KANBAN = 'kanban',
   TIMELINE = 'timeline',
+  CALENDAR = 'calendar',
   GANTT = 'gantt'
 }
 

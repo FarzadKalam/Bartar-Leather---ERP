@@ -17,8 +17,6 @@ import {
 import ViewManager from "../components/ViewManager";
 import SmartForm from "../components/SmartForm"; 
 
-// --- کامپوننت‌های کمکی (خارج از کامپوننت اصلی برای رفع خطای Key) ---
-
 const RenderTags = ({ record, tagsField }: { record: any, tagsField?: string }) => {
     if (!tagsField || !record[tagsField]) return null;
     const tags = Array.isArray(record[tagsField]) ? record[tagsField] : [record[tagsField]];
@@ -98,8 +96,6 @@ const RenderCardItem = ({
     );
 };
 
-// --- کامپوننت اصلی ---
-
 export const ModuleListRefine = () => {
   const { moduleId } = useParams();
   const navigate = useNavigate();
@@ -153,6 +149,7 @@ export const ModuleListRefine = () => {
 
   const handleViewChange = (view: SavedView | null, config: any) => {
     setCurrentView(view);
+
     if (config && config.filters && Array.isArray(config.filters) && config.filters.length > 0) {
         const refineFilters: CrudFilters = config.filters.map((f: any) => ({
             field: f.field,
@@ -165,22 +162,28 @@ export const ModuleListRefine = () => {
     }
   };
 
+  // ✅ FIX: سرچ فقط فیلتر سرچ را اضافه/حذف می‌کند و به فیلترهای View دست نمی‌زند
   const handleSearch = (val: string) => {
-      if (!val) {
-          // حل خطای f.field با کست کردن به LogicalFilter
-          const activeViewFilters = filters.filter(f => (f as LogicalFilter).field !== searchTargetField || f.operator !== 'contains');
-          setFilters(activeViewFilters, 'replace');
-          return;
-      }
       if (!searchTargetField) return;
 
+      const nonSearchFilters = filters.filter(f => {
+        const lf = f as any;
+        return !(lf?.field === searchTargetField && lf?.operator === 'contains');
+      });
+
+      if (!val) {
+        setFilters(nonSearchFilters, 'replace');
+        return;
+      }
+
       setFilters([
-          {
-              field: searchTargetField,
-              operator: 'contains',
-              value: val
-          }
-      ], 'merge'); 
+        ...nonSearchFilters,
+        {
+          field: searchTargetField,
+          operator: 'contains',
+          value: val
+        }
+      ], 'replace');
   };
 
   const handleBulkDelete = () => {
@@ -256,83 +259,108 @@ export const ModuleListRefine = () => {
 
   return (
     <div className="p-4 md:p-6 max-w-[1800px] mx-auto animate-fadeIn pb-20 h-[calc(100vh-64px)] flex flex-col">
-       <div className="flex flex-col gap-4 mb-4 shrink-0">
-          <div className="flex flex-wrap justify-between items-center gap-4">
-              <div className="flex items-center gap-2">
-                  <h1 className="text-2xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
-                      <span className="w-2 h-8 bg-leather-500 rounded-full inline-block"></span>
-                      {moduleConfig.titles.fa}
-                  </h1>
-                  <Badge count={tableQueryResult.data?.total || 0} overflowCount={999} style={{ backgroundColor: '#f0f0f0', color: '#666', boxShadow: 'none' }} />
-              </div>
+        <div className="flex flex-col gap-2 mb-4 shrink-0">
+        {/* ردیف ۱: عنوان + شمارنده + دکمه افزودن */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+            <h1 className="text-2xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2 min-w-0">
+                <span className="w-2 h-8 bg-leather-500 rounded-full inline-block shrink-0"></span>
+                <span className="truncate">{moduleConfig.titles.fa}</span>
+            </h1>
+            <Badge
+                count={tableQueryResult.data?.total || 0}
+                overflowCount={999}
+                style={{ backgroundColor: '#f0f0f0', color: '#666', boxShadow: 'none' }}
+            />
+            </div>
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
-                 {selectedRowKeys.length === 0 && (
-                     <>
-                        <Input 
-                            prefix={<SearchOutlined className="text-gray-400" />} 
-                            placeholder={searchTargetField ? `جستجو در ${moduleConfig.fields.find(f=>f.key===searchTargetField)?.labels.fa}...` : "جستجو غیرفعال"}
-                            allowClear
-                            disabled={!searchTargetField}
-                            onChange={e => handleSearch(e.target.value)}
-                            className="rounded-xl w-40 md:w-64 border-none shadow-sm bg-white dark:bg-[#1a1a1a]"
-                        />
-                        <Divider type="vertical" />
-                        
-                        <div className="bg-white dark:bg-[#1a1a1a] shadow-sm rounded-xl p-1 flex">
-                            <Segmented
-                                options={[
-                                    { value: ViewMode.LIST, icon: <div className="flex items-center justify-center h-full px-1"><BarsOutlined /></div> },
-                                    { value: ViewMode.GRID, icon: <div className="flex items-center justify-center h-full px-1"><AppstoreOutlined /></div> },
-                                    { value: ViewMode.KANBAN, icon: <div className="flex items-center justify-center h-full px-1"><ProjectOutlined /></div> },
-                                ]}
-                                value={viewMode}
-                                onChange={(v) => setViewMode(v as ViewMode)}
-                                className="bg-transparent"
-                            />
-                        </div>
+            {selectedRowKeys.length === 0 && (
+            <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => navigate(`/${moduleId}/create`)}
+                className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/30 shrink-0"
+            >
+                افزودن
+            </Button>
+            )}
+        </div>
 
-                        {viewMode === ViewMode.KANBAN && availableGroupFields.length > 0 && (
-                             <Select
-                                value={kanbanGroupBy}
-                                onChange={setKanbanGroupBy}
-                                options={availableGroupFields.map(f => ({ label: `چیدمان: ${f.labels.fa}`, value: f.key }))}
-                                className="w-40"
-                                variant="borderless"
-                                suffixIcon={<GroupOutlined />}
-                             />
-                        )}
-                        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate(`/${moduleId}/create`)} className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/30">
-                            افزودن
-                        </Button>
-                     </>
-                 )}
-              </div>
-          </div>
-          {selectedRowKeys.length > 0 && (
-             <div className="bg-leather-600 text-white rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 animate-slideDown shadow-lg shadow-leather-600/20">
-                 <div className="flex items-center gap-3">
-                    <span className="font-bold text-lg">{selectedRowKeys.length}</span>
-                    <span className="text-sm opacity-90">مورد انتخاب شده</span>
-                    <div className="h-4 w-[1px] bg-white/30 mx-2"></div>
-                    <Button size="small" type="text" onClick={() => setSelectedRowKeys([])} className="text-white hover:bg-white/20 text-xs">
-                        لغو انتخاب
-                    </Button>
-                 </div>
-                 <div className="flex flex-wrap gap-2 items-center justify-end flex-1">
-                     <Button ghost icon={<EditOutlined />} onClick={handleBulkEditOpen} className="border-white/50 hover:border-white">
-                        ویرایش گروهی
-                     </Button>
-                     <Button ghost icon={<ExportOutlined />} onClick={handleExport} className="border-white/50 hover:border-white">
-                        خروجی
-                     </Button>
-                     <Button danger type="primary" icon={<DeleteOutlined />} onClick={handleBulkDelete} className="bg-white text-red-500 hover:bg-red-50 border-none">
-                        حذف
-                     </Button>
-                 </div>
-             </div>
-          )}
-       </div>
+        {/* ردیف ۲: جستجو + مود نمایش + انتخاب گروه کانبان */}
+        {selectedRowKeys.length === 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <Input
+                prefix={<SearchOutlined className="text-gray-400" />}
+                placeholder={
+                searchTargetField
+                    ? `جستجو در ${moduleConfig.fields.find(f => f.key === searchTargetField)?.labels.fa}...`
+                    : "جستجو غیرفعال"
+                }
+                allowClear
+                disabled={!searchTargetField}
+                onChange={e => handleSearch(e.target.value)}
+                className="rounded-xl w-full sm:max-w-[380px] border-none shadow-sm bg-white dark:bg-[#1a1a1a]"
+            />
+
+            <div className="flex items-center gap-2 w-full sm:w-auto sm:mr-auto">
+                <div className="bg-white dark:bg-[#1a1a1a] shadow-sm rounded-xl p-1 flex shrink-0">
+                <Segmented
+                    options={[
+                    { value: ViewMode.LIST, icon: <span className="w-8 h-8 inline-flex items-center justify-center"><BarsOutlined /></span> },
+                    { value: ViewMode.GRID, icon: <span className="w-8 h-8 inline-flex items-center justify-center"><AppstoreOutlined /></span> },
+                    { value: ViewMode.KANBAN, icon: <span className="w-8 h-8 inline-flex items-center justify-center"><ProjectOutlined /></span> },
+                    ]}
+                    value={viewMode}
+                    onChange={(v) => setViewMode(v as ViewMode)}
+                    className="
+                    bg-transparent
+                    [&_.ant-segmented-item]:!px-0
+                    [&_.ant-segmented-item-label]:!flex
+                    [&_.ant-segmented-item-label]:items-center
+                    [&_.ant-segmented-item-label]:justify-center
+                    "
+                />
+                </div>
+
+                {viewMode === ViewMode.KANBAN && availableGroupFields.length > 0 && (
+                <Select
+                    value={kanbanGroupBy}
+                    onChange={setKanbanGroupBy}
+                    options={availableGroupFields.map(f => ({ label: `چیدمان: ${f.labels.fa}`, value: f.key }))}
+                    className="w-full sm:w-52"
+                    variant="borderless"
+                    suffixIcon={<GroupOutlined />}
+                />
+                )}
+            </div>
+            </div>
+        )}
+
+        {/* نوار انتخاب گروهی (همان قبلی خودت، بدون تغییر) */}
+        {selectedRowKeys.length > 0 && (
+            <div className="bg-leather-600 text-white rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 animate-slideDown shadow-lg shadow-leather-600/20">
+            <div className="flex items-center gap-3">
+                <span className="font-bold text-lg">{selectedRowKeys.length}</span>
+                <span className="text-sm opacity-90">مورد انتخاب شده</span>
+                <div className="h-4 w-[1px] bg-white/30 mx-2"></div>
+                <Button size="small" type="text" onClick={() => setSelectedRowKeys([])} className="text-white hover:bg-white/20 text-xs">
+                لغو انتخاب
+                </Button>
+            </div>
+            <div className="flex flex-wrap gap-2 items-center justify-end flex-1">
+                <Button ghost icon={<EditOutlined />} onClick={handleBulkEditOpen} className="border-white/50 hover:border-white">
+                ویرایش گروهی
+                </Button>
+                <Button ghost icon={<ExportOutlined />} onClick={handleExport} className="border-white/50 hover:border-white">
+                خروجی
+                </Button>
+                <Button danger type="primary" icon={<DeleteOutlined />} onClick={handleBulkDelete} className="bg-white text-red-500 hover:bg-red-50 border-none">
+                حذف
+                </Button>
+            </div>
+            </div>
+        )}
+        </div>
 
        <div className="mb-4">
             <ViewManager 

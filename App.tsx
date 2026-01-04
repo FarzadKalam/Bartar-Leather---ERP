@@ -7,6 +7,8 @@ import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider, App as AntdApp } from "antd";
 import faIR from "antd/lib/locale/fa_IR";
 import SettingsPage from "./pages/Settings/SettingsPage";
+import { JalaliLocaleListener } from "antd-jalali";
+
 
 // فایل‌های پروژه
 import { supabase } from "./supabaseClient";
@@ -37,13 +39,14 @@ function App() {
       <ConfigProvider 
         direction="rtl" 
         locale={faIR} 
+        
         theme={{
           token: {
             colorPrimary: '#c58f60', 
             fontFamily: 'Vazirmatn, sans-serif',
           }
         }}
-      >
+              >
         <AntdApp>
           <Refine
             dataProvider={dataProvider(supabase)} 

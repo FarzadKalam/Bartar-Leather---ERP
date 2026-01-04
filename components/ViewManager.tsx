@@ -82,9 +82,12 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
         return;
     }
 
-    const validFilters = (config.filters || []).filter(f => 
-        f.field && f.operator && (f.value !== undefined && f.value !== null && String(f.value).trim() !== '')
-    );
+    const validFilters = (config.filters || []).filter(f =>
+  f.field &&
+  f.operator &&
+  !(f.value === undefined || f.value === null)
+);
+
 
     const cleanConfig: ViewConfig = { ...config, filters: validFilters };
 
@@ -141,25 +144,75 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
 
   return (
     <>
-      <div className="flex items-center gap-2 bg-white dark:bg-[#1f1f1f] p-1 rounded-xl border border-gray-200 dark:border-gray-800 h-10 shadow-sm animate-fadeIn overflow-hidden">
-         <span className="text-gray-400 px-2 flex items-center"><EyeOutlined /></span>
-         <div className="flex items-center gap-1 overflow-x-auto flex-1 no-scrollbar px-1">
-             {views.map(view => (
-                 <div key={view.id} onClick={() => onViewChange(view, (view.config as any))} className={`group px-3 py-1 rounded-lg text-xs cursor-pointer whitespace-nowrap transition-all flex items-center gap-2 select-none border ${currentView?.id === view.id ? 'bg-leather-600 text-white border-leather-600 shadow-md font-bold' : 'bg-gray-50 dark:bg-white/5 border-transparent hover:bg-gray-100 text-gray-600 dark:text-gray-300'}`}>
-                     {view.name}
-                     <div className={`flex items-center gap-1 mr-1 transition-opacity ${currentView?.id === view.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                        <Tooltip title="ویرایش"><span className="p-1 rounded-full hover:bg-black/10 flex items-center" onClick={(e) => handleEditView(view, e)}><EditOutlined className="text-[10px]" /></span></Tooltip>
-                        {!view.is_default && !view.id.startsWith('default_') && (<Popconfirm title="حذف نما؟" onConfirm={async (e) => { e?.stopPropagation(); await supabase.from('saved_views').delete().eq('id', view.id); setViews(prev => prev.filter(v => v.id !== view.id)); if (currentView?.id === view.id) onViewChange(null, null); }} onCancel={(e) => e?.stopPropagation()}><span className="p-1 rounded-full hover:bg-red-50 hover:text-red-500 flex items-center" onClick={(e) => e.stopPropagation()}><DeleteOutlined className="text-[10px]" /></span></Popconfirm>)}
-                     </div>
-                 </div>
-             ))}
-         </div>
-         <div className="w-[1px] h-5 bg-gray-200 dark:bg-gray-700 mx-1"></div>
-         <div className="flex items-center gap-1">
-            <Tooltip title="ایجاد نمای جدید"><Button type="text" size="small" icon={<PlusOutlined />} onClick={handleOpenNewView} className="hover:bg-gray-100 rounded-lg text-gray-500" /></Tooltip>
-            <Tooltip title="بروزرسانی لیست"><Button type="text" size="small" icon={<ReloadOutlined />} onClick={onRefresh} className="hover:bg-gray-100 rounded-lg text-gray-500" /></Tooltip>
-         </div>
-      </div>
+        <div className="flex items-center gap-2 bg-white dark:bg-[#1f1f1f] p-1 rounded-xl border border-gray-200 dark:border-gray-800 h-10 shadow-sm animate-fadeIn overflow-hidden">
+        
+        {/* ✅ جای آیکون چشم: اکشن‌ها سمت راست */}
+        <div className="flex items-center gap-1 px-2 shrink-0">
+            <Tooltip title="ایجاد نمای جدید">
+            <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={handleOpenNewView}
+                className="hover:bg-gray-100 rounded-lg text-gray-500"
+            />
+            </Tooltip>
+            <Tooltip title="بروزرسانی لیست">
+            <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={onRefresh}
+                className="hover:bg-gray-100 rounded-lg text-gray-500"
+            />
+            </Tooltip>
+        </div>
+
+        <div className="w-[1px] h-5 bg-gray-200 dark:bg-gray-700 mx-1"></div>
+
+        {/* چیپ‌های ویو */}
+        <div className="flex items-center gap-1 overflow-x-auto flex-1 no-scrollbar px-1">
+            {views.map(view => (
+            <div
+                key={view.id}
+                onClick={() => onViewChange(view, (view.config as any))}
+                className={`group px-3 py-1 rounded-lg text-xs cursor-pointer whitespace-nowrap transition-all flex items-center gap-2 select-none border ${
+                currentView?.id === view.id
+                    ? 'bg-leather-600 text-white border-leather-600 shadow-md font-bold'
+                    : 'bg-gray-50 dark:bg-white/5 border-transparent hover:bg-gray-100 text-gray-600 dark:text-gray-300'
+                }`}
+            >
+                {view.name}
+                <div className={`flex items-center gap-1 mr-1 transition-opacity ${currentView?.id === view.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                <Tooltip title="ویرایش">
+                    <span className="p-1 rounded-full hover:bg-black/10 flex items-center" onClick={(e) => handleEditView(view, e)}>
+                    <EditOutlined className="text-[10px]" />
+                    </span>
+                </Tooltip>
+
+                {!view.is_default && !view.id.startsWith('default_') && (
+                    <Popconfirm
+                    title="حذف نما؟"
+                    onConfirm={async (e) => {
+                        e?.stopPropagation();
+                        await supabase.from('saved_views').delete().eq('id', view.id);
+                        setViews(prev => prev.filter(v => v.id !== view.id));
+                        if (currentView?.id === view.id) onViewChange(null, null);
+                    }}
+                    onCancel={(e) => e?.stopPropagation()}
+                    >
+                    <span className="p-1 rounded-full hover:bg-red-50 hover:text-red-500 flex items-center" onClick={(e) => e.stopPropagation()}>
+                        <DeleteOutlined className="text-[10px]" />
+                    </span>
+                    </Popconfirm>
+                )}
+                </div>
+            </div>
+            ))}
+        </div>
+
+        </div>
+
 
       <Modal title={<div className="flex items-center gap-2">{editingViewId ? <EditOutlined /> : <PlusOutlined />}{editingViewId ? "ویرایش نما" : "ساخت نمای جدید"}</div>} open={isModalOpen} onCancel={() => setIsModalOpen(false)} width={700} zIndex={1001} footer={[<Button key="back" onClick={() => setIsModalOpen(false)}>انصراف</Button>, <Button key="submit" type="primary" icon={<SaveOutlined />} onClick={handleSaveView} className="bg-leather-600 hover:!bg-leather-500">{editingViewId ? 'ذخیره تغییرات' : 'ایجاد نما'}</Button>]}>
           <div className="flex flex-col gap-4 py-4">

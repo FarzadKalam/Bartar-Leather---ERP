@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Modal, Button, Form, Card, FormInstance, FormProps 
-} from 'antd';
+import { Modal, Button, Form, Card, FormInstance, FormProps } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { ModuleDefinition, BlockType, LogicOperator } from '../types';
 import SmartFieldRenderer from './SmartFieldRenderer';
-// ایمپورت کامپوننت جدول خودت
-import EditableTable from './EditableTable'; 
+import { MODULES } from '../moduleRegistry';
+import EditableTable from './EditableTable';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -39,23 +37,83 @@ const evaluateCondition = (condition: any, data: any): boolean => {
   }
 };
 
-const SmartForm: React.FC<SmartFormProps> = ({ 
+const SmartForm: React.FC<SmartFormProps> = ({
   module, initialValues, visible, onCancel, onSave, title, isBulkEdit = false, embedded = false, form: propForm, formProps, isLoading = false
 }) => {
   const [internalForm] = Form.useForm();
   const form = propForm || internalForm;
   const [formData, setFormData] = useState<any>({});
 
+  const getFieldLabel = (field: any) => {
+    const fa = field?.labels?.fa;
+    const cleaned = typeof fa === 'string' ? fa.trim() : '';
+    return cleaned ? cleaned : String(field?.key || '');
+  };
+
+  const getModuleDisplayField = (moduleId: string) => {
+    const targetConfig: any = (MODULES as any)?.[moduleId];
+    const keyField = targetConfig?.fields?.find((f: any) => f?.isKey)?.key;
+    return keyField || 'name';
+  };
+
+  const resolveRelationConfig = (field: any, allValues: any) => {
+    let rc: any = field?.relationConfig ? { ...field.relationConfig } : undefined;
+
+    // FieldType.USER هم زیرساخت relation دارد
+    if (!rc && field?.type === 'user') {
+      rc = { targetModule: 'profiles', targetField: 'full_name' };
+    }
+    if (!rc) return rc;
+
+    // Polymorphic / Dynamic relation convention:
+    // xxx_id  ->  xxx_module
+    const baseKey = String(field?.key || '').replace(/_id$/, '');
+    const moduleKey = `${baseKey}_module`;
+    const dynModule =
+      allValues?.[moduleKey] ||
+      (field?.key === 'related_to_id' ? allValues?.['related_to_module'] : undefined);
+
+    if (dynModule && typeof dynModule === 'string') {
+      rc.targetModule = dynModule;
+      // در پلی‌مورفیک، فیلد نمایش هم باید با ماژول جدید هماهنگ شود
+      rc.targetField = getModuleDisplayField(dynModule);
+    }
+
+    // اگر targetField تعیین نشده، از فیلد کلیدی ماژول مقصد استفاده می‌کنیم
+    if (!rc.targetField && rc.targetModule) {
+      rc.targetField = getModuleDisplayField(rc.targetModule);
+    }
+
+    return rc;
+  };
+
   useEffect(() => {
     if (visible || embedded) {
       if (initialValues) {
-          setFormData(initialValues);
-          form.setFieldsValue(initialValues);
+        setFormData(initialValues);
+        form.setFieldsValue(initialValues);
       }
     }
   }, [visible, embedded, initialValues, form]);
 
   const handleValuesChange = (changedValues: any, allValues: any) => {
+    // اگر ماژولِ یک ریلیشن پلی‌مورفیک تغییر کرد، آی‌دی مرتبط را پاک می‌کنیم تا انتخاب قبلی باقی نماند.
+    try {
+      const changedKeys = Object.keys(changedValues || {});
+      const moduleKeys = changedKeys.filter((k) => String(k).endsWith('_module'));
+      moduleKeys.forEach((mk) => {
+        const idKey = String(mk).replace(/_module$/i, '_id');
+        if (allValues?.[idKey]) {
+          form.setFieldsValue({ [idKey]: null });
+          allValues[idKey] = null;
+        }
+      });
+      // کیس خاص تسک‌ها: related_to_module -> related_to_id
+      if ('related_to_module' in (changedValues || {}) && allValues?.related_to_id) {
+        form.setFieldsValue({ related_to_id: null });
+        allValues.related_to_id = null;
+      }
+    } catch {}
     setFormData(allValues);
   };
 
@@ -68,28 +126,34 @@ const SmartForm: React.FC<SmartFormProps> = ({
     <>
       {fields.map(field => {
         if (field.logic?.visibleIf && !evaluateCondition(field.logic.visibleIf, formData)) return null;
+
+        const required = !!field.validation?.required && !isBulkEdit && field.key !== 'system_code';
+        const safeLabel = getFieldLabel(field) + (required ? ' *' : '');
+        const effectiveRelationConfig = resolveRelationConfig(field, formData);
+
         return (
           <div key={field.key}>
-             <Form.Item
-                name={field.key}
-                noStyle 
-                rules={[{ required: field.validation?.required && !isBulkEdit && field.key !== 'system_code', message: 'الزامی' }]}
-             >
-                <SmartFieldRenderer
-                  label={field.labels.fa + (field.validation?.required && !isBulkEdit ? ' *' : '')}
-                  value={formData[field.key]}
-                  type={field.type}
-                  options={field.options}
-                  onSave={(val) => handleFieldChange(field.key, val)}
-                  forceEditMode={true}
-                  fieldKey={field.key} // انتقال کلید فیلد
-                />
-             </Form.Item>
+            <Form.Item
+              name={field.key}
+              noStyle
+              rules={[{ required, message: 'الزامی' }]}
+            >
+              <SmartFieldRenderer
+                label={safeLabel}
+                value={formData[field.key]}
+                type={field.type}
+                options={field.options}
+                relationConfig={effectiveRelationConfig}
+                onSave={(val) => handleFieldChange(field.key, val)}
+                forceEditMode={true}
+                fieldKey={field.key}
+              />
+            </Form.Item>
           </div>
         );
       })}
     </>
-  );
+  )
 
   const formContent = (
     <Form
@@ -174,24 +238,29 @@ const SmartForm: React.FC<SmartFormProps> = ({
     <div className={`flex justify-end gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 ${embedded ? 'sticky bottom-0 bg-white dark:bg-[#141414] py-3 z-10' : ''}`}>
         <Button onClick={onCancel} icon={<CloseOutlined />}>انصراف</Button>
         <Button type="primary" onClick={() => form.submit()} loading={isLoading} icon={<SaveOutlined />} className="bg-leather-600 hover:bg-leather-500">
-          {isBulkEdit ? 'ذخیره تغییرات گروهی' : 'ذخیره'}
+          {isBulkEdit ? 'اعمال تغییرات' : 'ذخیره'}
         </Button>
     </div>
   );
 
   if (embedded) {
-    return <div className="h-full flex flex-col"><div className="flex-1 overflow-y-auto px-1">{formContent}</div></div>;
+    return (
+      <>
+        {formContent}
+        {footerButtons}
+      </>
+    );
   }
 
   return (
     <Modal
-      title={title || `افزودن/ویرایش ${module.titles.fa}`}
+      title={title || `افزودن ${module.titles.fa}`}
       open={visible}
       onCancel={onCancel}
-      width={850}
-      zIndex={6000}
       footer={footerButtons}
-      styles={{ body: { maxHeight: '70vh', overflowY: 'auto', paddingRight: '0.5rem' } }}
+      width={1100}
+      destroyOnClose
+      centered
     >
       {formContent}
     </Modal>
