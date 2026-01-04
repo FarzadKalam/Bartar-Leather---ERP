@@ -1,156 +1,209 @@
-import React, { useEffect, useState } from 'react';
-import { Form, Input, Button, message, InputNumber, Select, Upload, Divider, DatePicker, Row, Col, Switch } from 'antd';
-import { SaveOutlined, UploadOutlined, CloseOutlined, CheckOutlined } from '@ant-design/icons';
-import { supabase } from '../supabaseClient';
-import { FieldType, ModuleDefinition } from '../types';
-import dayjs from 'dayjs';
-import jalaliday from 'jalaliday';
-import locale from 'antd/es/date-picker/locale/fa_IR';
-
-dayjs.extend(jalaliday);
+import React, { useState, useEffect } from 'react';
+import { 
+  Modal, 
+  Button, 
+  Form, 
+  message, 
+  Card, 
+  Divider, 
+  Space 
+} from 'antd';
+import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { 
+  ModuleDefinition, 
+  BlockType,
+  LogicOperator 
+} from '../types';
+import SmartFieldRenderer from './SmartFieldRenderer';
 
 interface SmartFormProps {
-  moduleConfig: ModuleDefinition;
+  module: ModuleDefinition;
   initialValues?: any;
-  onSuccess: () => void;
+  visible: boolean;
   onCancel: () => void;
-  mode: 'create' | 'edit';
-  recordId?: string;
+  onSave: (values: any) => void;
+  title?: string;
+  isBulkEdit?: boolean;
+  embedded?: boolean; // <--- پراپ جدید: اگر true باشد، فرم بدون مودال رندر می‌شود
 }
 
-const SmartForm: React.FC<SmartFormProps> = ({ moduleConfig, initialValues, onSuccess, onCancel, mode, recordId }) => {
-  const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
-  const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
-  const [uploading, setUploading] = useState(false);
+const evaluateCondition = (condition: any, data: any): boolean => {
+  if (!condition) return true;
+  const { field, operator, value } = condition;
+  const fieldValue = data[field];
+
+  switch (operator) {
+    case LogicOperator.EQUALS: return fieldValue === value;
+    case LogicOperator.NOT_EQUALS: return fieldValue !== value;
+    case LogicOperator.GREATER_THAN: return Number(fieldValue) > Number(value);
+    case LogicOperator.LESS_THAN: return Number(fieldValue) < Number(value);
+    case LogicOperator.CONTAINS: return fieldValue?.includes(value);
+    case LogicOperator.IS_TRUE: return fieldValue === true;
+    case LogicOperator.IS_FALSE: return fieldValue === false;
+    default: return true;
+  }
+};
+
+const SmartForm: React.FC<SmartFormProps> = ({ 
+  module, 
+  initialValues, 
+  visible, 
+  onCancel, 
+  onSave, 
+  title,
+  isBulkEdit = false,
+  embedded = false 
+}) => {
+  const [formData, setFormData] = useState<any>({});
 
   useEffect(() => {
-    if (mode === 'edit' && initialValues) {
-      // تبدیل تاریخ‌ها به آبجکت moment/dayjs برای نمایش در فرم
-      const parsedValues = { ...initialValues };
-      moduleConfig.fields.forEach(f => {
-          if (f.type === FieldType.DATE && parsedValues[f.key]) {
-              parsedValues[f.key] = dayjs(parsedValues[f.key]);
-          }
-      });
-      form.setFieldsValue(parsedValues);
-    } else {
-      form.resetFields();
-      // تولید کد سیستمی در حالت ایجاد
-      if (mode === 'create') generateSystemCode();
+    if (visible) {
+      setFormData(initialValues || {});
     }
-    fetchOptions();
-  }, [initialValues, mode, moduleConfig]);
+  }, [visible, initialValues]);
 
-  // --- اصلاح شده: تولید کد سیستمی بر اساس ماژول ---
-  const generateSystemCode = async () => {
-    // تعیین پیشوند بر اساس ماژول
-    let prefix = 'SYS';
-    if (moduleConfig.id === 'products') prefix = 'PRD';
-    else if (moduleConfig.id === 'customers') prefix = 'CUS';
-    else if (moduleConfig.id === 'suppliers') prefix = 'SUP';
-    else if (moduleConfig.id === 'production_boms') prefix = 'BOM';
-
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const code = `${prefix}-${randomNum}`;
-    form.setFieldValue('system_code', code);
+  const handleFieldChange = (key: string, value: any) => {
+    setFormData((prev: any) => ({ ...prev, [key]: value }));
   };
 
-  const fetchOptions = async () => {
-    const dynFields = moduleConfig.fields.filter(f => (f as any).dynamicOptionsCategory);
-    const opts: Record<string, any[]> = {};
-    for (const field of dynFields) {
-        const cat = (field as any).dynamicOptionsCategory;
-        const { data } = await supabase.from('option_sets').select('label, value').eq('category', cat);
-        if (data) opts[cat] = data;
-    }
-    setDynamicOptions(opts);
-  };
+  const handleSave = () => {
+    if (!isBulkEdit) {
+      const errors: string[] = [];
+      module.fields.forEach(field => {
+        const isFieldVisible = field.logic?.visibleIf 
+           ? evaluateCondition(field.logic.visibleIf, formData) 
+           : true;
 
-  const handleUpload = async (file: File, fieldKey: string) => {
-      setUploading(true);
-      try {
-          const fileName = `${moduleConfig.id}-${Date.now()}.${file.name.split('.').pop()}`;
-          const { error } = await supabase.storage.from('images').upload(fileName, file);
-          if (error) throw error;
-          const { data } = supabase.storage.from('images').getPublicUrl(fileName);
-          form.setFieldValue(fieldKey, data.publicUrl);
-          message.success('آپلود شد');
-      } catch (e) {
-          message.error('خطا در آپلود');
-      } finally {
-          setUploading(false);
-      }
-      return false;
-  };
+        if (!isFieldVisible) return;
 
-  const onFinish = async (values: any) => {
-    setLoading(true);
-    try {
-      // تبدیل تاریخ‌ها به رشته استاندارد برای ذخیره
-      const formattedValues = { ...values };
-      moduleConfig.fields.forEach(f => {
-          if (f.type === FieldType.DATE && values[f.key]) {
-              formattedValues[f.key] = values[f.key].toDate().toISOString(); // فرمت ISO برای دیتابیس
-          }
+        if (field.validation?.required && !formData[field.key]) {
+             if (formData[field.key] !== 0) {
+                 errors.push(`فیلد "${field.labels.fa}" الزامی است.`);
+             }
+        }
       });
 
-      if (mode === 'create') {
-        const { error } = await supabase.from(moduleConfig.id).insert([formattedValues]);
-        if (error) throw error;
-        message.success('رکورد جدید ایجاد شد');
-      } else {
-        const { error } = await supabase.from(moduleConfig.id).update(formattedValues).eq('id', recordId);
-        if (error) throw error;
-        message.success('ویرایش انجام شد');
+      if (errors.length > 0) {
+        message.error(errors[0]);
+        return;
       }
-      onSuccess();
-    } catch (error: any) {
-      message.error('خطا: ' + error.message);
-    } finally {
-      setLoading(false);
     }
+    onSave(formData);
   };
 
-  return (
-    <Form form={form} layout="vertical" onFinish={onFinish} className="pb-20">
-      <Row gutter={16}>
-        {moduleConfig.fields.sort((a,b) => (a.order||0) - (b.order||0)).map(field => {
-           if (field.readonly && mode === 'create' && field.key !== 'system_code') return null; // فیلدهای فقط خواندنی (بجز کد) در ایجاد نمایش داده نشوند
+  const sortedBlocks = [...module.blocks].sort((a, b) => a.order - b.order);
+
+  // محتوای اصلی فرم
+  const formContent = (
+    <div className="flex flex-col gap-4 pb-4">
+      {/* 1. Header Fields */}
+      <Card size="small" className="bg-gray-50 dark:bg-[#1f1f1f] border-gray-200 dark:border-gray-800 shadow-sm">
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             {module.fields
+               .filter(f => f.location === 'header')
+               .sort((a, b) => a.order - b.order)
+               .map(field => {
+                 if (field.logic?.visibleIf && !evaluateCondition(field.logic.visibleIf, formData)) return null;
+                 return (
+                   <div key={field.key}>
+                      <SmartFieldRenderer
+                        label={field.labels.fa + (field.validation?.required && !isBulkEdit ? ' *' : '')}
+                        value={formData[field.key]}
+                        type={field.type}
+                        options={field.options}
+                        relationModule={field.relationConfig?.targetModule}
+                        onSave={(val) => handleFieldChange(field.key, val)}
+                        forceEditMode={true}
+                      />
+                   </div>
+                 );
+               })}
+           </div>
+      </Card>
+
+      {/* 2. Blocks */}
+      {sortedBlocks.map(block => {
+           if (block.visibleIf && !evaluateCondition(block.visibleIf, formData)) return null;
+           if (block.type === BlockType.TABLE) return null;
+
+           const blockFields = module.fields
+             .filter(f => f.blockId === block.id)
+             .sort((a, b) => a.order - b.order);
+
+           if (blockFields.length === 0) return null;
 
            return (
-             <Col span={field.type === FieldType.TEXTAREA || field.type === FieldType.IMAGE ? 24 : 12} key={field.key}>
-                <Form.Item 
-                    name={field.key} 
-                    label={field.labels.fa} 
-                    rules={field.validation?.required ? [{ required: true, message: 'الزامی' }] : []}
-                >
-                    {field.type === FieldType.SELECT || field.type === FieldType.STATUS ? (
-                        <Select options={field.options || dynamicOptions[(field as any).dynamicOptionsCategory] || []} allowClear />
-                    ) : field.type === FieldType.DATE ? (
-                        <DatePicker style={{ width: '100%' }} locale={locale} />
-                    ) : field.type === FieldType.NUMBER || field.type === FieldType.PRICE || field.type === FieldType.stock ? (
-                        <InputNumber style={{ width: '100%' }} formatter={val => field.type === FieldType.PRICE ? `${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : `${val}`} />
-                    ) : field.type === FieldType.IMAGE ? (
-                        <Upload showUploadList={false} beforeUpload={(f) => handleUpload(f, field.key)}>
-                            <Button icon={<UploadOutlined />} loading={uploading}>آپلود تصویر</Button>
-                        </Upload>
-                    ) : field.type === FieldType.TEXTAREA ? (
-                        <Input.TextArea rows={3} />
-                    ) : (
-                        <Input disabled={field.readonly} />
-                    )}
-                </Form.Item>
-             </Col>
+             <Card 
+                key={block.id} 
+                title={<span className="text-xs font-bold text-gray-500">{block.titles.fa}</span>}
+                size="small"
+                className="shadow-sm border-gray-200 dark:border-gray-800"
+             >
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                 {blockFields.map(field => {
+                    if (field.logic?.visibleIf && !evaluateCondition(field.logic.visibleIf, formData)) return null;
+                    return (
+                      <div key={field.key}>
+                         <SmartFieldRenderer
+                            label={field.labels.fa + (field.validation?.required && !isBulkEdit ? ' *' : '')}
+                            value={formData[field.key]}
+                            type={field.type}
+                            options={field.options}
+                            relationModule={field.relationConfig?.targetModule}
+                            onSave={(val) => handleFieldChange(field.key, val)}
+                            forceEditMode={true} 
+                         />
+                      </div>
+                    );
+                 })}
+               </div>
+             </Card>
            );
-        })}
-      </Row>
-      
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-white dark:bg-[#1a1a1a] border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2 z-10">
-        <Button onClick={onCancel} icon={<CloseOutlined />}>انصراف</Button>
-        <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />} className="bg-leather-600">ذخیره</Button>
+      })}
+    </div>
+  );
+
+  const footerButtons = (
+    <div className={`flex justify-end gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 ${embedded ? 'sticky bottom-0 bg-white dark:bg-[#141414] py-3 z-10' : ''}`}>
+        <Button onClick={onCancel} icon={<CloseOutlined />}>
+          انصراف
+        </Button>
+        <Button 
+          type="primary" 
+          onClick={handleSave} 
+          icon={<SaveOutlined />}
+          className="bg-leather-600 hover:bg-leather-500"
+        >
+          {isBulkEdit ? 'ذخیره تغییرات گروهی' : 'ذخیره'}
+        </Button>
+    </div>
+  );
+
+  // اگر embedded باشد، فقط محتوا + دکمه‌ها را برمی‌گرداند (بدون مودال)
+  if (embedded) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="flex-1 overflow-y-auto px-1">
+            {formContent}
+        </div>
+        {footerButtons}
       </div>
-    </Form>
+    );
+  }
+
+  // در غیر این صورت، داخل مودال می‌گذارد
+  return (
+    <Modal
+      title={title || `افزودن/ویرایش ${module.titles.fa}`}
+      open={visible}
+      onCancel={onCancel}
+      width={850}
+      zIndex={6000}
+      footer={footerButtons}
+      styles={{ body: { maxHeight: '70vh', overflowY: 'auto', paddingRight: '1.0rem' } }}
+    >
+      {formContent}
+    </Modal>
   );
 };
 

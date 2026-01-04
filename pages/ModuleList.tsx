@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Table, Button, Tag, Dropdown, Space, Empty, Spin, 
-  message, Drawer, Segmented, Input, Avatar, Badge, Tooltip, App, Checkbox 
+  Button, Tag, Input, App, Drawer, Segmented, 
+  Empty, Avatar, Tooltip, Spin // <--- Spin اضافه شده
 } from 'antd';
 import { 
-  PlusOutlined, AppstoreOutlined, BarsOutlined, MoreOutlined,
-  ReloadOutlined, EditOutlined, DeleteOutlined, SearchOutlined, 
-  UserOutlined, ProjectOutlined, ShopOutlined
+  PlusOutlined, SearchOutlined, AppstoreOutlined, BarsOutlined, 
+  DeleteOutlined, EditOutlined, TableOutlined, FilterFilled, CloseCircleFilled
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
-import { FieldType, SavedView, ViewMode } from '../types';
+import { ViewMode, SavedView, ViewConfig } from '../types';
 import SmartForm from '../components/SmartForm';
 import ViewManager from '../components/ViewManager';
 import SmartTableRenderer from '../components/SmartTableRenderer';
+import dayjs from 'dayjs';
 
 const ModuleList: React.FC = () => {
   const { moduleId = 'products' } = useParams();
@@ -22,297 +22,353 @@ const ModuleList: React.FC = () => {
   const { message: msg, modal } = App.useApp();
   const moduleConfig = MODULES[moduleId];
 
-  // --- States ---
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.LIST);
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [searchText, setSearchText] = useState('');
   
-  // Drawers
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [isBulkEditDrawerOpen, setIsBulkEditDrawerOpen] = useState(false);
   const [currentView, setCurrentView] = useState<SavedView | null>(null);
+  const [activeConfig, setActiveConfig] = useState<ViewConfig | null>(null);
 
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [isCreateDrawerOpen, setIsCreateDrawerOpen] = useState(false);
+  const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<any>(null); 
+  const [isBulkEditMode, setIsBulkEditMode] = useState(false); 
+
+  // دریافت اطلاعات با وابستگی دقیق به activeConfig
   useEffect(() => {
-    if (moduleConfig) {
-      fetchData();
-      setViewMode(moduleConfig.defaultViewMode || ViewMode.LIST);
-      setSelectedRowKeys([]);
-    }
-  }, [moduleId, moduleConfig]);
+    const fetchData = async () => {
+        if (!moduleConfig) return;
+        setLoading(true);
+        setSelectedRowKeys([]);
+        
+        // --- LOGGING FOR DEBUGGING ---
+        console.group('ModuleList: Fetching Data');
+        console.log('Active View:', currentView?.name);
+        console.log('Active Config Filters:', activeConfig?.filters);
 
-  // --- Optimized Fetch Function ---
-  const fetchData = async () => {
-    if (!moduleConfig) return;
-    setLoading(true);
-    try {
-      // 1. دریافت رکوردهای اصلی
-      let query = supabase
-        .from(moduleId)
-        .select('*')
-        .order('created_at', { ascending: false });
+        let query = supabase.from(moduleId).select('*').order('created_at', { ascending: false });
 
-      const { data: records, error } = await query;
-      if (error) throw error;
-      
-      if (!records || records.length === 0) {
-          setData([]);
-          setLoading(false);
-          return;
-      }
+        // اعمال فیلترهای ویو
+        if (activeConfig?.filters && Array.isArray(activeConfig.filters)) {
+           activeConfig.filters.forEach((filter, index) => {
+              if (!filter.field || !filter.operator) return;
+              
+              // بررسی دقیق مقدار (اجازه به 0 و false، حذف فقط undefined/null/empty string)
+              const val = filter.value;
+              const hasValue = val !== undefined && val !== null && val !== '';
+              
+              // عملگرهای خاص مثل 'is' و 'is_not' نیاز به مقدار ندارند
+              const needsValue = !['is', 'is_not'].includes(filter.operator);
 
-      // 2. دریافت تگ‌ها برای این رکوردها (در یک کوئری جداگانه برای پرفورمنس بهتر)
-      const recordIds = records.map(r => r.id);
-      const { data: tagsData } = await supabase
-        .from('record_tags')
-        .select(`
-            record_id,
-            tags ( title, color )
-        `)
-        .in('record_id', recordIds)
-        .eq('module_id', moduleId);
+              if (needsValue && !hasValue) {
+                  console.warn(`Skipping filter #${index} (${filter.field}): No value provided`);
+                  return;
+              }
 
-      // 3. ترکیب رکوردها با تگ‌ها
-      const formattedRecords = records.map(record => {
-        const relatedTags = tagsData
-            ?.filter((rt: any) => rt.record_id === record.id)
-            .map((rt: any) => rt.tags) || [];
+              console.log(`Applying Filter #${index}:`, filter.field, filter.operator, val);
 
-        return {
-            ...record,
-            tags: relatedTags
-        };
-      });
+              // نگاشت عملگرها
+              switch (filter.operator) {
+                  case 'eq': query = query.eq(filter.field, val); break;
+                  case 'neq': query = query.neq(filter.field, val); break;
+                  case 'ilike': query = query.ilike(filter.field, `%${val}%`); break; // شامل (Case Insensitive)
+                  case 'like': query = query.like(filter.field, `%${val}%`); break;
+                  case 'gt': query = query.gt(filter.field, val); break;
+                  case 'lt': query = query.lt(filter.field, val); break;
+                  case 'gte': query = query.gte(filter.field, val); break;
+                  case 'lte': query = query.lte(filter.field, val); break;
+                  case 'in': 
+                      // تبدیل رشته جدا شده با کاما به آرایه (اگر ورودی آرایه نبود)
+                      const valArr = Array.isArray(val) ? val : String(val).split(',').map(s => s.trim());
+                      query = query.in(filter.field, valArr); 
+                      break;
+                  case 'is':
+                      if (String(val) === 'null' || val === null) query = query.is(filter.field, null);
+                      else if (String(val) === 'true') query = query.is(filter.field, true);
+                      else if (String(val) === 'false') query = query.is(filter.field, false);
+                      break;
+                  default:
+                      console.warn('Unknown operator:', filter.operator);
+              }
+           });
+        }
+        console.groupEnd();
 
-      setData(formattedRecords);
+        const { data: result, error } = await query;
+        if (error) {
+            console.error('Supabase Error:', error);
+            msg.error('خطا در دریافت اطلاعات: ' + error.message);
+        } else {
+            setData(result || []);
+        }
+        setLoading(false);
+    };
 
-    } catch (error: any) {
-      console.error('Fetch Error:', error);
-      msg.error('خطا در دریافت اطلاعات');
-    } finally {
-      setLoading(false);
-    }
+    fetchData();
+  }, [moduleId, currentView, activeConfig]);
+
+  // --- Handlers ---
+  const handleCreate = () => {
+    setEditingRecord(null);
+    setIsBulkEditMode(false);
+    setIsCreateDrawerOpen(true);
   };
 
-  // --- Delete Handler ---
-  const handleDelete = async (ids: React.Key[]) => {
+  const handleEditRow = (record: any) => {
+    setEditingRecord(record);
+    setIsBulkEditMode(false);
+    setIsEditDrawerOpen(true);
+  };
+
+  const handleBulkEdit = () => {
+    if (selectedRowKeys.length === 0) return;
+    setEditingRecord(null); 
+    setIsBulkEditMode(true);
+    setIsEditDrawerOpen(true);
+  };
+
+  const handleDeleteBulk = () => {
     modal.confirm({
-      title: `حذف ${ids.length} رکورد`, content: 'آیا اطمینان دارید؟', okType: 'danger',
+      title: `آیا از حذف ${selectedRowKeys.length} رکورد اطمینان دارید؟`,
+      okType: 'danger',
       onOk: async () => {
-        try {
-          // حذف تگ‌های وابسته (اگر Cascade در دیتابیس تنظیم نشده باشد)
-          await supabase.from('record_tags').delete().in('record_id', ids);
-          
-          const { error } = await supabase.from(moduleId).delete().in('id', ids);
-          if (error) throw error;
-          msg.success('حذف شد'); setSelectedRowKeys([]); fetchData();
-        } catch (e: any) { msg.error(e.message); }
+        const { error } = await supabase.from(moduleId).delete().in('id', selectedRowKeys);
+        if (!error) {
+          msg.success('حذف شد');
+          setSelectedRowKeys([]);
+          // Force refresh by triggering config update (safe trick)
+          setActiveConfig(prev => ({ ...prev! }));
+        } else msg.error(error.message);
       }
     });
   };
 
-  // --- Card Component (Shared for Grid & Kanban) ---
-  const CardItem = ({ item }: { item: any }) => {
-    const isSelected = selectedRowKeys.includes(item.id);
+  const saveToSupabase = async (values: any) => {
+    const cleanedValues = Object.fromEntries(
+        Object.entries(values).filter(([_, v]) => v !== undefined && v !== '')
+    );
+    const user = (await supabase.auth.getUser()).data.user;
 
-    const toggleSelect = (e: any) => {
-        e.stopPropagation(); 
-        const newSelected = isSelected 
-            ? selectedRowKeys.filter(k => k !== item.id)
-            : [...selectedRowKeys, item.id];
-        setSelectedRowKeys(newSelected);
-    };
+    if (isBulkEditMode) {
+       const { error } = await supabase.from(moduleId).update(cleanedValues).in('id', selectedRowKeys);
+       if (error) throw error;
+    } else if (editingRecord) {
+       const { error } = await supabase.from(moduleId).update({ ...cleanedValues, updated_by: user?.id }).eq('id', editingRecord.id);
+       if (error) throw error;
+    } else {
+       const { error } = await supabase.from(moduleId).insert([{
+          ...cleanedValues,
+          created_by: user?.id,
+          updated_by: user?.id
+       }]);
+       if (error) throw error;
+    }
+  };
 
-    return (
-        <div 
-            onClick={() => navigate(`/${moduleId}/${item.id}`)}
-            className={`
-                bg-white dark:bg-[#1e1e1e] p-3 rounded-xl border shadow-sm cursor-pointer transition-all whitespace-normal group relative flex flex-col
-                ${isSelected ? 'border-leather-500 ring-1 ring-leather-500' : 'border-gray-200 dark:border-gray-700 hover:shadow-md hover:border-leather-400'}
-            `}
-        >
-            <div className="absolute top-2 left-2 z-10" onClick={e => e.stopPropagation()}>
-                <Checkbox checked={isSelected} onChange={toggleSelect} className="scale-110" />
-            </div>
+  const handleFormSuccess = () => {
+    setIsCreateDrawerOpen(false);
+    setIsEditDrawerOpen(false);
+    setSelectedRowKeys([]);
+    setActiveConfig(prev => ({ ...prev! })); // Refresh Data
+    msg.success('عملیات با موفقیت انجام شد');
+  };
 
-            <div className="flex gap-3 mb-2">
-                <div className="shrink-0">
-                    {item.image_url ? (
-                        <Avatar shape="square" size={48} src={item.image_url} className="rounded-lg bg-gray-50 border border-gray-100" />
-                    ) : (
-                        <Avatar shape="square" size={48} icon={moduleId === 'customers' ? <UserOutlined /> : moduleId === 'suppliers' ? <ShopOutlined /> : <AppstoreOutlined />} className="rounded-lg bg-gray-50 dark:bg-white/5 text-gray-300" />
-                    )}
-                </div>
-                
-                <div className="flex-1 min-w-0 pt-0.5">
-                    <h4 className="font-bold text-sm text-gray-800 dark:text-white truncate mb-1 group-hover:text-leather-600 transition-colors">
-                        {item.name || item.business_name || `${item.first_name || ''} ${item.last_name}`}
-                    </h4>
-                    <div className="text-xs text-gray-400 font-mono truncate">
-                        {item.system_code || item.mobile_1 || '---'}
-                    </div>
-                </div>
-            </div>
+  const filteredData = data.filter(item => 
+    JSON.stringify(item).toLowerCase().includes(searchText.toLowerCase())
+  );
 
-            {/* Tags Section */}
-            {item.tags && item.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">
-                    {item.tags.map((tag: any, idx: number) => (
-                        <Tag key={idx} color={tag.color} style={{ fontSize: '10px', margin: 0, padding: '0 4px', lineHeight: '18px', border: 'none' }}>
-                            {tag.title}
-                        </Tag>
-                    ))}
+  const renderCard = (item: any) => (
+      <div 
+        key={item.id} 
+        onClick={() => navigate(`/${moduleId}/${item.id}`)}
+        className="bg-white dark:bg-[#1f1f1f] p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 cursor-pointer hover:shadow-md hover:-translate-y-1 transition-all group flex flex-col h-full"
+      >
+        <div className="flex items-start gap-3 mb-3">
+            {item.image_url ? (
+                <Avatar src={item.image_url} shape="square" size={48} className="rounded-lg border bg-gray-50" />
+            ) : (
+                <div className="w-12 h-12 rounded-lg bg-leather-50 text-leather-500 flex items-center justify-center font-bold text-lg">
+                    {item.name?.[0] || 'A'}
                 </div>
             )}
-
-            <div className="mt-auto pt-2 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                <div className="flex items-center gap-1">
-                     {item.rank && <Tag className="m-0 text-[10px] px-1">{item.rank}</Tag>}
-                     
-                     {(item.sell_price || item.total_spend) ? (
-                        <span className="font-bold text-xs text-gray-700 dark:text-gray-300">
-                            {Number(item.sell_price || item.total_spend).toLocaleString()} <span className="text-[9px] font-normal text-gray-400">تومان</span>
-                        </span>
-                     ) : null}
-                </div>
-
-                {item.assignee_id && (
-                    <Tooltip title="مسئول"><Avatar size={18} className="bg-leather-100 text-leather-600 border border-white" icon={<UserOutlined />} /></Tooltip>
-                )}
+            <div className="flex-1 min-w-0">
+                <div className="font-bold text-gray-800 dark:text-white truncate">{item.name}</div>
+                <div className="text-xs text-gray-400 mt-1">{item.system_code}</div>
             </div>
         </div>
-    );
-  };
+        <div className="mt-auto pt-3 border-t border-gray-50 dark:border-gray-800 flex justify-between items-center">
+            <span className="text-[10px] text-gray-400">{dayjs(item.created_at).calendar('jalali').format('YYYY/MM/DD')}</span>
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditRow(item); }} />
+        </div>
+      </div>
+  );
 
-  // --- Filter Logic ---
-  const filteredData = data.filter(item => {
-      const term = searchText.toLowerCase();
-      const title = (item.name || item.business_name || item.last_name || '').toLowerCase();
-      const code = (item.system_code || '').toLowerCase();
-      return title.includes(term) || code.includes(term);
-  });
-
-  // --- Kanban Grouping Logic ---
-  const getKanbanGroupingField = () => {
-      const statusField = moduleConfig?.fields.find(f => f.type === FieldType.STATUS);
-      if (statusField) return statusField;
-      if (moduleId === 'products') return moduleConfig?.fields.find(f => f.key === 'category');
-      // Fallback: اگر هیچ فیلدی پیدا نشد، null برمیگرداند
-      return null;
-  };
-  const kanbanField = getKanbanGroupingField();
-  const kanbanColumns = kanbanField?.options || [];
-
-  if (!moduleConfig) return <div className="p-10 text-center">ماژول یافت نشد</div>;
+  if (!moduleConfig) return <div>ماژول یافت نشد</div>;
 
   return (
-    <div className="p-4 md:p-6 max-w-[1600px] mx-auto animate-fadeIn pb-20 h-[calc(100vh-64px)] flex flex-col">
-      
-      {/* Header */}
-      <div className="flex flex-wrap md:flex-nowrap justify-between items-center mb-4 gap-4 shrink-0">
-        <div className="w-full md:w-auto">
-            <h1 className="text-2xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
-                <span className="w-2 h-8 bg-leather-500 rounded-full inline-block"></span>
-                {moduleConfig.titles.fa}
-                <span className="text-sm font-normal text-gray-400 bg-gray-100 dark:bg-white/10 px-2 py-1 rounded-lg mr-2">{filteredData.length}</span>
-            </h1>
-        </div>
+    <div className="p-4 md:p-6 pb-24 md:ml-16 transition-all min-h-screen bg-gray-50/50 dark:bg-[#0a0a0a]">
+       
+       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-4">
+         <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-black m-0 text-gray-800 dark:text-white">{moduleConfig.titles.fa}</h1>
+            <Tag className="rounded-full">{data.length}</Tag>
+         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            <Input prefix={<SearchOutlined className="text-gray-300" />} placeholder="جستجو..." className="rounded-xl border-none bg-white dark:bg-[#1a1a1a] shadow-sm h-10 grow md:grow-0 md:w-64" value={searchText} onChange={e => setSearchText(e.target.value)} allowClear />
+         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+            <Input 
+              prefix={<SearchOutlined className="text-gray-400" />} 
+              placeholder="جستجو..." 
+              className="rounded-xl border-none bg-white dark:bg-[#1f1f1f] shadow-sm w-full sm:w-56 h-10"
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+            />
             
-            <Segmented
-                options={[
-                    { value: ViewMode.LIST, icon: <BarsOutlined /> },
-                    { value: ViewMode.GRID, icon: <AppstoreOutlined /> },
-                    { value: ViewMode.KANBAN, icon: <ProjectOutlined /> },
-                ]}
-                value={viewMode}
-                onChange={(v) => setViewMode(v as ViewMode)}
-                className="bg-white dark:bg-[#1a1a1a] shadow-sm p-1 rounded-xl"
+            <ViewManager 
+               moduleId={moduleId} 
+               currentView={currentView} 
+               onViewChange={(view, config) => { 
+                   // پارس کردن کانفیگ اگر به صورت رشته ذخیره شده باشد (جهت اطمینان)
+                   let parsedConfig = config;
+                   if (typeof config === 'string') {
+                       try { parsedConfig = JSON.parse(config); } catch(e) { console.error('Config Parse Error', e); }
+                   }
+                   setCurrentView(view); 
+                   setActiveConfig(parsedConfig); 
+               }}
             />
 
-            <div className="flex gap-2 mr-auto md:mr-0">
-                {selectedRowKeys.length > 0 && (
-                    <Dropdown menu={{ items: [{ key: 'edit', label: 'ویرایش گروهی', icon: <EditOutlined />, onClick: () => setIsBulkEditDrawerOpen(true) }, { key: 'delete', label: 'حذف', icon: <DeleteOutlined />, danger: true, onClick: () => handleDelete(selectedRowKeys) }] }}>
-                        <Button className="h-10 rounded-xl border-leather-500 text-leather-600 px-3">
-                            <span className="hidden md:inline">عملیات</span> ({selectedRowKeys.length}) <MoreOutlined />
-                        </Button>
-                    </Dropdown>
-                )}
-                <Button icon={<ReloadOutlined />} onClick={fetchData} className="h-10 w-10 rounded-xl border-none shadow-sm" />
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsDrawerOpen(true)} className="h-10 px-4 md:px-6 rounded-xl bg-leather-600 hover:!bg-leather-500 border-none">
-                     <span className="hidden md:inline">افزودن</span><span className="md:hidden">جدید</span>
-                </Button>
-            </div>
-        </div>
-      </div>
+            <div className="w-[1px] h-8 bg-gray-300 mx-1 hidden sm:block"></div>
 
-      <div className="mb-2 shrink-0"><ViewManager moduleId={moduleId} currentView={currentView} onViewChange={setCurrentView} /></div>
+            <Segmented
+              options={[
+                { value: ViewMode.LIST, icon: <BarsOutlined /> },
+                { value: ViewMode.GRID, icon: <TableOutlined /> },
+                { value: ViewMode.KANBAN, icon: <AppstoreOutlined /> },
+              ]}
+              value={viewMode}
+              onChange={(val: any) => setViewMode(val)}
+              className="bg-gray-200 dark:bg-[#1f1f1f] p-1 rounded-xl"
+            />
+            
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate} className="h-10 px-6 rounded-xl bg-leather-600 hover:bg-leather-500 shadow-lg border-none">
+               جدید
+            </Button>
+         </div>
+       </div>
 
-      <div className="flex-1 overflow-hidden relative rounded-[2rem]">
-          {loading ? <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem]"><Spin size="large" /></div> : 
-           filteredData.length === 0 ? <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem]"><Empty description="رکوردی یافت نشد" /></div> : 
-           
-           /* === VIEW MODES === */
-           viewMode === ViewMode.LIST ? (
-              <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 h-full flex flex-col">
-                  <SmartTableRenderer 
-                      moduleConfig={moduleConfig} data={filteredData} loading={loading}
-                      rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
-                      onRow={(record: any) => ({ onClick: () => navigate(`/${moduleId}/${record.id}`), style: { cursor: 'pointer' } })}
-                  />
+       {/* تگ فیلترهای فعال */}
+       {activeConfig?.filters && activeConfig.filters.length > 0 && (
+           <div className="flex flex-wrap gap-2 mb-4 animate-fadeIn">
+               <span className="text-xs text-gray-400 flex items-center gap-1"><FilterFilled /> فیلترهای فعال:</span>
+               {activeConfig.filters.map((f, idx) => {
+                   if (!f.field) return null;
+                   const fieldLabel = moduleConfig.fields.find(field => field.key === f.field)?.labels.fa || f.field;
+                   const valDisplay = (typeof f.value === 'object') ? '...' : f.value;
+                   return (
+                       <Tag key={idx} color="blue" className="rounded-full px-3 py-1 m-0 flex items-center gap-2 border-none bg-blue-50 text-blue-600">
+                           <span>{fieldLabel}</span>
+                           <span className="opacity-50 text-[10px]">{f.operator}</span>
+                           <span className="font-bold">{valDisplay}</span>
+                       </Tag>
+                   )
+               })}
+               <Button size="small" type="text" danger icon={<CloseCircleFilled />} onClick={() => setActiveConfig({ ...activeConfig, filters: [] })}>حذف همه</Button>
+           </div>
+       )}
+
+       {selectedRowKeys.length > 0 && (
+         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-gray-900 text-white px-4 py-3 rounded-full shadow-2xl flex items-center gap-4 animate-fadeInUp">
+            <span className="font-bold text-sm px-2">{selectedRowKeys.length} انتخاب</span>
+            <Button size="small" type="text" className="text-white hover:text-blue-400" icon={<EditOutlined />} onClick={handleBulkEdit}>ویرایش</Button>
+            <Button size="small" type="text" className="text-white hover:text-red-400" icon={<DeleteOutlined />} onClick={handleDeleteBulk}>حذف</Button>
+            <Button size="small" type="text" className="text-gray-400" onClick={() => setSelectedRowKeys([])}>لغو</Button>
+         </div>
+       )}
+
+       <div className="bg-white dark:bg-[#141414] rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800 min-h-[500px] overflow-hidden relative p-1">
+          {loading && <div className="absolute inset-0 z-10 bg-white/60 dark:bg-black/60 flex items-center justify-center z-50 backdrop-blur-[1px]"><div className="bg-white dark:bg-[#222] px-6 py-3 rounded-xl shadow-lg font-bold text-gray-600 dark:text-gray-300 flex items-center gap-3"><Spin /> در حال بارگذاری...</div></div>}
+          
+          {viewMode === ViewMode.LIST && (
+             <SmartTableRenderer 
+               module={moduleConfig}
+               data={filteredData}
+               loading={false} 
+               onRowClick={(record) => navigate(`/${moduleId}/${record.id}`)}
+               viewConfig={activeConfig} 
+               selection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
+               onEditRow={handleEditRow}
+             />
+          )}
+
+          {viewMode === ViewMode.GRID && (
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {filteredData.map(item => renderCard(item))}
               </div>
+          )}
 
-           ) : viewMode === ViewMode.GRID ? (
-              <div className="h-full overflow-y-auto p-1 scroll-smooth">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 pb-20">
-                      {filteredData.map(record => (
-                          <CardItem key={record.id} item={record} />
-                      ))}
-                  </div>
-              </div>
-
-           ) : ( /* KANBAN */
-              <div className="h-full overflow-x-auto overflow-y-hidden whitespace-nowrap pb-4 px-1">
-                  {kanbanField && kanbanColumns.length > 0 ? (
-                      <div className="flex gap-4 h-full">
-                          {kanbanColumns.map((col: any) => {
-                              const colItems = filteredData.filter(item => item[kanbanField.key] === col.value);
-                              return (
-                                  <div key={col.value} className="w-72 min-w-[280px] flex flex-col max-h-full bg-gray-100 dark:bg-[#121212] rounded-2xl border border-gray-200 dark:border-gray-800">
-                                      {/* Header */}
-                                      <div className="p-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-white dark:bg-[#1a1a1a] rounded-t-2xl sticky top-0 z-10">
-                                          <div className="flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-full`} style={{ backgroundColor: col.color || '#ccc' }}></span><span className="font-bold text-sm text-gray-700 dark:text-gray-200">{col.label}</span></div>
-                                          <Badge count={colItems.length} style={{ backgroundColor: '#f0f0f0', color: '#999', boxShadow: 'none' }} />
-                                      </div>
-                                      
-                                      {/* Cards Area - اصلاح شده: max-h-full و flex-1 */}
-                                      <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                                          {colItems.map(item => (
-                                              <CardItem key={item.id} item={item} />
-                                          ))}
-                                          {colItems.length === 0 && <div className="text-center py-10 text-gray-300 text-xs">خالی</div>}
-                                      </div>
-                                  </div>
-                              );
-                          })}
+          {viewMode === ViewMode.KANBAN && (
+             <div className="p-4 flex gap-4 overflow-x-auto h-[calc(100vh-280px)]">
+                {(() => {
+                   const statusField = moduleConfig.fields.find(f => f.key === 'status');
+                   if (!statusField || !statusField.options) return <Empty description="فیلد وضعیت یافت نشد" />;
+                   
+                   return statusField.options.map(opt => (
+                      <div key={opt.value} className="min-w-[280px] w-[280px] flex flex-col h-full bg-gray-50 dark:bg-[#1f1f1f] rounded-xl border border-gray-200 dark:border-gray-800">
+                         <div className="p-3 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center sticky top-0 bg-inherit rounded-t-xl z-10">
+                            <div className="flex items-center gap-2">
+                               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: opt.color || '#ccc' }}></div>
+                               <span className="font-bold text-sm">{opt.label}</span>
+                            </div>
+                            <Tag>{filteredData.filter(d => d.status === opt.value).length}</Tag>
+                         </div>
+                         <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+                            {filteredData.filter(d => d.status === opt.value).map(item => renderCard(item))}
+                         </div>
                       </div>
-                  ) : <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem]"><Empty description="فیلد گروه‌بندی (وضعیت/دسته‌بندی) یافت نشد" /></div>}
-              </div>
-           )
-          }
-      </div>
+                   ));
+                })()}
+             </div>
+          )}
+       </div>
 
-      <Drawer title={`افزودن ${moduleConfig.titles.fa}`} width={720} onClose={() => setIsDrawerOpen(false)} open={isDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={1000}>
-        <SmartForm moduleConfig={moduleConfig} mode="create" onSuccess={() => { setIsDrawerOpen(false); fetchData(); }} onCancel={() => setIsDrawerOpen(false)} />
-      </Drawer>
-      <Drawer title={`ویرایش گروهی`} width={720} onClose={() => setIsBulkEditDrawerOpen(false)} open={isBulkEditDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={1000}>
-        <SmartForm moduleConfig={moduleConfig} mode="edit" recordId={selectedRowKeys[0] as string} onSuccess={() => { setIsBulkEditDrawerOpen(false); setSelectedRowKeys([]); fetchData(); }} onCancel={() => setIsBulkEditDrawerOpen(false)} />
-      </Drawer>
-      
-      <style>{`.custom-scrollbar::-webkit-scrollbar { width: 4px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; } .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; }`}</style>
+       <Drawer
+         title={`افزودن ${moduleConfig.titles.fa}`}
+         width={720}
+         open={isCreateDrawerOpen}
+         onClose={() => setIsCreateDrawerOpen(false)}
+         destroyOnClose
+         styles={{ body: { padding: 0 } }} 
+       >
+          <SmartForm 
+            module={moduleConfig}
+            visible={true}
+            onCancel={() => setIsCreateDrawerOpen(false)}
+            onSave={async (val) => { await saveToSupabase(val); handleFormSuccess(); }}
+            embedded={true} 
+          />
+       </Drawer>
+
+       <Drawer
+         title={isBulkEditMode ? 'ویرایش گروهی' : `ویرایش ${editingRecord?.name || ''}`}
+         width={720}
+         open={isEditDrawerOpen}
+         onClose={() => setIsEditDrawerOpen(false)}
+         destroyOnClose
+         styles={{ body: { padding: 0 } }}
+       >
+          <SmartForm 
+            module={moduleConfig}
+            visible={true}
+            initialValues={editingRecord || {}}
+            onCancel={() => setIsEditDrawerOpen(false)}
+            onSave={async (val) => { await saveToSupabase(val); handleFormSuccess(); }}
+            isBulkEdit={isBulkEditMode}
+            embedded={true}
+          />
+       </Drawer>
+
     </div>
   );
 };

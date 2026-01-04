@@ -6,6 +6,12 @@ import ModuleList from './pages/ModuleList';
 import ModuleShow from './pages/ModuleShow';
 import SettingsPage from './pages/Settings/SettingsPage';
 import ProfilePage from './pages/ProfilePage';
+import dayjs from 'dayjs';
+import jalaliday from 'jalaliday';
+
+// تنظیمات پلاگین تاریخ شمسی
+dayjs.extend(jalaliday);
+dayjs.calendar('jalali');
 
 function App() {
   const [isDarkMode, setIsDarkMode] = React.useState(false);

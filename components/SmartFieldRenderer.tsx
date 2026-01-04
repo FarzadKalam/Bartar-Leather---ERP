@@ -2,14 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { 
   Input, 
   Select, 
-  DatePicker, 
   Button, 
   Modal, 
   Tag,
   InputNumber,
   Checkbox,
-  message
+  message,
+  ConfigProvider
 } from 'antd';
+// ایمپورت کامپوننت‌های تاریخ شمسی
+import { DatePicker as DatePickerJalali } from "antd-jalali";
+import fa_IR from "antd/lib/locale/fa_IR";
+
 import { 
   CheckOutlined, 
   CloseOutlined, 
@@ -36,18 +40,22 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
   onSave,
   readonly = false,
   className = '',
-  showLabel = true
+  showLabel = true,
+  forceEditMode = false
 }) => {
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(forceEditMode);
   const [value, setValue] = useState(initialValue);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (forceEditMode) setIsEditing(true);
+  }, [forceEditMode]);
+  
   useEffect(() => {
     setValue(initialValue);
   }, [initialValue]);
 
   const handleSave = () => {
-    // Basic validation check (can be expanded based on props)
     if (type === FieldType.NUMBER && isNaN(Number(value))) {
         message.error('لطفا عدد صحیح وارد کنید');
         return;
@@ -55,6 +63,13 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
     onSave(value);
     setIsEditing(false);
   };
+
+  const handleChange = (val: any) => {
+      setValue(val);
+      if (forceEditMode) {
+          onSave(val); // بلافاصله آپدیت کن تا SmartForm باخبر شود
+      }
+  }; // <--- این براکت در کد شما جا افتاده بود
 
   const handleClear = () => {
     if (type === FieldType.MULTI_SELECT || type === FieldType.CHECKLIST) {
@@ -106,9 +121,15 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
         return <span className={`text-gray-800 dark:text-gray-200 ${className}`}>{selectedOption ? selectedOption.label : value}</span>;
       case FieldType.RELATION:
         return <span className={`text-leather-500 hover:underline cursor-pointer ${className}`}>{value}</span>;
+      
       case FieldType.DATE:
       case FieldType.DATETIME:
-        return <span className={`text-gray-600 dark:text-gray-300 font-mono ${className}`}>{dayjs(value).format('YYYY-MM-DD')}</span>;
+         const format = type === FieldType.DATETIME ? 'YYYY/MM/DD HH:mm' : 'YYYY/MM/DD';
+         if (!dayjs(value).isValid()) return <span className="text-red-400 text-xs">تاریخ نامعتبر</span>;
+         return <span className={`text-gray-600 dark:text-gray-300 font-mono ${className} dir-ltr inline-block`}>
+            {dayjs(value).calendar('jalali').locale('fa').format(format)}
+         </span>;
+
       case FieldType.NUMBER:
       case FieldType.STOCK:
          return <span className={`text-gray-800 dark:text-gray-200 font-medium font-sans ${className}`}>{formatNumber(value)}</span>;
@@ -127,9 +148,9 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
   const renderInput = () => {
     switch (type) {
       case FieldType.TEXT:
-        return <Input value={value} onChange={(e) => setValue(e.target.value)} size="small" className="text-sm" autoFocus />;
+        return <Input value={value} onChange={(e) => handleChange(e.target.value)} size="small" className="text-sm" autoFocus />;
       case FieldType.CHECKBOX:
-        return <Checkbox checked={value} onChange={(e) => setValue(e.target.checked)} />;
+        return <Checkbox checked={value} onChange={(e) => handleChange(e.target.checked)} />;
       case FieldType.NUMBER:
       case FieldType.PRICE:
       case FieldType.STOCK:
@@ -137,7 +158,7 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
         return (
           <InputNumber 
             value={value} 
-            onChange={(val) => setValue(val)} 
+            onChange={(val) => handleChange(val)} 
             className="w-full text-sm" 
             size="small"
             formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
@@ -151,7 +172,7 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
             mode="multiple"
             style={{ width: '100%' }}
             value={value}
-            onChange={setValue}
+            onChange={handleChange}
             options={options}
             size="small"
             autoFocus
@@ -164,14 +185,30 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
             <Select
               style={{ width: '100%' }}
               value={value}
-              onChange={setValue}
+              onChange={handleChange}
               options={options}
               size="small"
               autoFocus
             />
           );
+      
       case FieldType.DATE:
-        return <DatePicker className="w-full" size="small" onChange={(d, dateString) => setValue(dateString)} />;
+      case FieldType.DATETIME:
+        return (
+          <ConfigProvider locale={fa_IR} direction="rtl">
+             <DatePickerJalali 
+                className="w-full" 
+                size="small" 
+                showTime={type === FieldType.DATETIME}
+                value={value ? dayjs(value) : null}
+                onChange={(d) => {
+                   const isoString = d ? d.calendar('gregorian').toISOString() : null;
+                   handleChange(isoString);
+                }} 
+             />
+          </ConfigProvider>
+        );
+
       case FieldType.RELATION:
         return (
           <div className="flex gap-1 w-full">
@@ -182,21 +219,21 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
               onClick={() => setIsModalOpen(true)}
               className="border-leather-500 text-leather-500" 
             />
-            {/* Relation Modal Mockup */}
             <Modal 
               title={`انتخاب ${relationModule}`} 
               open={isModalOpen} 
               onCancel={() => setIsModalOpen(false)}
               footer={null}
               width={400}
+              zIndex={5000} // بالاتر از همه
             >
                <Input.Search placeholder="جستجو..." className="mb-4" />
                <div className="flex flex-col gap-2">
-                 {['تامین کننده الف', 'تامین کننده ب'].map(item => (
+                 {['گزینه تستی ۱', 'گزینه تستی ۲'].map(item => (
                    <div 
                     key={item} 
                     className="p-2 bg-gray-50 dark:bg-dark-surface rounded hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer flex justify-between text-sm transition-colors"
-                    onClick={() => { setValue(item); setIsModalOpen(false); }}
+                    onClick={() => { handleChange(item); setIsModalOpen(false); }}
                    >
                      <span>{item}</span>
                    </div>
@@ -206,7 +243,7 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
           </div>
         );
       default:
-        return <Input value={value} onChange={(e) => setValue(e.target.value)} size="small" />;
+        return <Input value={value} onChange={(e) => handleChange(e.target.value)} size="small" />;
     }
   };
 
@@ -236,29 +273,32 @@ const SmartFieldRenderer: React.FC<SmartFieldProps> = ({
           <div className="mb-1">
             {renderInput()}
           </div>
-          <div className="flex items-center gap-1 justify-end">
-              <Button 
-                size="small" 
-                type="text" 
-                className="w-6 h-6 flex items-center justify-center text-green-500 hover:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/20"
-                icon={<CheckOutlined className="text-xs" />} 
-                onClick={handleSave} 
-              />
-              <Button 
-                size="small" 
-                type="text"
-                className="w-6 h-6 flex items-center justify-center text-red-500 hover:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/20"
-                icon={<DeleteOutlined className="text-xs" />} 
-                onClick={handleClear}
-              />
-              <Button 
-                size="small" 
-                type="text" 
-                className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-white"
-                icon={<CloseOutlined className="text-xs" />} 
-                onClick={handleCancel}
-              />
-          </div>
+          {/* دکمه‌های عملیات فقط اگر forceEditMode نباشد نمایش داده شوند */}
+          {!forceEditMode && (
+            <div className="flex items-center gap-1 justify-end">
+                <Button 
+                  size="small" 
+                  type="text" 
+                  className="w-6 h-6 flex items-center justify-center text-green-500 hover:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/20"
+                  icon={<CheckOutlined className="text-xs" />} 
+                  onClick={handleSave} 
+                />
+                <Button 
+                  size="small" 
+                  type="text"
+                  className="w-6 h-6 flex items-center justify-center text-red-500 hover:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/20"
+                  icon={<DeleteOutlined className="text-xs" />} 
+                  onClick={handleClear}
+                />
+                <Button 
+                  size="small" 
+                  type="text" 
+                  className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-white"
+                  icon={<CloseOutlined className="text-xs" />} 
+                  onClick={handleCancel}
+                />
+            </div>
+          )}
         </div>
       )}
     </div>

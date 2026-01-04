@@ -3,6 +3,7 @@ import { productsModule } from './modules/productsConfig';
 import { productionBomModule, productionOrderModule } from './modules/productionConfig';
 import { customerModule } from './modules/customerConfig';
 import { supplierModule } from './modules/supplierConfig';
+import { tasksModule } from './modules/tasksConfig';
 
 export const MODULES: Record<string, ModuleDefinition> = {
   products: productsModule,
@@ -10,4 +11,5 @@ export const MODULES: Record<string, ModuleDefinition> = {
   production_orders: productionOrderModule,
   customers: customerModule,
   suppliers: supplierModule,
+  tasks: tasksModule,
 };

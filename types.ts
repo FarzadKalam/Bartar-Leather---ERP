@@ -9,6 +9,7 @@ export enum ModuleNature {
   PRODUCTION = 'production',   
   WAREHOUSE = 'warehouse',
   CRM = 'crm',
+  TASK = 'task',
   FINANCE = 'finance'
 }
 
@@ -94,6 +95,76 @@ export enum LogicOperator {
   IS_FALSE = 'is_false'
 }
 
+export enum FilterOperator {
+  // عمومی
+  EQUALS = 'eq',
+  NOT_EQUALS = 'neq',
+  
+  // متنی
+  CONTAINS = 'ilike',
+  
+  // عددی / تاریخ
+  GREATER_THAN = 'gt',
+  LESS_THAN = 'lt',
+  GREATER_THAN_OR_EQUAL = 'gte',
+  LESS_THAN_OR_EQUAL = 'lte',
+  
+  // لیستی
+  IN = 'in', 
+  IS_NULL = 'is', // برای خالی بودن
+}
+
+// ساختار یک شرط فیلتر
+export interface FilterCondition {
+  field: string;
+  operator: FilterOperator;
+  value: any;
+}
+// به انتهای فایل types.ts اضافه یا جایگزین کن
+
+// انواع عملگرهای فیلتر (تکمیل شده)
+
+// نگاشت عملگرها به نوع فیلد (برای نمایش در UI)
+export const OPERATORS_BY_TYPE: Record<string, { label: string; value: FilterOperator }[]> = {
+  text: [
+    { label: 'شامل', value: FilterOperator.CONTAINS },
+    { label: 'برابر با', value: FilterOperator.EQUALS },
+    { label: 'مخالف', value: FilterOperator.NOT_EQUALS },
+  ],
+  number: [
+    { label: 'برابر با', value: FilterOperator.EQUALS },
+    { label: 'بزرگتر از', value: FilterOperator.GREATER_THAN },
+    { label: 'کوچکتر از', value: FilterOperator.LESS_THAN },
+    { label: 'بزرگتر مساوی', value: FilterOperator.GREATER_THAN_OR_EQUAL },
+    { label: 'کوچکتر مساوی', value: FilterOperator.LESS_THAN_OR_EQUAL },
+  ],
+  date: [
+    { label: 'برابر با', value: FilterOperator.EQUALS },
+    { label: 'بعد از', value: FilterOperator.GREATER_THAN },
+    { label: 'قبل از', value: FilterOperator.LESS_THAN },
+  ],
+  select: [
+    { label: 'برابر با', value: FilterOperator.EQUALS },
+    { label: 'مخالف', value: FilterOperator.NOT_EQUALS },
+  ],
+  boolean: [
+    { label: 'برابر با', value: FilterOperator.EQUALS },
+  ]
+};
+
+export interface FilterCondition {
+  id: string; // برای کلید React
+  field: string;
+  operator: FilterOperator;
+  value: any;
+}
+
+export interface ViewConfig {
+  columns: string[]; 
+  filters: FilterCondition[]; 
+  sort?: { field: string; order: 'asc' | 'desc' };
+}
+
 // --- CORE INTERFACES ---
 
 export interface SelectOption {
@@ -113,6 +184,7 @@ export interface SmartFieldProps {
   className?: string;
   showLabel?: boolean;
   error?: string;
+  forceEditMode?: boolean;
 }
 
 export interface FieldAccess {
@@ -302,21 +374,7 @@ export interface ProductionOrder extends BaseEntity {
 // ... کدهای قبلی ...
 
 // انواع عملگرهای فیلتر
-export enum FilterOperator {
-  EQUALS = 'eq',
-  CONTAINS = 'ilike', // برای جستجوی متنی
-  GREATER_THAN = 'gt',
-  LESS_THAN = 'lt',
-  BETWEEN = 'between', // برای تاریخ و قیمت
-  IN = 'in', // برای لیست‌های انتخابی
-}
 
-// ساختار یک شرط فیلتر
-export interface FilterCondition {
-  field: string;
-  operator: FilterOperator;
-  value: any;
-}
 
 // ساختار ذخیره شده در دیتابیس برای هر نما
 export interface ViewConfig {
@@ -332,3 +390,4 @@ export interface SavedView {
   is_default: boolean;
   config: ViewConfig;
 }
+
