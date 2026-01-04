@@ -1,59 +1,87 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { ConfigProvider, App as AntApp, theme } from 'antd';
-import Layout from './components/Layout';
-import ModuleList from './pages/ModuleList';
-import ModuleShow from './pages/ModuleShow';
-import SettingsPage from './pages/Settings/SettingsPage';
-import ProfilePage from './pages/ProfilePage';
-import dayjs from 'dayjs';
-import jalaliday from 'jalaliday';
+import React from "react";
+import { Refine } from "@refinedev/core";
+import { notificationProvider, ErrorComponent } from "@refinedev/antd";
+import { dataProvider } from "@refinedev/supabase";
+import routerBindings, { NavigateToResource, UnsavedChangesNotifier, DocumentTitleHandler } from "@refinedev/react-router-v6";
+import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
+import { ConfigProvider, App as AntdApp } from "antd";
+import faIR from "antd/lib/locale/fa_IR";
+import SettingsPage from "./pages/Settings/SettingsPage";
 
-// تنظیمات پلاگین تاریخ شمسی
-dayjs.extend(jalaliday);
-dayjs.calendar('jalali');
+// فایل‌های پروژه
+import { supabase } from "./supabaseClient";
+import { MODULES } from "./moduleRegistry";
+import Layout from "./components/Layout";
+
+// صفحات (مدل قدیمی - فعلاً نگه می‌داریم تا سایت بالا بیاد)
+//import ModuleList from "./pages/ModuleList";
+import { ModuleListRefine } from "./pages/ModuleList_Refine";
+import { ModuleCreate } from "./pages/ModuleCreate";
+import ModuleShow from "./pages/ModuleShow";
 
 function App() {
-  const [isDarkMode, setIsDarkMode] = React.useState(false);
-
-  const toggleTheme = () => {
-    setIsDarkMode(!isDarkMode);
-    if (!isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  };
+  // تبدیل ماژول‌های پروژه به فرمت استاندارد Refine
+  const resources = Object.values(MODULES).map((mod) => ({
+    name: mod.id, 
+    list: `/${mod.id}`,
+    show: `/${mod.id}/:id`,
+    create: `/${mod.id}/create`,
+    edit: `/${mod.id}/:id`,
+    meta: {
+      label: mod.titles.fa,
+    },
+  }));
 
   return (
-    <ConfigProvider
-      direction="rtl"
-      theme={{
-        token: { fontFamily: 'Vazirmatn' },
-        algorithm: isDarkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
-      }}
-    >
-      <AntApp> 
-        <BrowserRouter>
-          {/* این Layout اصلی است و شامل هدر می‌شود */}
-          <Layout isDarkMode={isDarkMode} toggleTheme={toggleTheme}>
+    <BrowserRouter>
+      <ConfigProvider 
+        direction="rtl" 
+        locale={faIR} 
+        theme={{
+          token: {
+            colorPrimary: '#c58f60', 
+            fontFamily: 'Vazirmatn, sans-serif',
+          }
+        }}
+      >
+        <AntdApp>
+          <Refine
+            dataProvider={dataProvider(supabase)} 
+            notificationProvider={notificationProvider}
+            routerProvider={routerBindings}
+            resources={resources} 
+            options={{
+              syncWithLocation: true, 
+              warnWhenUnsavedChanges: true, 
+              projectId: "bartar-leather-erp",
+            }}
+          >
             <Routes>
-              <Route path="/" element={<div className="p-10">داشبورد (به زودی)</div>} />
-              
-              {/* مسیریابی داینامیک */}
-              <Route path="/:moduleId" element={<ModuleList />} />
-              <Route path="/:moduleId/:id" element={<ModuleShow />} />
-              
-              {/* --- اصلاح شد: حذف Layout اضافه از اینجا --- */}
-              <Route path="/settings" element={<SettingsPage />} />
-              
-              {/* --- اصلاح شد: حذف Layout اضافه از اینجا --- */}
-              <Route path="/profile/:id?" element={<ProfilePage />} />
+              {/* لایه اصلی اپلیکیشن */}
+              <Route element={<Layout><Outlet /></Layout>}>
+                
+                {/* روت اصلی: هدایت به محصولات */}
+                <Route index element={<NavigateToResource resource="products" />} />
+
+                {/* روت‌های داینامیک ماژول‌ها */}
+                <Route path="/:moduleId">
+                  <Route index element={<ModuleListRefine />} />
+                  <Route path="create" element={<ModuleCreate />} />
+                  <Route path="create" element={<ModuleShow />} />
+                  <Route path=":id" element={<ModuleShow />} />
+                  <Route path=":id/edit" element={<ModuleShow />} />
+                </Route>
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="*" element={<ErrorComponent />} />
+              </Route>
             </Routes>
-          </Layout>
-        </BrowserRouter>
-      </AntApp>
-    </ConfigProvider>
+            
+            <UnsavedChangesNotifier />
+            <DocumentTitleHandler />
+          </Refine>
+        </AntdApp>
+      </ConfigProvider>
+    </BrowserRouter>
   );
 }
 

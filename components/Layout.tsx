@@ -82,10 +82,10 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
   const userMenu = {
     items: [
       {
-  key: 'profile',
-  label: <span onClick={() => navigate('/profile')}>پروفایل کاربری</span>, // لینک به پروفایل
-  icon: <UserOutlined />,
-},
+        key: 'profile',
+        label: <span onClick={() => navigate('/profile')}>پروفایل کاربری</span>,
+        icon: <UserOutlined />,
+      },
       { key: 'logout', label: 'خروج', icon: <LogoutOutlined />, danger: true },
     ],
   };
@@ -135,7 +135,6 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
         theme={isDarkMode ? 'dark' : 'light'}
         width={260}
       >
-        {/* لوگو */}
         <div className="h-16 flex items-center justify-center border-b border-gray-200 dark:border-gray-800 overflow-hidden px-4 sticky top-0 bg-inherit z-10">
           <div className={`transition-all duration-300 font-black text-lg text-leather-500 tracking-tighter whitespace-nowrap ${collapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'}`}>
             MEHRBANOO <span className="text-gray-800 dark:text-white">LEATHER</span>
@@ -143,7 +142,6 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
           {collapsed && !isMobile && <div className="text-leather-500 font-black text-2xl absolute">B</div>}
         </div>
 
-        {/* منو با قابلیت اسکرول */}
         <div style={{ height: 'calc(100vh - 128px)', overflowY: 'auto' }}>
             <Menu
             theme={isDarkMode ? 'dark' : 'light'}
@@ -158,7 +156,6 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
             />
         </div>
 
-        {/* دکمه پایین سایدبار (فقط در دسکتاپ) */}
         {!isMobile && (
             <div className="absolute bottom-0 w-full h-16 border-t border-gray-200 dark:border-gray-800 flex items-center justify-center bg-inherit">
                 <Button 
@@ -201,7 +198,12 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
             />
             <div className="w-[1px] h-6 bg-gray-300 dark:bg-gray-700 mx-1"></div>
             <Badge count={5} size="small" color="#c58f60"><Button type="text" shape="circle" icon={<BellOutlined className="text-gray-500 dark:text-gray-400" />} /></Badge>
-            <Dropdown menu={userMenu} placement="bottomLeft"><Avatar size="small" src="https://i.pravatar.cc/150?u=a1" className="border border-leather-500 cursor-pointer shadow-lg" /></Dropdown>
+            {/* اصلاح: قرار دادن آواتار در div برای رفع وارنینگ */}
+            <Dropdown menu={userMenu} placement="bottomLeft">
+                <div>
+                   <Avatar size="small" src="https://i.pravatar.cc/150?u=a1" className="border border-leather-500 cursor-pointer shadow-lg" />
+                </div>
+            </Dropdown>
           </div>
         </Header>
 

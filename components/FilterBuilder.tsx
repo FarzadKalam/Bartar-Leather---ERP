@@ -1,160 +1,171 @@
 import React from 'react';
-import { Button, Select, Input, InputNumber, DatePicker, Row, Col, Space } from 'antd';
+import { Button, Input, Select, InputNumber, Switch } from 'antd';
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { 
-  ModuleDefinition, 
-  FilterCondition, 
-  FilterOperator, 
-  FieldType, 
-  OPERATORS_BY_TYPE 
-} from '../types';
-import dayjs from 'dayjs';
-import { DatePicker as DatePickerJalali } from "antd-jalali";
-import fa_IR from "antd/lib/locale/fa_IR";
+import { ModuleDefinition, FieldType } from '../types';
+
+interface FilterItem {
+  id: string;
+  field: string;
+  operator: string;
+  value: any;
+}
 
 interface FilterBuilderProps {
   module: ModuleDefinition;
-  filters: FilterCondition[];
-  onChange: (filters: FilterCondition[]) => void;
+  filters: FilterItem[];
+  onChange: (filters: FilterItem[]) => void;
 }
 
 const FilterBuilder: React.FC<FilterBuilderProps> = ({ module, filters, onChange }) => {
-
-  const handleAdd = () => {
-    // اولین فیلد ماژول رو به عنوان پیش‌فرض انتخاب میکنیم
-    const defaultField = module.fields[0];
-    const newFilter: FilterCondition = {
-      id: Math.random().toString(36).substr(2, 9),
-      field: defaultField.key,
-      operator: FilterOperator.EQUALS, // یا عملگر پیش فرض بر اساس نوع
+  
+  const addFilter = () => {
+    // اصلاح شده: اگر ستون جدول مشخص نبود، اولین فیلد موجود را بردار
+    const defaultField = module.fields.find(f => f.isTableColumn) || module.fields[0];
+    
+    const newFilter: FilterItem = {
+      id: Date.now().toString(),
+      field: defaultField?.key || '',
+      operator: 'eq', // پیش فرض: برابر
       value: ''
     };
     onChange([...filters, newFilter]);
   };
 
-  const handleRemove = (id: string) => {
+  const removeFilter = (id: string) => {
     onChange(filters.filter(f => f.id !== id));
   };
 
-  const handleUpdate = (id: string, key: keyof FilterCondition, val: any) => {
-    const updatedFilters = filters.map(f => {
-      if (f.id !== id) return f;
-      
-      // اگر فیلد عوض شد، باید مقدار و عملگر رو ریست کنیم تا با نوع فیلد جدید بخونه
-      if (key === 'field') {
-         const newFieldDef = module.fields.find(field => field.key === val);
-         let defaultOp = FilterOperator.EQUALS;
-         if (newFieldDef?.type === FieldType.TEXT) defaultOp = FilterOperator.CONTAINS;
-         
-         return { ...f, field: val, operator: defaultOp, value: '' };
+  const updateFilter = (id: string, key: keyof FilterItem, val: any) => {
+    const newFilters = filters.map(f => {
+      if (f.id === id) {
+        if (key === 'field') {
+             // وقتی فیلد عوض میشه، مقدار و اپراتور رو ریست کن
+             return { ...f, field: val, operator: 'eq', value: '' };
+        }
+        return { ...f, [key]: val };
       }
-
-      return { ...f, [key]: val };
+      return f;
     });
-    onChange(updatedFilters);
+    onChange(newFilters);
   };
 
-  // رندر کردن ورودی مقدار (Value Input) بر اساس نوع فیلد
-  const renderValueInput = (filter: FilterCondition, fieldDef: any) => {
-    if (!fieldDef) return <Input disabled />;
+  const getOperators = (fieldKey: string) => {
+    const field = module.fields.find(f => f.key === fieldKey);
+    if (!field) return [{ label: 'برابر با', value: 'eq' }];
 
-    // 1. اگر فیلد سلکتی یا وضعیت است
-    if (fieldDef.type === FieldType.SELECT || fieldDef.type === FieldType.STATUS || fieldDef.type === FieldType.MULTI_SELECT) {
+    switch (field.type) {
+      case FieldType.TEXT:
+      case FieldType.TEXTAREA:
+        return [
+          { label: 'شامل (متن)', value: 'contains' },
+          { label: 'دقیقاً برابر', value: 'eq' },
+        ];
+      case FieldType.NUMBER:
+      case FieldType.PRICE:
+      case FieldType.STOCK:
+        return [
+          { label: 'برابر با', value: 'eq' },
+          { label: 'بزرگتر از', value: 'gt' },
+          { label: 'کوچکتر از', value: 'lt' },
+          { label: 'بزرگتر مساوی', value: 'gte' },
+          { label: 'کوچکتر مساوی', value: 'lte' },
+        ];
+      case FieldType.SELECT:
+      case FieldType.STATUS:
+      case FieldType.BOOLEAN:
+        return [
+          { label: 'برابر با', value: 'eq' },
+          { label: 'نابرابر با', value: 'ne' },
+        ];
+      default:
+        return [{ label: 'برابر با', value: 'eq' }];
+    }
+  };
+
+  const renderValueInput = (filter: FilterItem) => {
+    const field = module.fields.find(f => f.key === filter.field);
+    if (!field) return <Input disabled />;
+
+    if (field.type === FieldType.BOOLEAN) {
+        return <Switch checked={!!filter.value} onChange={(v) => updateFilter(filter.id, 'value', v)} />;
+    }
+
+    if ((field.type === FieldType.SELECT || field.type === FieldType.STATUS) && field.options) {
         return (
             <Select
-                className="w-full"
+                style={{ width: 180 }}
                 value={filter.value}
-                onChange={v => handleUpdate(filter.id, 'value', v)}
-                options={fieldDef.options}
-                placeholder="انتخاب گزینه..."
+                onChange={(v) => updateFilter(filter.id, 'value', v)}
+                options={field.options}
+                placeholder="انتخاب کنید"
             />
         );
     }
 
-    // 2. اگر فیلد تاریخ است (شمسی)
-    if (fieldDef.type === FieldType.DATE || fieldDef.type === FieldType.DATETIME) {
-        return (
-            // @ts-ignore
-            <DatePickerJalali
-                className="w-full"
-                value={filter.value ? dayjs(filter.value) : null}
-                onChange={(date) => {
-                    // ذخیره به صورت ISO میلادی
-                    const val = date ? date.toISOString() : null;
-                    handleUpdate(filter.id, 'value', val);
-                }}
-                locale={fa_IR}
-            />
-        );
-    }
-
-    // 3. اگر فیلد عددی یا پول است
-    if (fieldDef.type === FieldType.NUMBER || fieldDef.type === FieldType.PRICE || fieldDef.type === FieldType.STOCK) {
+    if (field.type === FieldType.NUMBER || field.type === FieldType.PRICE || field.type === FieldType.STOCK) {
         return (
             <InputNumber
-                className="w-full"
+                style={{ width: 180 }}
                 value={filter.value}
-                onChange={v => handleUpdate(filter.id, 'value', v)}
-                formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                parser={(value) => value?.replace(/\$\s?|(,*)/g, '') as unknown as number}
+                onChange={(v) => updateFilter(filter.id, 'value', v)}
+                placeholder="عدد وارد کنید"
             />
         );
     }
 
-    // 4. پیش فرض (متن)
     return (
-        <Input 
-            value={filter.value} 
-            onChange={e => handleUpdate(filter.id, 'value', e.target.value)} 
+        <Input
+            style={{ width: 180 }}
+            value={filter.value}
+            onChange={(e) => updateFilter(filter.id, 'value', e.target.value)}
             placeholder="مقدار..."
         />
     );
   };
 
   return (
-    <div className="flex flex-col gap-3 w-full">
-      {filters.map((filter) => {
-        const fieldDef = module.fields.find(f => f.key === filter.field);
-        
-        // پیدا کردن لیست عملگرهای مجاز برای این نوع فیلد
-        let allowedOps = OPERATORS_BY_TYPE['text']; // پیش فرض
-        if (fieldDef) {
-            if ([FieldType.NUMBER, FieldType.PRICE, FieldType.STOCK].includes(fieldDef.type)) allowedOps = OPERATORS_BY_TYPE['number'];
-            else if ([FieldType.DATE, FieldType.DATETIME].includes(fieldDef.type)) allowedOps = OPERATORS_BY_TYPE['date'];
-            else if ([FieldType.SELECT, FieldType.STATUS].includes(fieldDef.type)) allowedOps = OPERATORS_BY_TYPE['select'];
-        }
+    <div className="flex flex-col gap-3">
+      {filters.length === 0 && (
+          <div className="text-center text-gray-400 py-6 border-2 border-dashed border-gray-100 rounded-xl bg-gray-50/50">
+              هنوز شرطی تعریف نکرده‌اید
+          </div>
+      )}
 
-        return (
-          <Row key={filter.id} gutter={8} align="middle" className="bg-gray-50 p-2 rounded border border-gray-200">
-            <Col span={8}>
-              <Select
-                className="w-full"
-                value={filter.field}
-                onChange={v => handleUpdate(filter.id, 'field', v)}
-                options={module.fields.map(f => ({ label: f.labels.fa, value: f.key }))}
-                showSearch
-                filterOption={(input, option) => (option?.label ?? '').includes(input)}
-              />
-            </Col>
-            <Col span={5}>
-              <Select
-                className="w-full"
-                value={filter.operator}
-                onChange={v => handleUpdate(filter.id, 'operator', v)}
-                options={allowedOps}
-              />
-            </Col>
-            <Col span={9}>
-                {renderValueInput(filter, fieldDef)}
-            </Col>
-            <Col span={2}>
-              <Button danger type="text" icon={<DeleteOutlined />} onClick={() => handleRemove(filter.id)} />
-            </Col>
-          </Row>
-        );
-      })}
+      {filters.map((filter, index) => (
+        <div key={filter.id || index} className="flex flex-wrap items-center gap-2 bg-gray-50 p-3 rounded-xl border border-gray-200 animate-fadeIn">
+          <span className="text-xs text-gray-400 w-5 font-mono">{index + 1}.</span>
+          
+          <Select
+            style={{ width: 180 }}
+            value={filter.field}
+            onChange={(val) => updateFilter(filter.id, 'field', val)}
+            options={module.fields.map(f => ({ label: f.labels.fa, value: f.key }))}
+            showSearch
+            optionFilterProp="label"
+          />
 
-      <Button type="dashed" icon={<PlusOutlined />} onClick={handleAdd} block>
+          <Select
+            style={{ width: 130 }}
+            value={filter.operator}
+            onChange={(val) => updateFilter(filter.id, 'operator', val)}
+            options={getOperators(filter.field)}
+          />
+
+          <div className="flex-1 min-w-[150px]">
+             {renderValueInput(filter)}
+          </div>
+
+          <Button 
+            danger 
+            type="text" 
+            shape="circle"
+            icon={<DeleteOutlined />} 
+            onClick={() => removeFilter(filter.id)} 
+          />
+        </div>
+      ))}
+
+      <Button type="dashed" block icon={<PlusOutlined />} onClick={addFilter} className="mt-2 h-10 rounded-xl border-gray-300 text-gray-500 hover:text-leather-600 hover:border-leather-400">
         افزودن شرط جدید
       </Button>
     </div>

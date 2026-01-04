@@ -1,5 +1,6 @@
+import { LogicalFilter } from "@refinedev/core";
 
-// --- ENUMS & CONSTANTS ---
+// --- ENUMS ---
 
 export enum ModuleNature {
   STANDARD = 'standard',       
@@ -51,13 +52,8 @@ export enum FieldType {
   STATUS = 'status',  
   PHONE = 'phone',
   JSON = 'json',
-  READONLY_LOOKUP = 'readonly_lookup' // <--- جدید برای ستون‌های نمایشی جدول
-}
-
-export interface RelationConfig {
-  targetModule: string;
-  targetField: string;
-  filter?: Record<string, any>; // <--- جدید برای فیلتر کردن لیست (مثلا فقط چرم‌ها)
+  TAGS = 'tags',
+  READONLY_LOOKUP = 'readonly_lookup'
 }
 
 export enum FieldNature {
@@ -73,8 +69,9 @@ export enum FieldLocation {
 }
 
 export enum BlockType {
-  FIELD_GROUP = 'field_group', // Default: A group of fields
-  TABLE = 'table'              // New: A table of items (e.g. BOM Items, Invoice Items)
+  DEFAULT = 'default', // برای سازگاری با کدهای قبلی
+  FIELD_GROUP = 'field_group',
+  TABLE = 'table'
 }
 
 export enum UserRole {
@@ -86,8 +83,8 @@ export enum UserRole {
 }
 
 export enum LogicOperator {
-  EQUALS = 'eq',
-  NOT_EQUALS = 'neq',
+  EQUALS = 'equals',
+  NOT_EQUALS = 'not_equals',
   GREATER_THAN = 'gt',
   LESS_THAN = 'lt',
   CONTAINS = 'contains',
@@ -96,100 +93,23 @@ export enum LogicOperator {
 }
 
 export enum FilterOperator {
-  // عمومی
   EQUALS = 'eq',
   NOT_EQUALS = 'neq',
-  
-  // متنی
   CONTAINS = 'ilike',
-  
-  // عددی / تاریخ
   GREATER_THAN = 'gt',
   LESS_THAN = 'lt',
   GREATER_THAN_OR_EQUAL = 'gte',
   LESS_THAN_OR_EQUAL = 'lte',
-  
-  // لیستی
   IN = 'in', 
-  IS_NULL = 'is', // برای خالی بودن
+  IS_NULL = 'is',
 }
 
-// ساختار یک شرط فیلتر
-export interface FilterCondition {
-  field: string;
-  operator: FilterOperator;
-  value: any;
-}
-// به انتهای فایل types.ts اضافه یا جایگزین کن
-
-// انواع عملگرهای فیلتر (تکمیل شده)
-
-// نگاشت عملگرها به نوع فیلد (برای نمایش در UI)
-export const OPERATORS_BY_TYPE: Record<string, { label: string; value: FilterOperator }[]> = {
-  text: [
-    { label: 'شامل', value: FilterOperator.CONTAINS },
-    { label: 'برابر با', value: FilterOperator.EQUALS },
-    { label: 'مخالف', value: FilterOperator.NOT_EQUALS },
-  ],
-  number: [
-    { label: 'برابر با', value: FilterOperator.EQUALS },
-    { label: 'بزرگتر از', value: FilterOperator.GREATER_THAN },
-    { label: 'کوچکتر از', value: FilterOperator.LESS_THAN },
-    { label: 'بزرگتر مساوی', value: FilterOperator.GREATER_THAN_OR_EQUAL },
-    { label: 'کوچکتر مساوی', value: FilterOperator.LESS_THAN_OR_EQUAL },
-  ],
-  date: [
-    { label: 'برابر با', value: FilterOperator.EQUALS },
-    { label: 'بعد از', value: FilterOperator.GREATER_THAN },
-    { label: 'قبل از', value: FilterOperator.LESS_THAN },
-  ],
-  select: [
-    { label: 'برابر با', value: FilterOperator.EQUALS },
-    { label: 'مخالف', value: FilterOperator.NOT_EQUALS },
-  ],
-  boolean: [
-    { label: 'برابر با', value: FilterOperator.EQUALS },
-  ]
-};
-
-export interface FilterCondition {
-  id: string; // برای کلید React
-  field: string;
-  operator: FilterOperator;
-  value: any;
-}
-
-export interface ViewConfig {
-  columns: string[]; 
-  filters: FilterCondition[]; 
-  sort?: { field: string; order: 'asc' | 'desc' };
-}
-
-// --- CORE INTERFACES ---
+// --- INTERFACES ---
 
 export interface SelectOption {
   label: string;
   value: string | number;
   color?: string; 
-}
-
-export interface SmartFieldProps {
-  label?: string;
-  value: any;
-  type: FieldType;
-  options?: SelectOption[];
-  relationModule?: string;
-  onSave: (value: any) => void;
-  readonly?: boolean;
-  className?: string;
-  showLabel?: boolean;
-  error?: string;
-  forceEditMode?: boolean;
-}
-
-export interface FieldAccess {
-  viewRoles: UserRole[]; 
-  editRoles: UserRole[]; 
 }
 
 export interface FieldValidation {
@@ -202,6 +122,11 @@ export interface FieldValidation {
   customMessage?: string;
 }
 
+export interface FieldAccess {
+  viewRoles: UserRole[]; 
+  editRoles: UserRole[]; 
+}
+
 export interface FieldLogic {
   defaultValue?: any;
   visibleIf?: {
@@ -212,182 +137,66 @@ export interface FieldLogic {
   formula?: string; 
 }
 
-export interface FieldDefinition {
-  key: string;              
-  labels: { fa: string; en: string };
-  type: FieldType;
-  nature: FieldNature;
-  location: FieldLocation;
-  blockId?: string;         
-  order: number;
-  icon?: string;            
-  isKey: boolean;           
-  access?: FieldAccess;
-  validation?: FieldValidation;
-  logic?: FieldLogic;
-  options?: SelectOption[]; 
-  relationConfig?: {
-    targetModule: string;   
-    targetField: string;    
-    filter?: Record<string, any>; // <--- این خط جدید اضافه شود
-  };
-}
-
-export interface TableColumnDefinition {
+export interface ModuleField {
   key: string;
-  title: string;
   type: FieldType;
-  width?: string | number;
-  relationConfig?: { targetModule: string; targetField: string; };
+  labels: { fa: string; en?: string };
+  isTableColumn?: boolean;
   options?: SelectOption[];
+  validation?: FieldValidation;
+  location?: FieldLocation | 'header' | 'block'; // پشتیبانی از هر دو حالت رشته و enum
+  nature?: FieldNature;
+  blockId?: string;
+  order?: number;
+  icon?: string;
+  isKey?: boolean;
+  access?: FieldAccess;
+  logic?: any; // برای انعطاف‌پذیری بیشتر
+  relationConfig?: { targetModule: string; targetField?: string; filter?: Record<string, any>; };
 }
 
 export interface BlockDefinition {
   id: string;
-  titles: { fa: string; en: string };
-  icon: string; 
-  order: number;
   type: BlockType;
-  tableColumns?: TableColumnDefinition[]; // Only used if type === TABLE
+  titles: { fa: string; en?: string };
+  order: number;
+  icon?: string;
+  visibleIf?: any;
+  tableColumns?: any[];
 }
 
 export interface ModuleDefinition {
-  id: string;               
-  titles: { fa: string; en: string };
-  nature: ModuleNature;
-  supportedViewModes: ViewMode[];
-  defaultViewMode: ViewMode;
-  fields: FieldDefinition[]; 
-  blocks: BlockDefinition[]; 
-  relatedTabs?: {
-    sourceModule: string;
-    displayMode: RelatedDisplayMode;
-    label: string;
-  }[];
-}
-
-export interface RelatedTabConfig {
-  title: string;
-  icon: string; // نام آیکون
-  targetModule: string; // ماژول هدف (مثلا products)
-  foreignKey: string; // نام فیلدی در ماژول هدف که به این رکورد اشاره دارد (مثلا production_bom_id)
-}
-
-// --- DB ENTITY INTERFACES (Matching Supabase Schema) ---
-
-export interface BaseEntity {
   id: string;
-  created_at?: string;
-  created_by?: string;
-  updated_at?: string;
-  updated_by?: string;
-  [key: string]: any;
+  titles: { fa: string; en?: string };
+  nature?: ModuleNature;
+  table: string;
+  fields: ModuleField[];
+  blocks: BlockDefinition[];
+  supportedViewModes?: ViewMode[];
+  defaultViewMode?: ViewMode;
+  relatedTabs?: any[];
 }
 
-export interface Profile extends BaseEntity {
-  full_name: string;
-  mobile_1?: string;
-  role: UserRole;
-  avatar_url?: string;
+// --- VIEW & FILTER INTERFACES ---
+
+export interface FilterItem {
+  id: string;
+  field: string;
+  operator: string;
+  value: any;
 }
 
-export interface Product extends BaseEntity {
-  name: string;
-  custom_code?: string;
-  manual_code?: string;
-  product_type: 'raw' | 'semi' | 'final';
-  category: string;
-  main_unit?: string;
-  sub_unit?: string;
-  colors?: string[]; // JSONB
-  supplier_id?: string;
-  brand?: string;
-  waste_rate?: number;
-  buy_price?: number;
-  sell_price?: number;
-  stock: number;
-  reorder_point: number;
-  specs?: any; // JSONB
-  image?: string; // Add to DB later if needed
-}
-
-export interface Supplier extends BaseEntity {
-  business_name: string;
-  first_name?: string;
-  last_name?: string;
-  mobile_1?: string;
-  city?: string;
-  rating?: number;
-}
-
-export interface Customer extends BaseEntity {
-  business_name?: string;
-  first_name: string;
-  last_name: string;
-  mobile_1: string;
-  rating?: number;
-}
-
-export interface Warehouse extends BaseEntity {
-  name: string;
-  location?: string;
-  manager_id?: string;
-}
-
-export interface Invoice extends BaseEntity {
-  invoice_type: 'proforma' | 'final';
-  status: string;
-  customer_id: string;
-  total_amount: number;
-  final_payable: number;
-  financial_approval: boolean;
-  items?: any[];
-}
-
-export interface Task extends BaseEntity {
-  name: string;
-  task_type: 'org' | 'production' | 'marketing';
-  responsible_id?: string;
-  status: string;
-  due_at?: string;
-  related_to_module?: string;
-  related_to_id?: string;
-}
-
-export interface BOM extends BaseEntity {
-  name: string;
-  status: string;
-  custom_code?: string;
-  items?: any[];
-}
-
-export interface ProductionOrder extends BaseEntity {
-  order_code: string;
-  product_id: string;
-  qty: number;
-  start_date: string;
-  due_date: string;
-  status: string;
-  items?: any[];
-}
-
-// ... کدهای قبلی ...
-
-// انواع عملگرهای فیلتر
-
-
-// ساختار ذخیره شده در دیتابیس برای هر نما
 export interface ViewConfig {
-  columns: string[]; // کلید فیلدهایی که باید نمایش داده شوند
-  filters: FilterCondition[]; // فیلترهای اعمال شده
-  sort?: { field: string; order: 'asc' | 'desc' };
+  columns: string[];
+  filters: FilterItem[];
+  sort?: { field: string; order: 'asc' | 'desc' }[];
 }
 
 export interface SavedView {
   id: string;
-  module_id: string;
   name: string;
-  is_default: boolean;
+  module_id: string;
   config: ViewConfig;
+  is_default: boolean;
+  created_at?: string;
 }
-
