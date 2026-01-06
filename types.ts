@@ -70,7 +70,7 @@ export enum FieldLocation {
 }
 
 export enum BlockType {
-  DEFAULT = 'default', // برای سازگاری با کدهای قبلی
+  DEFAULT = 'default',
   FIELD_GROUP = 'field_group',
   TABLE = 'table'
 }
@@ -144,15 +144,19 @@ export interface ModuleField {
   labels: { fa: string; en?: string };
   isTableColumn?: boolean;
   options?: SelectOption[];
+  
+  // --- ویژگی اضافه شده برای رفع خطا ---
+  dynamicOptionsCategory?: string; 
+  
   validation?: FieldValidation;
-  location?: FieldLocation | 'header' | 'block'; // پشتیبانی از هر دو حالت رشته و enum
+  location?: FieldLocation | 'header' | 'block'; 
   nature?: FieldNature;
   blockId?: string;
   order?: number;
   icon?: string;
   isKey?: boolean;
   access?: FieldAccess;
-  logic?: any; // برای انعطاف‌پذیری بیشتر
+  logic?: any; 
   relationConfig?: { targetModule: string; targetField?: string; filter?: Record<string, any>; };
 }
 
@@ -164,6 +168,12 @@ export interface BlockDefinition {
   icon?: string;
   visibleIf?: any;
   tableColumns?: any[];
+  // ویژگی اتصال به دیتای خارجی
+  externalDataConfig?: {
+    relationFieldKey: string;
+    targetModule: string;
+    targetColumn: string;
+  };
 }
 
 export interface ModuleDefinition {

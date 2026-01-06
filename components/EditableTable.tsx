@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Input, InputNumber, Select, Space, message, Empty, Typography } from 'antd';
-import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { Table, Button, Input, InputNumber, Select, Space, message, Empty, Typography, Spin, Modal } from 'antd';
+import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, LinkOutlined, QrcodeOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { FieldType } from '../types';
@@ -10,42 +10,70 @@ const { Text } = Typography;
 interface EditableTableProps {
   block: any;
   initialData: any[];
-  moduleId?: string; 
-  recordId?: string; 
+  moduleId?: string;
+  recordId?: string;
   relationOptions: Record<string, any[]>;
-  onSaveSuccess?: (newData: any[]) => void; 
-  onChange?: (newData: any[]) => void; 
-  mode?: 'db' | 'local'; 
-  // پراپ‌های جدید برای آپشن‌های داینامیک
+  onSaveSuccess?: (newData: any[]) => void;
+  onChange?: (newData: any[]) => void;
+  mode?: 'db' | 'local' | 'external_view';
   dynamicOptions?: Record<string, any[]>;
+  externalSource?: {
+      moduleId?: string;
+      recordId?: string;
+      column?: string;
+  };
 }
 
 const EditableTable: React.FC<EditableTableProps> = ({ 
-  block, initialData, moduleId, recordId, relationOptions, onSaveSuccess, onChange, mode = 'db', dynamicOptions = {}
+  block, initialData, moduleId, recordId, relationOptions, onSaveSuccess, onChange, 
+  mode = 'db', dynamicOptions = {}, externalSource
 }) => {
   const [isEditing, setIsEditing] = useState(mode === 'local');
   const [data, setData] = useState<any[]>(initialData || []);
   const [tempData, setTempData] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
+  const [loadingExternal, setLoadingExternal] = useState(false);
+
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+  const [scanTarget, setScanTarget] = useState<{ rowIndex: number, fieldKey: string } | null>(null);
+  const [scannedCode, setScannedCode] = useState('');
 
   useEffect(() => {
-    setData(initialData || []);
-    if (mode === 'local') {
-        setTempData(initialData || []);
-        setIsEditing(true);
-    }
-  }, [initialData, mode]);
+      const fetchExternalData = async () => {
+          if (mode === 'external_view' && externalSource?.moduleId && externalSource?.recordId) {
+              setLoadingExternal(true);
+              try {
+                  const { data: extData, error } = await supabase
+                      .from(externalSource.moduleId)
+                      .select(externalSource.column || 'items')
+                      .eq('id', externalSource.recordId)
+                      .single();
+                  
+                  if (error) throw error;
+                  const items = extData ? extData[externalSource.column || 'items'] : [];
+                  setData(items || []);
+              } catch (err) {
+                  console.error("Error fetching external data:", err);
+                  setData([]);
+              } finally {
+                  setLoadingExternal(false);
+              }
+          } else {
+              setData(initialData || []);
+              if (mode === 'local') setTempData(initialData || []);
+          }
+      };
+      fetchExternalData();
+  }, [initialData, mode, externalSource?.recordId]);
 
-  // محاسبه خودکار بهای تمام شده برای یک ردیف
   const calculateRowTotal = (row: any) => {
-      const usage = parseFloat(row.usage) || 0;
-      const price = parseFloat(row.buy_price) || 0;
+      const usage = parseFloat(row.usage) || parseFloat(row.qty) || 0;
+      const price = parseFloat(row.buy_price) || parseFloat(row.price) || 0;
       return usage * price;
   };
 
   const startEdit = () => {
     setIsEditing(true);
-    // هنگام شروع ویرایش، مطمئن شویم محاسبات درست است
     const preparedData = (data || []).map(row => ({
         ...row,
         total_price: calculateRowTotal(row)
@@ -60,12 +88,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   const handleSave = async () => {
     if (mode === 'local') return;
+    if (mode === 'external_view') {
+        message.info('ویرایش دیتای خارجی از این قسمت غیرفعال است.');
+        return;
+    }
 
     setSaving(true);
     try {
-      if (!moduleId || !recordId) throw new Error('Module ID or Record ID missing');
+      if (!moduleId || !recordId) throw new Error('مشخصات ماژول یا رکورد یافت نشد');
 
-      // محاسبه نهایی قبل از ذخیره
       const dataToSave = tempData.map(row => ({
           ...row,
           total_price: calculateRowTotal(row)
@@ -89,44 +120,20 @@ const EditableTable: React.FC<EditableTableProps> = ({
     }
   };
 
-  const updateRow = async (index: number, key: string, value: any) => {
+  const updateRow = (index: number, key: string, value: any) => {
     const newData = [...tempData];
     newData[index] = { ...newData[index], [key]: value };
-
-    // اگر آیتم (چرم/یراق) تغییر کرد، اطلاعات پیش‌فرضش را بکش
-    if (key === 'item_id' && value) {
-        const relCol = block.tableColumns?.find((c: any) => c.key === 'item_id');
-        if (relCol?.relationConfig) {
-            const { data: product } = await supabase.from(relCol.relationConfig.targetModule).select('*').eq('id', value).single();
-            if (product) {
-                // پر کردن فیلدهای مرتبط (اگر در محصول وجود داشته باشند)
-                // اینجا نگاشت دستی یا هوشمند انجام می‌دهیم
-                if (product.sell_price || product.buy_price) newData[index]['buy_price'] = product.buy_price || product.sell_price;
-                
-                // کپی کردن ویژگی‌ها (رنگ، جنس و...)
-                // فرض بر این است که نام فیلدها در محصول و BOM یکی است یا شبیه است
-                ['leather_type', 'leather_color_1', 'lining_material', 'lining_color', 'fitting_type', 'acc_material'].forEach(field => {
-                    if (product[field]) {
-                        // نگاشت leather_color_1 به leather_color
-                        const targetKey = field === 'leather_color_1' ? 'leather_color' : field;
-                        newData[index][targetKey] = product[field];
-                    }
-                });
-            }
-        }
-    }
-
-    // محاسبه مجدد بهای تمام شده اگر قیمت یا مصرف تغییر کرد
-    if (key === 'usage' || key === 'buy_price' || key === 'item_id') {
+    
+    if (key === 'usage' || key === 'qty' || key === 'buy_price' || key === 'price') {
         newData[index]['total_price'] = calculateRowTotal(newData[index]);
     }
-
+    
     setTempData(newData);
     if (mode === 'local' && onChange) onChange(newData);
   };
 
   const addRow = () => {
-    const newRow = { key: Date.now(), usage: 1, buy_price: 0, total_price: 0 };
+    const newRow = { key: Date.now(), usage: 1, qty: 1, buy_price: 0, total_price: 0 };
     const newData = [...tempData, newRow];
     setTempData(newData);
     if (mode === 'local' && onChange) onChange(newData);
@@ -139,92 +146,119 @@ const EditableTable: React.FC<EditableTableProps> = ({
     if (mode === 'local' && onChange) onChange(newData);
   };
 
+  const handleScanClick = (index: number, fieldKey: string) => {
+      setScanTarget({ rowIndex: index, fieldKey });
+      setScannedCode('');
+      setIsScanModalOpen(true);
+  };
+
+  const processScan = () => {
+      if (!scanTarget || !scannedCode) return;
+      const { rowIndex, fieldKey } = scanTarget;
+      const specificKey = `${block.id}_${fieldKey}`;
+      const options = relationOptions[specificKey] || relationOptions[fieldKey] || [];
+      
+      const foundOption = options.find(opt => 
+          opt.value === scannedCode || 
+          opt.label.includes(scannedCode)
+      );
+
+      if (foundOption) {
+          updateRow(rowIndex, fieldKey, foundOption.value);
+          message.success(`محصول "${foundOption.label}" شناسایی شد`);
+          setIsScanModalOpen(false);
+      } else {
+          message.error('محصولی با این مشخصات یافت نشد');
+      }
+  };
+
   const columns = [
     ...(block.tableColumns?.map((col: any) => ({
       title: col.title,
       dataIndex: col.key,
       key: col.key,
-      width: col.key === 'item_id' ? 250 : undefined,
+      width: col.key === 'item_id' || col.type === FieldType.RELATION ? 300 : undefined,
       render: (text: any, record: any, index: number) => {
-        // --- حالت نمایش ---
-        if (!isEditing && mode === 'db') {
+        if (!isEditing) {
           if (col.type === FieldType.RELATION) {
              const specificKey = `${block.id}_${col.key}`;
              const options = relationOptions[specificKey] || relationOptions[col.key] || [];
              const opt = options.find((o: any) => o.value === text);
              const label = opt ? opt.label : text;
-             if (text && typeof text === 'string' && text.length > 10) return <Link to={`/products/${text}`} className="text-leather-600 hover:underline font-medium">{label}</Link>;
-             return <span className="font-medium text-gray-800 dark:text-gray-200">{label}</span>;
+             return <span className="font-medium text-gray-800 dark:text-gray-200">{label || '-'}</span>;
           }
           if (col.type === FieldType.PRICE) return <span className="font-mono">{text ? Number(text).toLocaleString() : '0'}</span>;
-          if (col.type === FieldType.SELECT) {
-             // پیدا کردن لیبل برای سلکت
-             let options = col.options;
-             if (col.dynamicOptionsCategory && dynamicOptions) options = dynamicOptions[col.dynamicOptionsCategory];
-             const opt = options?.find((o:any) => o.value === text);
-             return <span>{opt?.label || text}</span>;
-          }
           return <span>{text}</span>;
         }
 
-        // --- حالت ویرایش ---
-        // فیلدهای محاسباتی فقط خواندنی هستند
-        if (col.isCalculated) {
-             return <span className="font-bold text-gray-500 bg-gray-50 px-2 py-1 rounded block text-center">{Number(text || 0).toLocaleString()}</span>;
-        }
-
         if (col.type === FieldType.RELATION) {
-           const specificKey = `${block.id}_${col.key}`;
-           const options = relationOptions[specificKey] || relationOptions[col.key] || [];
-           return (
-            <Select
-              value={text}
-              onChange={(val) => updateRow(index, col.key, val)}
-              className="w-full"
-              placeholder="جستجو..."
-              showSearch
-              filterOption={(input, option) => (option?.label as string ?? '').toLowerCase().includes(input.toLowerCase())}
-              options={options}
-            />
-          );
-        }
-
-        if (col.type === FieldType.SELECT) {
-            let options = col.options;
-            if (col.dynamicOptionsCategory && dynamicOptions) {
-                options = dynamicOptions[col.dynamicOptionsCategory]?.map((o: any) => ({ label: o.label, value: o.value }));
-            }
-            return <Select value={text} onChange={(val) => updateRow(index, col.key, val)} className="w-full" options={options} allowClear />;
+            const specificKey = `${block.id}_${col.key}`;
+            const options = relationOptions[specificKey] || relationOptions[col.key] || [];
+            
+            return (
+                <Space.Compact style={{ width: '100%' }}>
+                    <Select
+                        showSearch
+                        value={text}
+                        onChange={(val) => updateRow(index, col.key, val)}
+                        options={options}
+                        optionFilterProp="label"
+                        placeholder="جستجو..."
+                        style={{ width: '100%' }}
+                        filterOption={(input, option) =>
+                            (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        // 👇 اصلاح برای باز شدن در مودال 👇
+                        getPopupContainer={(trigger) => trigger.parentNode}
+                    />
+                    <Button 
+                        icon={<QrcodeOutlined />} 
+                        onClick={() => handleScanClick(index, col.key)} 
+                        title="اسکن بارکد/QR"
+                    />
+                </Space.Compact>
+            );
         }
 
         if (col.type === FieldType.NUMBER || col.type === FieldType.PRICE) {
-          return <InputNumber value={text} onChange={(val) => updateRow(index, col.key, val)} className="w-full" formatter={col.type === FieldType.PRICE ? value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : undefined} parser={col.type === FieldType.PRICE ? value => value!.replace(/\$\s?|(,*)/g, '') : undefined} />;
+          return <InputNumber value={text} onChange={(val) => updateRow(index, col.key, val)} className="w-full" controls={false} />;
         }
+
         return <Input value={text} onChange={(e) => updateRow(index, col.key, e.target.value)} />;
       }
     })) || []),
     ...(isEditing ? [{ title: '', key: 'actions', width: 50, render: (_: any, __: any, i: number) => <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeRow(i)} /> }] : [])
   ];
 
+  if (loadingExternal) return <div className="p-10 text-center"><Spin /> <span className="text-gray-400 mr-2">در حال بارگذاری اقلام...</span></div>;
+
   return (
-    <div className={`bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border ${isEditing && mode === 'db' ? 'border-leather-500 ring-1 ring-leather-500' : 'border-gray-200 dark:border-gray-800'} transition-all`}>
+    <div className={`bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border ${isEditing ? 'border-leather-500' : 'border-gray-200 dark:border-gray-800'} transition-all`}>
       <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
         <h3 className="font-bold text-lg text-gray-700 dark:text-white m-0 flex items-center gap-2">
           <span className="w-1 h-6 bg-leather-500 rounded-full inline-block"></span>
           {block.titles.fa}
+          {mode === 'external_view' && <span className="text-xs font-normal text-gray-400 mr-2">(نمایش از سند مرتبط)</span>}
         </h3>
-        {mode === 'db' && (
-            <Space>
-            {isEditing ? (
+        
+        <Space>
+            {mode === 'external_view' && externalSource?.recordId && (
+                <Link to={`/${externalSource.moduleId}/${externalSource.recordId}`} target="_blank">
+                    <Button icon={<LinkOutlined />}>مشاهده جزئیات اصلی</Button>
+                </Link>
+            )}
+
+            {mode === 'db' && !isEditing && (
+                <Button size="small" icon={<EditOutlined />} onClick={startEdit}>ویرایش لیست</Button>
+            )}
+            
+            {isEditing && mode !== 'local' && (
                 <>
                 <Button onClick={cancelEdit} disabled={saving} icon={<CloseOutlined />}>انصراف</Button>
                 <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving} className="bg-green-500 border-none">ذخیره</Button>
                 </>
-            ) : (
-                <Button size="small" icon={<EditOutlined />} onClick={startEdit}>ویرایش لیست</Button>
             )}
-            </Space>
-        )}
+        </Space>
       </div>
 
       <Table
@@ -232,35 +266,38 @@ const EditableTable: React.FC<EditableTableProps> = ({
         columns={columns}
         pagination={false}
         size="middle"
-        rowKey={(record: any, index) => record.key || record.item_id || index} 
-        locale={{ emptyText: <Empty description="لیست خالی است" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+        rowKey={(record: any, index) => record.key || record.item_id || index || Math.random()} 
+        locale={{ emptyText: <Empty description={mode === 'external_view' ? "لیست در سند مرتبط خالی است" : "لیست خالی است"} image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
         className="custom-erp-table"
         footer={(isEditing || mode === 'local') ? () => (
           <Button type="dashed" block icon={<PlusOutlined />} onClick={addRow}>افزودن ردیف جدید</Button>
         ) : undefined}
-        summary={(pageData) => {
-            let totalUsage = 0;
-            let totalCost = 0;
-            pageData.forEach((row: any) => {
-                totalUsage += parseFloat(row.usage) || 0;
-                // محاسبه جمع بر اساس مقادیر موجود (چه در حال ادیت چه نمایش)
-                const price = row.total_price !== undefined ? row.total_price : ((parseFloat(row.usage)||0) * (parseFloat(row.buy_price)||0));
-                totalCost += price;
-            });
-            return (
-                <Table.Summary.Row className="bg-gray-50 dark:bg-white/5 font-bold">
-                    <Table.Summary.Cell index={0} colSpan={1}>جمع کل</Table.Summary.Cell>
-                    {/* پر کردن سلول‌های خالی تا برسیم به ستون‌های عددی */}
-                    {block.tableColumns.slice(1).map((col: any, idx: number) => {
-                         if (col.key === 'usage') return <Table.Summary.Cell key={idx} index={idx + 1}><Text>{Number(totalUsage).toLocaleString()}</Text></Table.Summary.Cell>;
-                         if (col.key === 'total_price') return <Table.Summary.Cell key={idx} index={idx + 1}><Text type="success">{Number(totalCost).toLocaleString()}</Text></Table.Summary.Cell>;
-                         return <Table.Summary.Cell key={idx} index={idx + 1} />;
-                    })}
-                    {isEditing && <Table.Summary.Cell index={99} />}
-                </Table.Summary.Row>
-            );
-        }}
       />
+
+      <Modal
+        title={<Space><QrcodeOutlined /> اسکن محصول</Space>}
+        open={isScanModalOpen}
+        onCancel={() => setIsScanModalOpen(false)}
+        onOk={processScan}
+        okText="تایید"
+        cancelText="لغو"
+        zIndex={2000}
+      >
+          <div className="flex flex-col gap-4">
+              <p className="text-gray-500">
+                  لطفاً کد محصول را با بارکدخوان اسکن کنید یا به صورت دستی وارد نمایید:
+              </p>
+              <Input 
+                autoFocus
+                placeholder="کد محصول را اینجا اسکن کنید..." 
+                value={scannedCode}
+                onChange={e => setScannedCode(e.target.value)}
+                onPressEnter={processScan}
+                size="large"
+                prefix={<QrcodeOutlined className="text-gray-400" />}
+              />
+          </div>
+      </Modal>
     </div>
   );
 };

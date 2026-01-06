@@ -1,269 +1,255 @@
-import React, { useState, useEffect } from 'react';
-import { Modal, Button, Form, Card, FormInstance, FormProps } from 'antd';
+import React, { useEffect, useState } from 'react';
+import { Form, Button, message, Spin, Divider } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
-import { ModuleDefinition, BlockType, LogicOperator } from '../types';
+import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
-import { MODULES } from '../moduleRegistry';
 import EditableTable from './EditableTable';
+import { ModuleDefinition, FieldLocation, BlockType, LogicOperator } from '../types';
 
 interface SmartFormProps {
   module: ModuleDefinition;
-  initialValues?: any;
   visible: boolean;
   onCancel: () => void;
-  onSave: (values: any) => void;
+  onSave?: (values: any) => void;
+  recordId?: string;
   title?: string;
   isBulkEdit?: boolean;
-  embedded?: boolean;
-  form?: FormInstance; 
-  formProps?: FormProps;
-  isLoading?: boolean;
 }
 
-const evaluateCondition = (condition: any, data: any): boolean => {
-  if (!condition) return true;
-  const { field, operator, value } = condition;
-  const fieldValue = data ? data[field] : null;
-
-  switch (operator) {
-    case LogicOperator.EQUALS: return fieldValue === value;
-    case LogicOperator.NOT_EQUALS: return fieldValue !== value;
-    case LogicOperator.GREATER_THAN: return Number(fieldValue) > Number(value);
-    case LogicOperator.LESS_THAN: return Number(fieldValue) < Number(value);
-    case LogicOperator.CONTAINS: return fieldValue?.includes(value);
-    case LogicOperator.IS_TRUE: return fieldValue === true;
-    case LogicOperator.IS_FALSE: return fieldValue === false;
-    default: return true;
-  }
-};
-
-const SmartForm: React.FC<SmartFormProps> = ({
-  module, initialValues, visible, onCancel, onSave, title, isBulkEdit = false, embedded = false, form: propForm, formProps, isLoading = false
+const SmartForm: React.FC<SmartFormProps> = ({ 
+  module, visible, onCancel, onSave, recordId, title, forceEditMode, isBulkEdit = false 
 }) => {
-  const [internalForm] = Form.useForm();
-  const form = propForm || internalForm;
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
-
-  const getFieldLabel = (field: any) => {
-    const fa = field?.labels?.fa;
-    const cleaned = typeof fa === 'string' ? fa.trim() : '';
-    return cleaned ? cleaned : String(field?.key || '');
-  };
-
-  const getModuleDisplayField = (moduleId: string) => {
-    const targetConfig: any = (MODULES as any)?.[moduleId];
-    const keyField = targetConfig?.fields?.find((f: any) => f?.isKey)?.key;
-    return keyField || 'name';
-  };
-
-  const resolveRelationConfig = (field: any, allValues: any) => {
-    let rc: any = field?.relationConfig ? { ...field.relationConfig } : undefined;
-
-    // FieldType.USER هم زیرساخت relation دارد
-    if (!rc && field?.type === 'user') {
-      rc = { targetModule: 'profiles', targetField: 'full_name' };
-    }
-    if (!rc) return rc;
-
-    // Polymorphic / Dynamic relation convention:
-    // xxx_id  ->  xxx_module
-    const baseKey = String(field?.key || '').replace(/_id$/, '');
-    const moduleKey = `${baseKey}_module`;
-    const dynModule =
-      allValues?.[moduleKey] ||
-      (field?.key === 'related_to_id' ? allValues?.['related_to_module'] : undefined);
-
-    if (dynModule && typeof dynModule === 'string') {
-      rc.targetModule = dynModule;
-      // در پلی‌مورفیک، فیلد نمایش هم باید با ماژول جدید هماهنگ شود
-      rc.targetField = getModuleDisplayField(dynModule);
-    }
-
-    // اگر targetField تعیین نشده، از فیلد کلیدی ماژول مقصد استفاده می‌کنیم
-    if (!rc.targetField && rc.targetModule) {
-      rc.targetField = getModuleDisplayField(rc.targetModule);
-    }
-
-    return rc;
-  };
-
+  
   useEffect(() => {
-    if (visible || embedded) {
-      if (initialValues) {
-        setFormData(initialValues);
-        form.setFieldsValue(initialValues);
+    if (visible) {
+      if (recordId && !isBulkEdit) {
+        fetchRecord();
+      } else {
+        form.resetFields();
+        setFormData({});
       }
     }
-  }, [visible, embedded, initialValues, form]);
+  }, [visible, recordId]);
+
+  const fetchRecord = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from(module.table).select('*').eq('id', recordId).single();
+      if (error) throw error;
+      if (data) {
+        form.setFieldsValue(data);
+        setFormData(data);
+      }
+    } catch (err: any) {
+      message.error('خطا در دریافت اطلاعات: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFinish = async (values: any) => {
+    setLoading(true);
+    try {
+      if (onSave) {
+        await onSave(values);
+      } else {
+        if (recordId) {
+          const { error } = await supabase.from(module.table).update(values).eq('id', recordId);
+          if (error) throw error;
+          message.success('ویرایش انجام شد');
+        } else {
+          const { error } = await supabase.from(module.table).insert(values);
+          if (error) throw error;
+          message.success('رکورد جدید ثبت شد');
+        }
+        onCancel();
+      }
+    } catch (err: any) {
+      message.error('خطا: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleValuesChange = (changedValues: any, allValues: any) => {
-    // اگر ماژولِ یک ریلیشن پلی‌مورفیک تغییر کرد، آی‌دی مرتبط را پاک می‌کنیم تا انتخاب قبلی باقی نماند.
-    try {
-      const changedKeys = Object.keys(changedValues || {});
-      const moduleKeys = changedKeys.filter((k) => String(k).endsWith('_module'));
-      moduleKeys.forEach((mk) => {
-        const idKey = String(mk).replace(/_module$/i, '_id');
-        if (allValues?.[idKey]) {
-          form.setFieldsValue({ [idKey]: null });
-          allValues[idKey] = null;
-        }
-      });
-      // کیس خاص تسک‌ها: related_to_module -> related_to_id
-      if ('related_to_module' in (changedValues || {}) && allValues?.related_to_id) {
-        form.setFieldsValue({ related_to_id: null });
-        allValues.related_to_id = null;
-      }
-    } catch {}
     setFormData(allValues);
   };
 
-  const handleFieldChange = (key: string, value: any) => {
-    form.setFieldsValue({ [key]: value });
-    setFormData((prev: any) => ({ ...prev, [key]: value }));
+  const checkVisibility = (logic: any) => {
+    if (!logic) return true;
+    const { field, operator, value } = logic;
+    const fieldValue = formData[field];
+
+    switch (operator) {
+      case LogicOperator.EQUALS: return fieldValue === value;
+      case LogicOperator.NOT_EQUALS: return fieldValue !== value;
+      case LogicOperator.GREATER_THAN: return Number(fieldValue) > Number(value);
+      default: return true;
+    }
   };
 
-  const renderFields = (fields: any[]) => (
-    <>
-      {fields.map(field => {
-        if (field.logic?.visibleIf && !evaluateCondition(field.logic.visibleIf, formData)) return null;
+  if (!visible) return null;
+  if (!module || !module.fields) return null;
 
-        const required = !!field.validation?.required && !isBulkEdit && field.key !== 'system_code';
-        const safeLabel = getFieldLabel(field) + (required ? ' *' : '');
-        const effectiveRelationConfig = resolveRelationConfig(field, formData);
+  const sortedBlocks = [...(module.blocks || [])].sort((a, b) => a.order - b.order);
+  const headerFields = module.fields.filter(f => f.location === FieldLocation.HEADER).sort((a, b) => (a.order || 0) - (b.order || 0));
 
-        return (
-          <div key={field.key}>
-            <Form.Item
-              name={field.key}
-              noStyle
-              rules={[{ required, message: 'الزامی' }]}
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
+      <div className="bg-white dark:bg-[#1e1e1e] w-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+        
+        <div className="flex justify-between items-center p-5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-white/5">
+          <h2 className="text-xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
+            <span className="w-2 h-8 bg-leather-500 rounded-full inline-block"></span>
+            {title || (recordId ? `ویرایش ${module.titles.fa}` : `افزودن ${module.titles.fa} جدید`)}
+          </h2>
+          <Button shape="circle" icon={<CloseOutlined />} onClick={onCancel} className="border-none hover:bg-red-50 hover:text-red-500" />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+          {loading && !isBulkEdit ? (
+            <div className="h-full flex items-center justify-center"><Spin size="large" /></div>
+          ) : (
+            <Form 
+              form={form} 
+              layout="vertical" 
+              onFinish={handleFinish} 
+              onValuesChange={handleValuesChange}
+              initialValues={formData}
             >
-              <SmartFieldRenderer
-                label={safeLabel}
-                value={formData[field.key]}
-                type={field.type}
-                options={field.options}
-                relationConfig={effectiveRelationConfig}
-                onSave={(val) => handleFieldChange(field.key, val)}
-                forceEditMode={true}
-                fieldKey={field.key}
-              />
-            </Form.Item>
-          </div>
-        );
-      })}
-    </>
-  )
+              
+              {/* بخش هدر (Header Fields) */}
+              {headerFields.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 bg-gray-50 dark:bg-white/5 p-4 rounded-2xl border border-gray-100 dark:border-gray-800">
+                  {headerFields.map(field => (
+                    <div key={field.key} className={field.type === 'image' ? 'row-span-2' : ''}>
+                      <SmartFieldRenderer 
+                        field={field} 
+                        value={formData[field.key]} 
+                        onChange={(val) => form.setFieldValue(field.key, val)}
+                        forceEditMode={true} // <--- نکته مهم: فعال کردن حالت ویرایش
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
 
-  const formContent = (
-    <Form
-        form={form}
-        layout="vertical"
-        onFinish={onSave}
-        onValuesChange={handleValuesChange}
-        {...formProps}
-        component={false}
-    >
-      <div className="flex flex-col gap-4 pb-4">
-        {/* 1. Header Fields */}
-        <Card size="small" className="bg-gray-50 dark:bg-[#1f1f1f] border-gray-200 dark:border-gray-800 shadow-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {renderFields(
-                    module.fields
-                    .filter(f => f.location === 'header')
-                    .sort((a, b) => a.order - b.order)
-                )}
-            </div>
-        </Card>
+              {/* بلوک‌ها (Blocks) */}
+              {sortedBlocks.map(block => {
+                if (block.visibleIf && !checkVisibility(block.visibleIf)) return null;
 
-        {/* 2. Blocks */}
-        {[...module.blocks].sort((a, b) => a.order - b.order).map(block => {
-            if (block.visibleIf && !evaluateCondition(block.visibleIf, formData)) return null;
+                // حالت ۱: بلوک گروه فیلد
+                if (block.type === BlockType.FIELD_GROUP || block.type === BlockType.DEFAULT) {
+                  const blockFields = module.fields
+                    .filter(f => f.blockId === block.id)
+                    .sort((a, b) => (a.order || 0) - (b.order || 0));
+                  
+                  if (blockFields.length === 0) return null;
 
-            // --- استفاده از EditableTable برای بلوک‌های جدولی ---
-            if (block.type === BlockType.TABLE) {
-                return (
-                    <div key={block.id} className="mb-6 animate-fadeIn">
-                        <div className="flex items-center gap-2 mb-3 border-b border-gray-100 dark:border-gray-800 pb-2">
-                            <div className="w-1 h-5 bg-blue-500 rounded-full"></div>
-                            <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 m-0">
-                                {block.titles.fa}
-                            </h3>
+                  return (
+                    <div key={block.id} className="mb-6 animate-slideUp">
+                      <Divider orientation="left" className="!border-leather-200 !text-leather-600 !font-bold !text-sm">
+                        {block.icon && <i className={`mr-2 ${block.icon}`}></i>}
+                        {block.titles.fa}
+                      </Divider>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                        {blockFields.map(field => {
+                          if (field.logic?.visibleIf && !checkVisibility(field.logic.visibleIf)) return null;
+                          return (
+                            <SmartFieldRenderer 
+                              key={field.key}
+                              field={field} 
+                              value={formData[field.key]}
+                              onChange={(val) => {
+                                form.setFieldValue(field.key, val);
+                                setFormData({ ...form.getFieldsValue(), [field.key]: val });
+                              }}
+                              forceEditMode={true} // <--- نکته مهم: فعال کردن حالت ویرایش
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // حالت ۲: بلوک جدول (Table Block)
+                if (block.type === BlockType.TABLE) {
+                  let externalRecordId = undefined;
+                  if (block.externalDataConfig) {
+                    externalRecordId = formData[block.externalDataConfig.relationFieldKey];
+                  }
+
+                  return (
+                    <div key={block.id} className="mb-8 p-1 border border-dashed border-gray-300 dark:border-gray-700 rounded-3xl bg-gray-50/30 dark:bg-white/5">
+                        <div className="px-4 pt-4">
+                             {module.fields
+                                .filter(f => f.blockId === block.id)
+                                .map(field => {
+                                    if (field.logic?.visibleIf && !checkVisibility(field.logic.visibleIf)) return null;
+                                    return (
+                                        <div key={field.key} className="mb-4 max-w-md">
+                                             <SmartFieldRenderer
+                                                field={field}
+                                                value={formData[field.key]}
+                                                onChange={(val) => {
+                                                    form.setFieldValue(field.key, val);
+                                                    setFormData({ ...form.getFieldsValue(), [field.key]: val });
+                                                }}
+                                                forceEditMode={true} // <--- نکته مهم
+                                             />
+                                        </div>
+                                    );
+                                })}
                         </div>
-                        
+
                         <Form.Item name={block.id} noStyle>
                             <EditableTable
                                 block={block}
                                 initialData={formData[block.id] || []}
-                                // مهم: حالت local باعث می‌شود جدول دیتابیس را آپدیت نکند
-                                // بلکه تابع onChange را صدا بزند
-                                mode="local" 
-                                relationOptions={{}} // اینجا باید آپشن‌های ریلیشن را پاس بدهیم (فعلا خالی)
-                                onChange={(newData) => handleFieldChange(block.id, newData)}
+                                mode={externalRecordId ? 'external_view' : 'local'}
+                                moduleId={module.id}
+                                externalSource={{
+                                    moduleId: block.externalDataConfig?.targetModule,
+                                    recordId: externalRecordId,
+                                    column: block.externalDataConfig?.targetColumn
+                                }}
+                                relationOptions={{}} 
+                                onChange={(newData) => {
+                                    form.setFieldValue(block.id, newData);
+                                }}
                             />
                         </Form.Item>
                     </div>
-                );
-            }
+                  );
+                }
+                
+                return null;
+              })}
 
-            // --- بلوک‌های معمولی ---
-            const blockFields = module.fields
-                .filter(f => f.blockId === block.id)
-                .sort((a, b) => a.order - b.order);
+            </Form>
+          )}
+        </div>
 
-            if (blockFields.length === 0) return null;
+        <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1e1e1e] flex justify-end gap-3">
+          <Button size="large" onClick={onCancel} className="rounded-xl">انصراف</Button>
+          <Button 
+            size="large" 
+            type="primary" 
+            onClick={() => form.submit()} 
+            loading={loading} 
+            icon={<SaveOutlined />} 
+            className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/20"
+          >
+            {recordId ? 'ذخیره تغییرات' : 'ثبت نهایی'}
+          </Button>
+        </div>
 
-            return (
-                <div key={block.id} className="mb-6 animate-fadeIn">
-                    <div className="flex items-center gap-2 mb-3 border-b border-gray-100 dark:border-gray-800 pb-2">
-                        <div className="w-1 h-5 bg-leather-500 rounded-full"></div>
-                        <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 m-0">
-                            {block.titles.fa}
-                        </h3>
-                    </div>
-                    
-                    <div className="bg-gray-50/50 dark:bg-white/5 rounded-xl p-4 border border-gray-100 dark:border-gray-800 hover:border-leather-200 transition-colors">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-5">
-                            {renderFields(blockFields)}
-                        </div>
-                    </div>
-                </div>
-            );
-        })}
       </div>
-    </Form>
-  );
-
-  const footerButtons = (
-    <div className={`flex justify-end gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 ${embedded ? 'sticky bottom-0 bg-white dark:bg-[#141414] py-3 z-10' : ''}`}>
-        <Button onClick={onCancel} icon={<CloseOutlined />}>انصراف</Button>
-        <Button type="primary" onClick={() => form.submit()} loading={isLoading} icon={<SaveOutlined />} className="bg-leather-600 hover:bg-leather-500">
-          {isBulkEdit ? 'اعمال تغییرات' : 'ذخیره'}
-        </Button>
     </div>
-  );
-
-  if (embedded) {
-    return (
-      <>
-        {formContent}
-        {footerButtons}
-      </>
-    );
-  }
-
-  return (
-    <Modal
-      title={title || `افزودن ${module.titles.fa}`}
-      open={visible}
-      onCancel={onCancel}
-      footer={footerButtons}
-      width={1100}
-      destroyOnClose
-      centered
-    >
-      {formContent}
-    </Modal>
   );
 };
 
