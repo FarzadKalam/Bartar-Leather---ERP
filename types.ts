@@ -1,4 +1,5 @@
-import { LogicalFilter } from "@refinedev/core";
+// @refinedev/core types are available but not always used directly
+// import { LogicalFilter } from "@refinedev/core"; // TODO: استفاده شود اگر filter logic پیچیده شود
 
 // --- ENUMS ---
 
@@ -147,6 +148,7 @@ export interface ModuleField {
   
   // --- ویژگی اضافه شده برای رفع خطا ---
   dynamicOptionsCategory?: string; 
+  mode?: 'multiple' | 'tags'; // حالت انتخاب: چندگانه یا با قابلیت افزودن
   
   validation?: FieldValidation;
   location?: FieldLocation | 'header' | 'block'; 
@@ -157,7 +159,10 @@ export interface ModuleField {
   isKey?: boolean;
   access?: FieldAccess;
   logic?: any; 
-  relationConfig?: { targetModule: string; targetField?: string; filter?: Record<string, any>; };
+  readonly?: boolean;
+  isCalculated?: boolean;
+  relationConfig?: { targetModule: string; targetField?: string; filter?: Record<string, any>; dependsOn?: string; };  
+  defaultValue?: any;
 }
 
 export interface BlockDefinition {

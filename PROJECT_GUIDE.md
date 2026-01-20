@@ -105,33 +105,273 @@ The backend relies on Supabase. Key tables include:
 
 * **Core Entities:** `products`, `customers`, `suppliers`, `production_boms`.
 * **System Tables:**
-* `profiles`: Extended user data (connected to Auth).
-* `org_roles`: Role-Based Access Control (RBAC) definitions.
-* `tags` & `record_tags`: Universal tagging.
-* `saved_views`: Stores user-defined filters for `ModuleList`.
-* `company_settings`: Global settings (Logo, Name).
-
-
+  * `profiles`: Extended user data (connected to Auth).
+  * `org_roles`: Role-Based Access Control (RBAC) definitions.
+  * `tags` & `record_tags`: Universal tagging.
+  * `saved_views`: Stores user-defined filters for `ModuleList`.
+  * `company_settings`: Global settings (Logo, Name).
 
 **Security:** Row Level Security (RLS) is enabled. Currently set to allow authenticated access, but ready for granular policies.
 
+📖 **See:** `DATABASE_SCHEMA.md` for complete schema documentation.
+
 ---
 
-## 5. Design System & Theming
+## 5. Relations System (Relational Data)
+
+The platform supports multiple types of relationships:
+
+### A. One-to-Many (1:N) - Forward Relations
+```typescript
+// Example: Product → Supplier
+{
+  key: 'supplier_id',
+  type: FieldType.RELATION,
+  relationConfig: {
+    targetModule: 'suppliers',
+    targetField: 'business_name'
+  }
+}
+```
+
+### B. Reverse Relations (N:1 View)
+Display related records in the parent record's sidebar:
+```typescript
+relatedTabs: [
+  {
+    name: 'products',
+    label: 'محصولات',
+    icon: 'ShoppingCart',
+    relationField: 'supplier_id',  // Foreign key in products table
+    displayFields: ['name', 'category', 'stock']
+  }
+]
+```
+
+### C. Many-to-Many (N:M)
+Requires junction tables:
+```sql
+-- Example: Products ↔ Categories
+CREATE TABLE product_categories (
+  product_id uuid REFERENCES products(id),
+  category_id uuid REFERENCES categories(id),
+  PRIMARY KEY (product_id, category_id)
+);
+```
+
+### D. Master-Detail (Table Blocks)
+Nested editable tables within a record:
+```typescript
+{
+  id: 'bom_items',
+  type: BlockType.TABLE,
+  tableColumns: [
+    { key: 'item_id', type: FieldType.RELATION, ... },
+    { key: 'quantity', type: FieldType.NUMBER, ... }
+  ]
+}
+```
+
+📖 **See:** `RELATIONS_GUIDE.md` for detailed implementation guide.
+
+---
+
+## 6. BOM (Bill of Materials) System
+
+The BOM system calculates production costs across multiple categories:
+
+### Cost Calculation Tables:
+- **Leather Section** (`items_leather`): Material costs
+- **Lining Section** (`items_lining`): Fabric costs  
+- **Fittings Section** (`items_fitting`): Hardware costs
+- **Accessories Section** (`items_accessory`): Additional materials
+- **Labor Section** (`items_labor`): Workforce costs
+
+### Auto-Calculation Formula:
+```typescript
+total_price = usage × buy_price
+grandTotal = Σ(all sections)
+```
+
+### Renderer Component:
+`components/renderers/BomStructureRenderer.tsx` displays the hierarchical structure with real-time calculations.
+
+---
+
+## 7. View Management & Filtering
+
+Users can create and save custom views with:
+
+* **Filter Operators:** `eq`, `neq`, `ilike`, `gt`, `lt`, `gte`, `lte`, `in`, `is`
+* **Column Selection:** Choose which fields to display
+* **View Modes:** List, Grid, Kanban, Timeline, Calendar, Gantt
+* **Persistence:** Saved in `saved_views` table
+
+**Component:** `components/ViewManager.tsx`
+
+---
+
+## 8. Permissions & Security (RBAC)
+
+### Role Levels:
+```typescript
+enum UserRole {
+  ADMIN = 'admin',        // Full access
+  SALES = 'sales',        // CRM & Orders
+  WAREHOUSE = 'warehouse', // Inventory
+  PRODUCTION = 'production', // Manufacturing
+  VIEWER = 'viewer'       // Read-only
+}
+```
+
+### Field-Level Permissions:
+```typescript
+fieldAccess: {
+  viewRoles: [UserRole.ADMIN, UserRole.SALES],
+  editRoles: [UserRole.ADMIN]
+}
+```
+
+### Current Status:
+⚠️ **RLS Policies are NOT fully implemented.** All authenticated users can access all data.
+
+🔒 **TODO:** Implement row-level security policies in Supabase.
+
+---
+
+## 9. Tag System
+
+A flexible many-to-many tagging system:
+
+### Tables:
+- `tags`: Tag definitions (name, color)
+- `record_tags`: Links tags to any record
+
+### Usage:
+```typescript
+{ 
+  key: 'tags', 
+  type: FieldType.TAGS,
+  // Automatically renders TagInput component
+}
+```
+
+**Component:** `components/TagInput.tsx`
+
+---
+
+## 10. Design System & Theming
 
 * **Theme:** Fully supports **Dark/Light** modes via Tailwind classes (`dark:bg-black`) and Ant Design ConfigProvider.
 * **Color Palette:**
-* Primary: Leather Orange (`#c58f60`).
-* Dark Backgrounds: Deep Black (`#141414`) and Dark Grey (`#1f1f1f`).
-
+  * Primary: Leather Orange (`#c58f60`)
+  * Dark Backgrounds: Deep Black (`#141414`) and Dark Grey (`#1f1f1f`)
 
 * **Responsiveness:** Mobile-first design. Sidebar collapses on mobile, tables become scrollable, and headers adapt.
 
 ---
 
-## 6. Development Roadmap
+## 11. Best Practices
 
-1. **Financial Module:** Implement `Invoices` (Sales/Purchase) with calculation logic (Tax, Discount, Total).
-2. **Dashboard:** Create a widget-based dashboard (`pages/Dashboard.tsx`) to visualize key metrics using Recharts.
-3. **Advanced Formula:** Implement a parser to handle field dependencies (e.g., `Total = Qty * Price`) in real-time within `SmartForm`.
-4. **Printing:** Generate PDF templates for Invoices and BOMs.
+### Adding a New Module:
+1. ✅ Create table in Supabase
+2. ✅ Define config file in `modules/`
+3. ✅ Register in `moduleRegistry.ts`
+4. ✅ Add route to `Layout.tsx` sidebar
+5. ✅ Test CRUD operations
+
+### Code Organization:
+- **Keep configs under 200 lines**: Split large modules
+- **Use custom hooks**: Extract logic from components
+- **Type everything**: Avoid `any` types
+- **Add comments**: Explain complex logic
+
+### Performance Tips:
+- Use `isTableColumn` to limit displayed fields
+- Implement pagination for large datasets
+- Add database indexes for frequently queried fields
+- Use React Query for caching (planned)
+
+---
+
+## 12. Known Issues & Limitations
+
+### Critical:
+- ❌ **RLS not implemented**: Security risk in production
+- ❌ **Many-to-Many relations incomplete**: Need junction table support
+- ❌ **Large file components**: `ModuleShow.tsx` (664 lines) needs refactoring
+
+### Medium Priority:
+- ⚠️ **No virtualization**: Performance issues with 1000+ records
+- ⚠️ **Hard-coded strings**: Need i18n system
+- ⚠️ **Type safety gaps**: Many optional fields should be required
+
+### Low Priority:
+- 📝 Old files (`-old.tsx`) still present
+- 📝 Mock data in production code
+- 📝 Missing database indexes
+
+---
+
+## 13. Development Roadmap
+
+### Phase 1: Core Fixes (2 weeks)
+1. ✅ Implement RLS policies
+2. ✅ Add Many-to-Many relation support
+3. ✅ Refactor large components
+4. ✅ Complete `relatedTabs` implementation
+
+### Phase 2: Features (3 weeks)
+1. 📊 **Dashboard**: Widget-based metrics visualization
+2. 💰 **Financial Module**: Complete invoice system with tax calculations
+3. 📈 **Reports**: Excel/PDF export functionality
+4. 🔍 **Advanced Search**: Global search across modules
+
+### Phase 3: Optimization (2 weeks)
+1. ⚡ React Query integration
+2. ⚡ Virtual scrolling for tables
+3. ⚡ Database indexing
+4. ⚡ Code splitting and lazy loading
+
+### Phase 4: Advanced Features (4 weeks)
+1. 🤖 **Formula Engine**: Real-time field calculations
+2. 📄 **Print Templates**: Custom PDF generation
+3. 📱 **Mobile App**: React Native version
+4. 🔔 **Notifications**: Real-time updates
+
+---
+
+## 14. Troubleshooting
+
+### Common Issues:
+
+**Problem:** "Cannot read property of undefined"
+- **Solution:** Check if field exists in config and database
+
+**Problem:** Dropdown menus don't open in forms
+- **Solution:** Ensure `getPopupContainer` is set in Select components
+
+**Problem:** Images not uploading
+- **Solution:** Check Supabase storage bucket permissions
+
+**Problem:** Relations not displaying
+- **Solution:** Verify `relationConfig.targetModule` matches module ID
+
+**Problem:** Performance issues with large lists
+- **Solution:** Enable pagination and add database indexes
+
+---
+
+## 15. Resources & Documentation
+
+- 📚 **Architecture Details**: See `ARCHITECTURE.md`
+- 🔗 **Relations Guide**: See `RELATIONS_GUIDE.md`
+- 🗄️ **Database Schema**: See `DATABASE_SCHEMA.md`
+- 🎨 **Ant Design**: https://ant.design
+- ⚛️ **Refine Framework**: https://refine.dev
+- 🔥 **Supabase**: https://supabase.com/docs
+
+---
+
+**Last Updated:** January 7, 2026
+**Version:** 4.0

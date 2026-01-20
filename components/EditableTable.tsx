@@ -4,8 +4,7 @@ import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined
 import { Link } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { FieldType } from '../types';
-
-const { Text } = Typography;
+import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 
 interface EditableTableProps {
   block: any;
@@ -26,7 +25,7 @@ interface EditableTableProps {
 
 const EditableTable: React.FC<EditableTableProps> = ({ 
   block, initialData, moduleId, recordId, relationOptions, onSaveSuccess, onChange, 
-  mode = 'db', dynamicOptions = {}, externalSource
+  mode = 'db', externalSource, dynamicOptions = {}
 }) => {
   const [isEditing, setIsEditing] = useState(mode === 'local');
   const [data, setData] = useState<any[]>(initialData || []);
@@ -37,6 +36,37 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [scanTarget, setScanTarget] = useState<{ rowIndex: number, fieldKey: string } | null>(null);
   const [scannedCode, setScannedCode] = useState('');
+
+  // تابع برای fetch کردن مقادیر سفارشی از محصول مرتبط
+  const enrichRowWithProductData = async (row: any) => {
+      if (!row.item_id) return row;
+      
+      try {
+          // فیلدهایی که نیاز دارند (فیلدهای سفارشی + نام و کد)
+          const customFields = block.tableColumns
+              ?.filter((col: any) => col.type !== FieldType.RELATION && col.key !== 'usage' && col.key !== 'unit' && col.key !== 'buy_price' && col.key !== 'total_price')
+              .map((col: any) => col.key)
+              .join(', ') || '';
+          
+          const { data: product } = await supabase
+              .from('products')
+              .select(`id, name, system_code${customFields ? ', ' + customFields : ''}`)
+              .eq('id', row.item_id)
+              .single();
+          
+          if (product) {
+              // merge مقادیر محصول به row، اما فیلدهای موجود در row را preserve کن
+              return {
+                  ...product,
+                  ...row,
+                  item_id: row.item_id // اطمینان از اینکه item_id باقی می‌ماند
+              };
+          }
+      } catch (error) {
+          console.error('Error enriching row:', error);
+      }
+      return row;
+  };
 
   useEffect(() => {
       const fetchExternalData = async () => {
@@ -74,7 +104,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   const startEdit = () => {
     setIsEditing(true);
-    const preparedData = (data || []).map(row => ({
+    const preparedData = (data || []).map((row: any) => ({
         ...row,
         total_price: calculateRowTotal(row)
     }));
@@ -97,7 +127,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     try {
       if (!moduleId || !recordId) throw new Error('مشخصات ماژول یا رکورد یافت نشد');
 
-      const dataToSave = tempData.map(row => ({
+      const dataToSave = tempData.map((row: any) => ({
           ...row,
           total_price: calculateRowTotal(row)
       }));
@@ -120,9 +150,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
     }
   };
 
-  const updateRow = (index: number, key: string, value: any) => {
+  const updateRow = async (index: number, key: string, value: any) => {
     const newData = [...tempData];
     newData[index] = { ...newData[index], [key]: value };
+    
+    // اگر item_id تغییر کرد، مقادیر سفارشی را از محصول فراخوانی کن
+    if (key === 'item_id' && value) {
+        const enriched = await enrichRowWithProductData({ ...newData[index] });
+        newData[index] = enriched;
+    }
     
     if (key === 'usage' || key === 'qty' || key === 'buy_price' || key === 'price') {
         newData[index]['total_price'] = calculateRowTotal(newData[index]);
@@ -132,7 +168,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     if (mode === 'local' && onChange) onChange(newData);
   };
 
-  const addRow = () => {
+  const addRow = async () => {
     const newRow = { key: Date.now(), usage: 1, qty: 1, buy_price: 0, total_price: 0 };
     const newData = [...tempData, newRow];
     setTempData(newData);
@@ -158,7 +194,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       const specificKey = `${block.id}_${fieldKey}`;
       const options = relationOptions[specificKey] || relationOptions[fieldKey] || [];
       
-      const foundOption = options.find(opt => 
+      const foundOption = options.find((opt: any) => 
           opt.value === scannedCode || 
           opt.label.includes(scannedCode)
       );
@@ -178,16 +214,41 @@ const EditableTable: React.FC<EditableTableProps> = ({
       dataIndex: col.key,
       key: col.key,
       width: col.key === 'item_id' || col.type === FieldType.RELATION ? 300 : undefined,
-      render: (text: any, record: any, index: number) => {
+      render: (text: any, _record: any, index: number) => {
         if (!isEditing) {
           if (col.type === FieldType.RELATION) {
              const specificKey = `${block.id}_${col.key}`;
              const options = relationOptions[specificKey] || relationOptions[col.key] || [];
              const opt = options.find((o: any) => o.value === text);
-             const label = opt ? opt.label : text;
-             return <span className="font-medium text-gray-800 dark:text-gray-200">{label || '-'}</span>;
+             // اگر option پیدا شد، label را نمایش بده؛ اگر نه خالی نمایش بده
+             const label = opt ? opt.label : '-';
+             return <span className="font-medium text-gray-800 dark:text-gray-200">{label}</span>;
           }
-          if (col.type === FieldType.PRICE) return <span className="font-mono">{text ? Number(text).toLocaleString() : '0'}</span>;
+          if (col.type === FieldType.SELECT) {
+              const categoryKey = col.dynamicOptionsCategory || col.key;
+              const options = dynamicOptions[categoryKey] || [];
+              const opt = options.find((o: any) => (o.id || o.value || o) === text);
+              const label = opt ? (opt.name || opt.label || opt) : '-';
+              return <span className="font-medium text-gray-800 dark:text-gray-200">{label}</span>;
+          }
+          if (col.type === FieldType.MULTI_SELECT) {
+              const categoryKey = col.dynamicOptionsCategory || col.key;
+              const options = dynamicOptions[categoryKey] || [];
+              const values = Array.isArray(text) ? text : (text ? [text] : []);
+              const labels = values.map(v => {
+                  const opt = options.find((o: any) => (o.id || o.value || o) === v);
+                  return opt ? (opt.name || opt.label || opt) : v;
+              }).join(', ');
+              return <span className="font-medium text-gray-800 dark:text-gray-200">{labels || '-'}</span>;
+          }
+          if (col.type === FieldType.PRICE) {
+              const persianPrice = formatPersianPrice(text);
+              return <span className="persian-number font-bold">{persianPrice}</span>;
+          }
+          if (col.type === FieldType.NUMBER || col.type === FieldType.STOCK) {
+              const persianNum = toPersianNumber(text);
+              return <span className="persian-number font-bold">{persianNum}</span>;
+          }
           return <span>{text}</span>;
         }
 
@@ -200,16 +261,16 @@ const EditableTable: React.FC<EditableTableProps> = ({
                     <Select
                         showSearch
                         value={text}
-                        onChange={(val) => updateRow(index, col.key, val)}
+                        onChange={(val: any) => updateRow(index, col.key, val)}
                         options={options}
                         optionFilterProp="label"
                         placeholder="جستجو..."
                         style={{ width: '100%' }}
-                        filterOption={(input, option) =>
+                        filterOption={(input: any, option: any) =>
                             (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                         }
                         // 👇 اصلاح برای باز شدن در مودال 👇
-                        getPopupContainer={(trigger) => trigger.parentNode}
+                        getPopupContainer={(trigger: any) => trigger.parentNode}
                     />
                     <Button 
                         icon={<QrcodeOutlined />} 
@@ -220,15 +281,65 @@ const EditableTable: React.FC<EditableTableProps> = ({
             );
         }
 
-        if (col.type === FieldType.NUMBER || col.type === FieldType.PRICE) {
-          return <InputNumber value={text} onChange={(val) => updateRow(index, col.key, val)} className="w-full" controls={false} />;
+        if (col.type === FieldType.SELECT) {
+            // دریافت گزینه‌های این فیلد از dynamicOptions
+            const categoryKey = col.dynamicOptionsCategory || col.key;
+            const options = dynamicOptions[categoryKey] || [];
+            
+            return (
+                <Select
+                    value={text}
+                    onChange={(val: any) => updateRow(index, col.key, val)}
+                    options={options.map((opt: any) => ({ 
+                        label: opt.name || opt.label || opt, 
+                        value: opt.id || opt.value || opt 
+                    }))}
+                    placeholder="انتخاب کنید..."
+                    style={{ width: '100%' }}
+                    getPopupContainer={(trigger: any) => trigger.parentNode}
+                />
+            );
         }
 
-        return <Input value={text} onChange={(e) => updateRow(index, col.key, e.target.value)} />;
+        if (col.type === FieldType.MULTI_SELECT) {
+            // دریافت گزینه‌های این فیلد از dynamicOptions
+            const categoryKey = col.dynamicOptionsCategory || col.key;
+            const options = dynamicOptions[categoryKey] || [];
+            
+            return (
+                <Select
+                    mode="multiple"
+                    value={Array.isArray(text) ? text : (text ? [text] : [])}
+                    onChange={(val: any) => updateRow(index, col.key, val)}
+                    options={options.map((opt: any) => ({ 
+                        label: opt.name || opt.label || opt, 
+                        value: opt.id || opt.value || opt 
+                    }))}
+                    placeholder="انتخاب کنید..."
+                    style={{ width: '100%' }}
+                    getPopupContainer={(trigger: any) => trigger.parentNode}
+                />
+            );
+        }
+
+        if (col.type === FieldType.NUMBER || col.type === FieldType.PRICE) {
+          return <InputNumber value={text} onChange={(val: any) => updateRow(index, col.key, val)} className="w-full" controls={false} />;
+        }
+
+        return <Input value={text} onChange={(e: any) => updateRow(index, col.key, e.target.value)} />;
       }
     })) || []),
     ...(isEditing ? [{ title: '', key: 'actions', width: 50, render: (_: any, __: any, i: number) => <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeRow(i)} /> }] : [])
   ];
+
+  // محاسبه جمع کل برای ستون‌های قیمتی
+  const calculateTotal = () => {
+    const dataToSum = isEditing ? tempData : data;
+    return dataToSum.reduce((sum: number, row: any) => {
+      const rowTotal = calculateRowTotal(row);
+      return sum + rowTotal;
+    }, 0);
+  };
 
   if (loadingExternal) return <div className="p-10 text-center"><Spin /> <span className="text-gray-400 mr-2">در حال بارگذاری اقلام...</span></div>;
 
@@ -261,18 +372,50 @@ const EditableTable: React.FC<EditableTableProps> = ({
         </Space>
       </div>
 
-      <Table
-        dataSource={isEditing ? tempData : data}
-        columns={columns}
-        pagination={false}
-        size="middle"
-        rowKey={(record: any, index) => record.key || record.item_id || index || Math.random()} 
-        locale={{ emptyText: <Empty description={mode === 'external_view' ? "لیست در سند مرتبط خالی است" : "لیست خالی است"} image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-        className="custom-erp-table"
-        footer={(isEditing || mode === 'local') ? () => (
-          <Button type="dashed" block icon={<PlusOutlined />} onClick={addRow}>افزودن ردیف جدید</Button>
-        ) : undefined}
-      />
+      <div className="overflow-x-auto custom-scrollbar -mx-6 px-6">
+        <Table
+          dataSource={isEditing ? tempData : data}
+          columns={columns}
+          pagination={false}
+          size="middle"
+          rowKey={(record: any) => record.key || record.item_id || record.id || Math.random()} 
+          locale={{ emptyText: <Empty description={mode === 'external_view' ? "لیست در سند مرتبط خالی است" : "لیست خالی است"} image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+          className="custom-erp-table min-w-[800px] md:min-w-full"
+          footer={(isEditing || mode === 'local') ? () => (
+            <>
+              <Button type="dashed" block icon={<PlusOutlined />} onClick={addRow}>افزودن ردیف جدید</Button>
+              {(data.length > 0 || tempData.length > 0) && (
+                <div className="mt-4 flex justify-end items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <span className="font-bold text-blue-700 dark:text-blue-300">جمع کل:</span>
+                  <span className="text-lg font-mono font-bold text-blue-900 dark:text-blue-100">
+                    {calculateTotal().toLocaleString()} تومان
+                  </span>
+                </div>
+              )}
+            </>
+          ) : undefined}
+          summary={() => {
+            if (!isEditing && mode !== 'local' && data.length > 0) {
+              const total = calculateTotal();
+              return (
+                <Table.Summary fixed>
+                  <Table.Summary.Row className="bg-gray-50 dark:bg-gray-800">
+                    <Table.Summary.Cell index={0} colSpan={block.tableColumns?.length - 1 || 3}>
+                      <div className="text-right font-bold">جمع کل</div>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={1}>
+                      <div className="text-right font-mono font-bold text-blue-600 dark:text-blue-400">
+                        {total.toLocaleString()}
+                      </div>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              );
+            }
+            return null;
+          }}
+        />
+      </div>
 
       <Modal
         title={<Space><QrcodeOutlined /> اسکن محصول</Space>}

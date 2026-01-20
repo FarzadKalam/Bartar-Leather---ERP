@@ -1,3 +1,15 @@
+/**
+ * @deprecated این فایل نسخه قدیمی ModuleList است
+ * TODO: حذف شود بعد از اطمینان ModuleList_Refine تمام ویژگی‌ها دارد
+ * 
+ * جایگزین: ModuleList_Refine.tsx
+ * تاریخ حذف پیشنهادی: پس از Phase 1
+ * 
+ * قبل از حذف باید بررسی شود:
+ * - آیا KANBAN view در ModuleList_Refine کار می‌کند؟
+ * - آیا تمام ViewModes در نسخه جدید پیاده‌شده است؟
+ */
+
 import React, { useState, useEffect } from 'react';
 import { 
   Button, Tag, Input, App, Drawer, Segmented, 

@@ -1,23 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Button, Tag, Spin, Image, Breadcrumb, Tabs, App, Upload, Input, InputNumber, Select, Tooltip, Popover, QRCode, Divider, Drawer, Avatar, Space, Modal } from 'antd';
-import { 
-  ArrowRightOutlined, DeleteOutlined, HomeOutlined, EditOutlined, 
-  CheckOutlined, CloseOutlined, UploadOutlined, LoadingOutlined, 
-  PrinterOutlined, ShareAltOutlined, QrcodeOutlined, AppstoreOutlined,
-  UserOutlined, TeamOutlined, ClockCircleOutlined, HistoryOutlined,
-  SafetyCertificateOutlined
-} from '@ant-design/icons';
+import { Button, Tag, Spin, App, Input, InputNumber, Select, Drawer, Avatar, QRCode } from 'antd';
+import { EditOutlined, CheckOutlined, CloseOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
-import { FieldType, BlockType, LogicOperator, FieldLocation } from '../types';
-import EditableTable from '../components/EditableTable';
+import { FieldType, BlockType, LogicOperator } from '../types';
 import SmartForm from '../components/SmartForm';
 import RelatedSidebar from '../components/Sidebar/RelatedSidebar';
-import BomStructureRenderer from '../components/renderers/BomStructureRenderer';
-import TagInput from '../components/TagInput'; // اطمینان حاصل کن که این فایل ساخته شده است
+import DynamicSelectField from '../components/DynamicSelectField';
+import { getSingleOptionLabel } from '../utils/optionHelpers';
+import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 import dayjs from 'dayjs';
 import jalaliday from 'jalaliday';
+import HeaderActions from '../components/moduleShow/HeaderActions';
+import HeroSection from '../components/moduleShow/HeroSection';
+import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
+import TablesSection from '../components/moduleShow/TablesSection';
+import PrintSection from '../components/moduleShow/PrintSection';
 
 dayjs.extend(jalaliday);
 
@@ -39,21 +38,58 @@ const ModuleShow: React.FC = () => {
   const [printMode, setPrintMode] = useState(false);
   const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
   const [tempValues, setTempValues] = useState<Record<string, any>>({});
-  const [savingField, setSavingField] = useState<string | null>(null);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  const [, setSavingField] = useState<string | null>(null);
+  const [, setUploadingImage] = useState(false);
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
 
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [allRoles, setAllRoles] = useState<any[]>([]);
 
+  const fetchBaseInfo = useCallback(async () => {
+      const { data: users } = await supabase.from('profiles').select('id, full_name, avatar_url');
+      const { data: roles } = await supabase.from('org_roles').select('id, title');
+      if (users) setAllUsers(users);
+      if (roles) setAllRoles(roles);
+  }, []);
+
+  const fetchRecord = useCallback(async () => {
+    if (!id || !moduleConfig) return;
+    setLoading(true);
+    
+    try {
+        const { data: record, error } = await supabase
+            .from(moduleId)
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (error) throw error;
+
+        const { data: tagsData } = await supabase
+            .from('record_tags')
+            .select('tags(id, title, color)')
+            .eq('record_id', id);
+
+        const tags = tagsData?.map((item: any) => item.tags).filter(Boolean) || [];
+        
+        setCurrentTags(tags);
+        setData(record);
+    } catch (err: any) {
+        console.error(err);
+        msg.error('خطا در دریافت اطلاعات: ' + err.message);
+    } finally {
+        setLoading(false);
+    }
+  }, [id, moduleConfig, moduleId, msg]);
+
   useEffect(() => {
     fetchBaseInfo();
-  }, []);
+  }, [fetchBaseInfo]);
 
   useEffect(() => {
     fetchRecord();
-  }, [moduleId, id]);
+  }, [fetchRecord]);
 
   useEffect(() => {
     if (!printMode) return;
@@ -66,125 +102,183 @@ const ModuleShow: React.FC = () => {
     };
   }, [printMode]);
 
-  useEffect(() => {
-    if (data) {
-        fetchOptions(data);
-        if (moduleId === 'products' && data.production_bom_id) {
-            fetchLinkedBom(data.production_bom_id);
-        } else if (moduleId === 'production_boms') {
-            setLinkedBomData(data); 
-        } else {
-            setLinkedBomData(null);
-        }
-    }
-  }, [data, moduleId]);
-
-  const fetchBaseInfo = async () => {
-      const { data: users } = await supabase.from('profiles').select('id, full_name, avatar_url');
-      const { data: roles } = await supabase.from('org_roles').select('id, title');
-      if (users) setAllUsers(users);
-      if (roles) setAllRoles(roles);
-  };
-
-  const fetchRecord = async () => {
-    if (!id || !moduleConfig) return;
-    setLoading(true);
-    
-    try {
-        // 1. دریافت خود رکورد
-        const { data: record, error } = await supabase
-            .from(moduleId)
-            .select('*')
-            .eq('id', id)
-            .single();
-
-        if (error) throw error;
-
-        // 2. دریافت تگ‌ها (به صورت جداگانه برای جلوگیری از خطای جوین)
-        const { data: tagsData } = await supabase
-            .from('record_tags')
-            .select('tags(id, title, color)')
-            .eq('record_id', id);
-
-        // استخراج آرایه تمیز از تگ‌ها
-        const tags = tagsData?.map((item: any) => item.tags).filter(Boolean) || [];
-        
-        setCurrentTags(tags);
-        setData(record);
-    } catch (err: any) {
-        console.error(err);
-        msg.error('خطا در دریافت اطلاعات: ' + err.message);
-    } finally {
-        setLoading(false);
-    }
-  };
-
-  const fetchLinkedBom = async (bomId: string) => {
+  const fetchLinkedBom = useCallback(async (bomId: string) => {
       const { data: bom } = await supabase.from('production_boms').select('*').eq('id', bomId).single();
       if (bom) setLinkedBomData(bom);
-  };
+  }, []);
 
-  const fetchOptions = async (recordData: any = null) => {
+  const fetchOptions = useCallback(async (recordData: any = null) => {
     if (!moduleConfig) return;
-    const dynFields = moduleConfig.fields.filter(f => (f as any).dynamicOptionsCategory);
+    
+    const dynFields = [...moduleConfig.fields.filter(f => (f as any).dynamicOptionsCategory)];
+    moduleConfig.blocks?.forEach(b => {
+      if (b.type === BlockType.TABLE && b.tableColumns) {
+        b.tableColumns.forEach(c => {
+          if ((c.type === FieldType.SELECT || c.type === FieldType.MULTI_SELECT) && (c as any).dynamicOptionsCategory) {
+            dynFields.push(c);
+          }
+        });
+      }
+    });
+    
     const dynOpts: Record<string, any[]> = {};
     for (const field of dynFields) {
-        const cat = (field as any).dynamicOptionsCategory;
-        const { data } = await supabase.from('option_sets').select('label, value').eq('category', cat);
+      const cat = (field as any).dynamicOptionsCategory;
+      if (cat && !dynOpts[cat]) {
+        const { data } = await supabase.from('dynamic_options').select('label, value').eq('category', cat).eq('is_active', true);
         if (data) dynOpts[cat] = data.filter(i => i.value !== null);
+      }
     }
     setDynamicOptions(dynOpts);
 
     const relFields = [...moduleConfig.fields.filter(f => f.type === FieldType.RELATION)];
     moduleConfig.blocks?.forEach(b => {
-        if (b.type === BlockType.TABLE && b.tableColumns) {
-            b.tableColumns.forEach(c => {
-                if (c.type === FieldType.RELATION) relFields.push({ ...c, key: `${b.id}_${c.key}` }); 
-            });
-        }
+      if (b.type === BlockType.TABLE && b.tableColumns) {
+        b.tableColumns.forEach(c => {
+          if (c.type === FieldType.RELATION) relFields.push({ ...c, key: `${b.id}_${c.key}` }); 
+        });
+      }
     });
 
     const relOpts: Record<string, any[]> = {};
     for (const field of relFields) {
-        if (field.relationConfig) {
-            const { targetModule, targetField, filter } = field.relationConfig;
-            let query = supabase.from(targetModule).select(`id, ${targetField}, system_code`);
-            if (filter) Object.keys(filter).forEach(k => query = query.eq(k, filter[k]));
-            const { data: relData } = await query.limit(200);
-            if (relData) {
-                const options = relData.map(i => ({ label: `${i[targetField]} ${i.system_code ? `(${i.system_code})` : ''}`, value: i.id }));
+      if (field.relationConfig) {
+        if (field.relationConfig.dependsOn && recordData) {
+          const dependsOnValue = recordData[field.relationConfig.dependsOn];
+          if (dependsOnValue) {
+            try {
+              const { data: relData } = await supabase.from(dependsOnValue).select('id, name, system_code').limit(200);
+              if (relData) {
+                const options = relData.map((i: any) => ({ 
+                  label: i.system_code ? `${i.name} (${i.system_code})` : i.name, 
+                  value: i.id,
+                  module: dependsOnValue,
+                  name: i.name,
+                  system_code: i.system_code
+                }));
                 relOpts[field.key] = options;
-                if (field.key.includes('_')) relOpts[field.key.split('_').pop()!] = options; 
+              }
+            } catch (err) {
+              console.warn(`Could not fetch options for ${field.key}:`, err);
             }
+          }
+        } else {
+          const { targetModule, filter } = field.relationConfig;
+          try {
+            const { data: relData } = await supabase.from(targetModule).select('id, name, system_code').limit(200);
+            if (relData) {
+              let filteredData = relData;
+              if (filter) {
+                filteredData = relData.filter((item: any) => {
+                  return Object.keys(filter).every(k => item[k] === filter[k]);
+                });
+              }
+                        
+              const options = filteredData.map((i: any) => ({ 
+                label: i.system_code ? `${i.name} (${i.system_code})` : i.name, 
+                value: i.id,
+                name: i.name,
+                system_code: i.system_code
+              }));
+              relOpts[field.key] = options;
+              if (field.key.includes('_')) relOpts[field.key.split('_').pop()!] = options;
+            }
+          } catch (err) {
+            console.warn(`Could not fetch options for ${field.key}:`, err);
+          }
         }
+      }
     }
     setRelationOptions(relOpts);
-  };
+    }, [moduleConfig]);
 
-  const handleAddOption = async (category: string, newValue: string) => {
-      if(!newValue) return;
-      const { error } = await supabase.from('option_sets').insert([{ category, label: newValue, value: newValue }]);
-      if(!error) {
-          msg.success('گزینه اضافه شد');
-          setDynamicOptions(prev => ({ ...prev, [category]: [...(prev[category] || []), { label: newValue, value: newValue }] }));
+  useEffect(() => {
+    if (data) {
+      fetchOptions(data);
+      if (moduleId === 'products' && data.production_bom_id) {
+        fetchLinkedBom(data.production_bom_id);
+      } else if (moduleId === 'production_boms') {
+        setLinkedBomData(data); 
+      } else {
+        setLinkedBomData(null);
       }
-  };
+    }
+  }, [data, moduleId, fetchOptions, fetchLinkedBom]);
 
-  const handleAssigneeChange = async (value: string) => {
+    const handleAssigneeChange = useCallback(async (value: string) => {
       const [type, assignId] = value.split('_');
       try {
-          const { error } = await supabase.from(moduleId).update({ assignee_id: assignId, assignee_type: type }).eq('id', id);
-          if (error) throw error;
-          setData((prev: any) => ({ ...prev, assignee_id: assignId, assignee_type: type }));
-          msg.success('مسئول رکورد تغییر کرد');
+        const { error } = await supabase.from(moduleId).update({ assignee_id: assignId, assignee_type: type }).eq('id', id);
+        if (error) throw error;
+        setData((prev: any) => ({ ...prev, assignee_id: assignId, assignee_type: type }));
+        msg.success('مسئول رکورد تغییر کرد');
       } catch (e: any) { msg.error('خطا: ' + e.message); }
-  };
+    }, [id, moduleId, msg]);
+
+  // تابع برای کپی خودکار اقلام BOM به جداول مواد اولیه
+    const handleRelatedBomChange = useCallback(async (bomId: string) => {
+      try {
+        const { data: bom, error: bomError } = await supabase
+          .from('production_boms')
+          .select('*')
+          .eq('id', bomId)
+          .single();
+
+        if (bomError) throw bomError;
+          
+        const calculateBomTotal = () => {
+          let total = 0;
+          const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory', 'items_labor'];
+          tables.forEach(tableName => {
+            const rows = bom[tableName];
+            if (Array.isArray(rows)) {
+              rows.forEach(row => {
+                const rowTotal = (row.total_price || ((row.usage || 0) * (row.buy_price || 0)));
+                total += rowTotal;
+              });
+            }
+          });
+          return total;
+        };
+
+        const bomTotal = calculateBomTotal();
+
+        const updateData: any = {};
+        const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
+          
+        tables.forEach(tableName => {
+          if (bom[tableName]) {
+            updateData[tableName] = bom[tableName];
+          }
+        });
+
+        updateData['production_cost'] = bomTotal;
+        updateData['related_bom'] = bomId;
+
+        const { error: updateError } = await supabase
+          .from(moduleId)
+          .update(updateData)
+          .eq('id', id);
+
+        if (updateError) throw updateError;
+
+        setData((prev: any) => ({ 
+          ...prev, 
+          ...updateData 
+        }));
+          
+        setLinkedBomData(bom);
+        msg.success('اقلام شناسنامه تولید بارگذاری شد و بهای تمام شده محاسبه شد');
+      } catch (e: any) {
+        msg.error('خطا در بارگذاری اقلام: ' + e.message);
+      }
+    }, [id, moduleId, msg]);
 
   const handleDelete = () => {
     modal.confirm({ title: 'حذف رکورد', okType: 'danger', onOk: async () => { await supabase.from(moduleId).delete().eq('id', id); navigate(`/${moduleId}`); } });
   };
 
-  const handleImageUpdate = async (file: File) => {
+  const handleImageUpdate = useCallback(async (file: File) => {
     setUploadingImage(true);
     try {
       const fileName = `${Math.random()}.${file.name.split('.').pop()}`;
@@ -196,7 +290,7 @@ const ModuleShow: React.FC = () => {
       msg.success('تصویر بروزرسانی شد');
     } catch (e: any) { msg.error('خطا: ' + e.message); } finally { setUploadingImage(false); }
     return false;
-  };
+  }, [id, moduleId, msg]);
 
   const saveEdit = async (key: string) => {
     setSavingField(key);
@@ -224,6 +318,20 @@ const ModuleShow: React.FC = () => {
   };
 
   const getOptionLabel = (field: any, value: any) => {
+      // اگر MULTI_SELECT است و آرایه است
+      if (field.type === FieldType.MULTI_SELECT && Array.isArray(value)) {
+          return value.map(v => {
+              let opt = field.options?.find((o: any) => o.value === v);
+              if (opt) return opt.label;
+              if ((field as any).dynamicOptionsCategory) {
+                  const cat = (field as any).dynamicOptionsCategory;
+                  opt = dynamicOptions[cat]?.find((o: any) => o.value === v);
+                  if (opt) return opt.label;
+              }
+              return v;
+          }).join(', ');
+      }
+      
       let opt = field.options?.find((o: any) => o.value === value);
       if (opt) return opt.label;
       if ((field as any).dynamicOptionsCategory) {
@@ -292,13 +400,14 @@ const ModuleShow: React.FC = () => {
     return moduleConfig.fields
       .filter(f => f.type !== FieldType.IMAGE && f.type !== FieldType.JSON && f.type !== FieldType.READONLY_LOOKUP)
       .filter(f => !f.logic || checkVisibility(f.logic))
-      .sort((a, b) => a.order - b.order)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(f => ({ ...f, value: data[f.key] }))
       .filter(f => hasValue(f.value));
   }, [moduleConfig, data, dynamicOptions, relationOptions]);
 
   const activeTemplate = printTemplates.find(t => t.id === selectedTemplateId) || printTemplates[0];
-  const printQrValue = typeof window !== 'undefined' ? window.location.href : '';
+  const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
+  const printQrValue = pageUrl;
 
   const handlePrint = () => {
     if (!activeTemplate) return;
@@ -346,10 +455,23 @@ const ModuleShow: React.FC = () => {
       { label: 'تیم‌ها (جایگاه سازمانی)', title: 'roles', options: allRoles.map(r => ({ label: r.title, value: `role_${r.id}`, emoji: <TeamOutlined /> })) }
   ];
 
+  if (!moduleConfig || !data) return loading ? <div className="flex h-screen items-center justify-center"><Spin size="large" /></div> : null;
+
   const renderSmartField = (field: any, isHeader = false) => {
     const isEditing = editingFields[field.key];
     const value = data[field.key];
-    const tempValue = tempValues[field.key] !== undefined ? tempValues[field.key] : (value ?? undefined);
+    let baseValue = value ?? undefined;
+    
+    // نرمال‌سازی MULTISELECT برای نمایش اولیه
+    if (field.type === FieldType.MULTI_SELECT && typeof baseValue === 'string') {
+      try {
+        baseValue = JSON.parse(baseValue);
+      } catch {
+        baseValue = baseValue ? [baseValue] : [];
+      }
+    }
+    
+    const tempValue = tempValues[field.key] !== undefined ? tempValues[field.key] : baseValue;
 
     if (isEditing) {
       let inputNode;
@@ -358,11 +480,30 @@ const ModuleShow: React.FC = () => {
       else if (field.type === FieldType.RELATION) options = relationOptions[field.key];
 
       if ((field as any).dynamicOptionsCategory) {
+          const cat = (field as any).dynamicOptionsCategory;
+          const isMultiple = field.type === FieldType.MULTI_SELECT;
           inputNode = (
-            <Select value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" showSearch options={options} dropdownRender={(menu) => (<><>{menu}</><Divider style={{ margin: '8px 0' }} /><div style={{ padding: '0 8px 4px' }}><Input placeholder="جدید..." onPressEnter={(e) => handleAddOption((field as any).dynamicOptionsCategory, e.currentTarget.value)} /></div></>)} />
+            <DynamicSelectField
+              value={tempValue}
+              onChange={(v) => setTempValues(prev => ({ ...prev, [field.key]: v }))}
+              options={options || []}
+              category={cat}
+              placeholder="انتخاب کنید"
+              onOptionsUpdate={fetchOptions}
+              mode={isMultiple ? 'multiple' : undefined}
+            />
           );
+      } else if (field.type === FieldType.MULTI_SELECT) {
+           inputNode = <Select mode="multiple" value={tempValue} onChange={(v) => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" options={options} showSearch allowClear />;
       } else if (field.type === FieldType.SELECT || field.type === FieldType.STATUS || field.type === FieldType.RELATION) {
-           inputNode = <Select value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" options={options} showSearch allowClear />;
+           const handleRelationChange = (v: any) => {
+               setTempValues(prev => ({ ...prev, [field.key]: v }));
+               // اگر فیلد related_bom باشد، خودکار BOM را بارگذاری کن
+               if (field.key === 'related_bom' && v) {
+                   setTimeout(() => handleRelatedBomChange(v), 100);
+               }
+           };
+           inputNode = <Select value={tempValue} onChange={handleRelationChange} className="w-full" options={options} showSearch allowClear />;
       } else if (field.type === FieldType.PRICE) {
            inputNode = <InputNumber formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={value => value!.replace(/\$\s?|(,*)/g, '')} value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
       } else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
@@ -375,11 +516,60 @@ const ModuleShow: React.FC = () => {
 
     let displayContent;
     if (value === null || value === undefined || value === '') displayContent = <span className="text-gray-300 text-xs italic">---</span>;
-    else if (field.type === FieldType.PRICE) displayContent = <span className="font-mono font-bold text-lg">{Number(value).toLocaleString()} <span className="text-[10px] text-gray-500 font-sans font-normal">تومان</span></span>;
+    else if (field.type === FieldType.PRICE) {
+        const persianPrice = formatPersianPrice(value);
+        displayContent = <span className="persian-number font-bold text-lg">{persianPrice} <span className="text-[10px] text-gray-500 font-sans font-normal">تومان</span></span>;
+    }
+    else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
+        const persianNum = toPersianNumber(value);
+        displayContent = <span className="persian-number font-bold text-lg">{persianNum}</span>;
+    }
     else if (field.type === FieldType.STATUS) {
        const opt = field.options?.find((o: any) => o.value === value);
        displayContent = <Tag color={opt?.color || 'default'} className="px-2 py-0.5 text-sm">{opt?.label || value}</Tag>;
-    } else if (field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT || field.type === FieldType.RELATION) displayContent = <span className="font-medium">{getOptionLabel(field, value)}</span>;
+    } else if (field.type === FieldType.RELATION && field.relationConfig) {
+       // نمایش RELATION fields به صورت لینک
+       const label = getOptionLabel(field, value);
+       displayContent = (
+           <Link to={`/${field.relationConfig.targetModule}/${value}`} className="text-leather-600 hover:text-leather-700 font-medium underline">
+               {label}
+           </Link>
+       );
+    } else if (field.type === FieldType.MULTI_SELECT) {
+       // نمایش MULTI_SELECT به صورت tags
+       // تبدیل value به آرایه اگر string JSON است
+       let normalizedValue = value;
+       if (typeof value === 'string') {
+         try {
+           normalizedValue = JSON.parse(value);
+         } catch {
+           normalizedValue = value ? [value] : [];
+         }
+       }
+       
+       if (Array.isArray(normalizedValue) && normalizedValue.length > 0) {
+         displayContent = (
+           <div className="flex flex-wrap gap-2">
+             {normalizedValue.map((val: any, idx: number) => {
+               const label = getSingleOptionLabel(field, val, dynamicOptions, relationOptions);
+               return (
+                 <Tag key={idx} color="default" className="px-2 py-1 text-xs font-medium" style={{backgroundColor: '#fef3c7', borderColor: '#d97706', color: '#92400e'}} >
+                   {label}
+                 </Tag>
+               );
+             })}
+           </div>
+         );
+       } else {
+         displayContent = <span className="text-gray-400">-</span>;
+       }
+    } else if (field.type === FieldType.SELECT) {
+       const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions);
+       displayContent = <span className="font-medium">{label}</span>;
+    } else if (field.type === FieldType.RELATION && !field.relationConfig) {
+       const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions);
+       displayContent = <span className="font-medium">{label}</span>;
+    }
     else if (field.type === FieldType.STOCK) displayContent = <span className={`font-mono font-bold ${value < (data.reorder_point || 10) ? 'text-red-500' : 'text-green-600'}`}>{value}</span>;
     else displayContent = <span className="font-medium">{value}</span>;
 
@@ -387,237 +577,85 @@ const ModuleShow: React.FC = () => {
     return <div className="group flex items-center justify-between min-h-[32px] hover:bg-gray-50 dark:hover:bg-white/5 px-3 rounded-lg -mx-3 transition-colors cursor-pointer border border-transparent hover:border-gray-100 dark:hover:border-gray-700" onClick={() => !field.readonly && startEdit(field.key, value)}><div className="text-gray-800 dark:text-gray-200">{displayContent}</div>{!field.readonly && <EditOutlined className="text-leather-400 opacity-0 group-hover:opacity-100 transition-opacity" />}</div>;
   };
 
-  if (!moduleConfig || !data) return loading ? <div className="flex h-screen items-center justify-center"><Spin size="large" /></div> : null;
-
   const fieldGroups = moduleConfig.blocks?.filter(b => b.type === BlockType.FIELD_GROUP && checkVisibility(b));
   const standardTableBlocks = moduleConfig.blocks?.filter(b => b.type === BlockType.TABLE && checkVisibility(b));
 
   const currentAssigneeId = data.assignee_id;
   const currentAssigneeType = data.assignee_type;
-  let assigneeLabel = 'تعیین مسئول';
   let assigneeIcon = <UserOutlined />;
   if (currentAssigneeId) {
       if (currentAssigneeType === 'user') {
           const u = allUsers.find(u => u.id === currentAssigneeId);
-          if (u) { assigneeLabel = u.full_name; assigneeIcon = u.avatar_url ? <Avatar src={u.avatar_url} size="small" /> : <Avatar icon={<UserOutlined />} size="small" />; }
+          if (u) { assigneeIcon = u.avatar_url ? <Avatar src={u.avatar_url} size="small" /> : <Avatar icon={<UserOutlined />} size="small" />; }
       } else {
           const r = allRoles.find(r => r.id === currentAssigneeId);
-          if (r) { assigneeLabel = r.title; assigneeIcon = <Avatar icon={<TeamOutlined />} size="small" className="bg-blue-100 text-blue-600" />; }
+          if (r) { assigneeIcon = <Avatar icon={<TeamOutlined />} size="small" className="bg-blue-100 text-blue-600" />; }
       }
   }
-
   return (
     <div className="p-4 md:p-6 max-w-[1600px] mx-auto pb-20 ml-16 transition-all">
       <RelatedSidebar moduleConfig={moduleConfig} recordId={id!} />
 
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
-             <Button icon={<ArrowRightOutlined />} onClick={() => navigate(`/${moduleId}`)} shape="circle" size="large" className="border-none shadow-sm shrink-0" />
-             <Breadcrumb className="whitespace-nowrap overflow-x-auto no-scrollbar" items={[{ title: <HomeOutlined />, onClick: () => navigate('/') }, { title: moduleConfig.titles.fa, onClick: () => navigate(`/${moduleId}`) }, { title: data.name }]} />
-        </div>
-        <div className="flex gap-2 w-full md:w-auto justify-end flex-wrap">
-            <Tooltip title="چاپ"><Button icon={<PrinterOutlined />} onClick={() => setIsPrintModalOpen(true)} className="hover:text-leather-600 hover:border-leather-600" /></Tooltip>
-            <Tooltip title="اشتراک گذاری"><Button icon={<ShareAltOutlined />} className="hover:text-leather-600 hover:border-leather-600" /></Tooltip>
-            <Popover content={<QRCode value={window.location.href} bordered={false} />} trigger="click"><Button icon={<QrcodeOutlined />} className="hover:text-leather-600 hover:border-leather-600">QR</Button></Popover>
-            <Button icon={<EditOutlined />} onClick={() => setIsEditDrawerOpen(true)} className="hover:text-leather-600 hover:border-leather-600">ویرایش</Button>
-            <Button icon={<DeleteOutlined />} danger onClick={handleDelete} className="hover:text-leather-600 hover:border-leather-600">حذف</Button>
-        </div>
-      </div>
+      <HeaderActions
+        moduleTitle={moduleConfig.titles.fa}
+        recordName={data.name}
+        shareUrl={pageUrl}
+        onBack={() => navigate(`/${moduleId}`)}
+        onHome={() => navigate('/')}
+        onModule={() => navigate(`/${moduleId}`)}
+        onPrint={() => setIsPrintModalOpen(true)}
+        onEdit={() => setIsEditDrawerOpen(true)}
+        onDelete={handleDelete}
+      />
 
-      {/* Hero Section */}
-      <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6 relative overflow-hidden animate-fadeIn">
-         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-leather-500 to-leather-800 opacity-80"></div>
-         
-         <div className="flex flex-col lg:flex-row gap-8 items-stretch">
-             {/* تصویر */}
-             <div className="w-full lg:w-56 h-48 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
-                 {data.image_url ? (
-                     <Image src={data.image_url} className="w-full h-full object-cover" wrapperStyle={{ width: '100%', height: '100%' }} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                 ) : <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-2"><LoadingOutlined className="text-3xl opacity-20" /><span className="text-xs">بدون تصویر</span></div>}
-                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center backdrop-blur-sm">
-                     <Upload showUploadList={false} beforeUpload={handleImageUpdate}><Button type="primary" icon={<UploadOutlined />} className="bg-leather-500 border-none">تغییر تصویر</Button></Upload>
-                 </div>
-             </div>
+      <HeroSection
+        data={{ ...data, id }}
+        moduleId={moduleId}
+        moduleConfig={moduleConfig}
+        currentTags={currentTags}
+        onTagsChange={fetchRecord}
+        renderSmartField={renderSmartField}
+        getOptionLabel={getOptionLabel}
+        getUserName={getUserName}
+        handleAssigneeChange={handleAssigneeChange}
+        getAssigneeOptions={getAssigneeOptions}
+        assigneeIcon={assigneeIcon}
+        onImageUpdate={handleImageUpdate}
+      />
 
-             {/* محتوا */}
-             <div className="flex-1 w-full flex flex-col justify-between">
-                 <div>
-                     <div className="flex flex-wrap items-start justify-between gap-4 mb-4 mt-2">
-                         <div className="flex flex-wrap items-center gap-3">
-                             <h1 className="text-2xl md:text-3xl font-black m-0 text-gray-800 dark:text-white">{data.name}</h1>
-                             {(data.system_code || data.custom_code) && <Tag className="font-mono dir-ltr bg-gray-100 dark:bg-white/10 border-none text-gray-500 px-2 py-1">{data.system_code || data.custom_code}</Tag>}
-                         </div>
+      <FieldGroupsTabs
+        fieldGroups={fieldGroups}
+        moduleConfig={moduleConfig}
+        renderSmartField={renderSmartField}
+        checkVisibility={checkVisibility}
+      />
 
-                         {/* بخش انتخاب مسئول */}
-                         <div className="flex items-center bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-full pl-1 pr-3 py-1 gap-2">
-                             <span className="text-xs text-gray-400">مسئول:</span>
-                             <Select
-                                bordered={false}
-                                value={currentAssigneeId ? `${currentAssigneeType}_${currentAssigneeId}` : null}
-                                onChange={handleAssigneeChange}
-                                placeholder="انتخاب کنید"
-                                className="min-w-[140px] font-bold text-gray-700 dark:text-gray-300"
-                                dropdownStyle={{ minWidth: 200 }}
-                                options={getAssigneeOptions()}
-                                optionRender={(option) => (
-                                    <Space>
-                                        <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
-                                        {option.data.label}
-                                    </Space>
-                                )}
-                             />
-                             <div className="w-6 h-6 flex items-center justify-center">{assigneeIcon}</div>
-                         </div>
-                     </div>
-
-                     {/* --- کامپوننت مدیریت تگ --- */}
-                     <div className="mb-6">
-                        <TagInput 
-                            recordId={id!} 
-                            moduleId={moduleId} 
-                            initialTags={currentTags} 
-                            onChange={() => fetchRecord()} // رفرش تگ‌ها بعد از تغییر
-                        />
-                     </div>
-
-                     {/* فیلدهای هدر */}
-                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mt-6">
-                         {moduleConfig.fields.filter(f => f.location === FieldLocation.HEADER && !['name', 'image_url', 'status', 'system_code'].includes(f.key)).map(f => (
-                            <div key={f.key} className="flex flex-col gap-1 border-r last:border-0 border-gray-100 dark:border-gray-700 px-4 first:pr-0">
-                                <span className="text-xs text-gray-400 uppercase tracking-wider">{f.labels.fa}</span>
-                                {renderSmartField(f, true)}
-                            </div>
-                         ))}
-                     </div>
-                 </div>
-
-                 <div className="mt-6 flex flex-col gap-4">
-                    {/* تگ‌های پایین */}
-                    <div className="flex gap-2 overflow-x-auto pb-2 border-t border-gray-100 dark:border-gray-800 pt-4">
-                        {data.category && <Tag icon={<AppstoreOutlined />} className="rounded-full px-3 py-1 bg-gray-50 dark:bg-white/5 border-none text-gray-600 dark:text-gray-300">{getOptionLabel(moduleConfig.fields.find(f => f.key === 'category'), data.category)}</Tag>}
-                        {data.product_type && <Tag className="rounded-full px-3 py-1 bg-leather-50 text-leather-600 border-none">{getOptionLabel(moduleConfig.fields.find(f => f.key === 'product_type'), data.product_type)}</Tag>}
-                    </div>
-
-                    {/* --- فیلدهای سیستمی (System Info) --- */}
-                    <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-500 dark:text-gray-400 border border-gray-100 dark:border-white/5">
-                        <div className="flex items-center gap-2">
-                             <div className="bg-white dark:bg-white/10 p-1.5 rounded-full"><SafetyCertificateOutlined className="text-green-600" /></div>
-                             <div className="flex flex-col">
-                                 <span className="opacity-70">ایجاد کننده</span>
-                                 <span className="font-bold text-gray-700 dark:text-gray-300">{getUserName(data.created_by)}</span>
-                             </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                             <div className="bg-white dark:bg-white/10 p-1.5 rounded-full"><ClockCircleOutlined className="text-blue-500" /></div>
-                             <div className="flex flex-col">
-                                 <span className="opacity-70">زمان ایجاد</span>
-                                 <span className="font-bold text-gray-700 dark:text-gray-300" dir="ltr">{data.created_at ? (dayjs(data.created_at) as any).calendar('jalali').format('YYYY/MM/DD - HH:mm') : '-'}</span>
-                             </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                             <div className="bg-white dark:bg-white/10 p-1.5 rounded-full"><EditOutlined className="text-orange-500" /></div>
-                             <div className="flex flex-col">
-                                 <span className="opacity-70">آخرین ویرایشگر</span>
-                                 <span className="font-bold text-gray-700 dark:text-gray-300">{getUserName(data.updated_by)}</span>
-                             </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                             <div className="bg-white dark:bg-white/10 p-1.5 rounded-full"><HistoryOutlined className="text-purple-500" /></div>
-                             <div className="flex flex-col">
-                                 <span className="opacity-70">زمان ویرایش</span>
-                                 <span className="font-bold text-gray-700 dark:text-gray-300" dir="ltr">{data.updated_at ? (dayjs(data.updated_at) as any).calendar('jalali').format('YYYY/MM/DD - HH:mm') : '-'}</span>
-                             </div>
-                        </div>
-                    </div>
-                 </div>
-             </div>
-         </div>
-      </div>
-
-      {/* Field Groups Tabs */}
-      {fieldGroups && fieldGroups.length > 0 && (
-          <div className="bg-white dark:bg-[#1a1a1a] p-1 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6">
-              <Tabs tabBarStyle={{ padding: '0 24px', marginBottom: 0 }} items={fieldGroups.map(block => ({
-                  key: block.id,
-                  label: <span className="flex items-center gap-2 py-3">{block.titles.fa}</span>,
-                  children: (
-                      <div className="p-6"><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6">
-                             {moduleConfig.fields.filter(f => f.blockId === block.id).map(f => ((!f.logic || checkVisibility(f.logic)) && (<div key={f.key} className="flex flex-col gap-1"><span className="text-xs text-gray-400">{f.labels.fa}</span>{renderSmartField(f)}</div>)))}
-                      </div></div>
-                  )
-              }))} />
-          </div>
-      )}
-
-      {linkedBomData ? (
-          <BomStructureRenderer 
-              bomData={linkedBomData}
-              relationOptions={relationOptions}
-              dynamicOptions={dynamicOptions}
-              onUpdate={() => fetchLinkedBom(linkedBomData.id)}
-          />
-      ) : (
-          standardTableBlocks && standardTableBlocks.length > 0 && (
-              <div className="space-y-6 overflow-x-auto pb-4">
-                  <div className="min-w-[600px]">
-                      {standardTableBlocks.map(block => (
-                          <div key={block.id} className="mb-6">
-                              <EditableTable 
-                                block={block}
-                                initialData={data[block.id] || []} 
-                                moduleId={moduleId}
-                                recordId={id!}
-                                relationOptions={relationOptions} 
-                                dynamicOptions={dynamicOptions}
-                                onSaveSuccess={(newData) => setData(prev => ({ ...prev, [block.id]: newData }))}
-                              />
-                          </div>
-                      ))}
-                  </div>
-              </div>
-          )
-      )}
+      <TablesSection
+        linkedBomData={linkedBomData}
+        standardTableBlocks={standardTableBlocks || []}
+        data={data}
+        moduleId={moduleId}
+        recordId={id!}
+        relationOptions={relationOptions}
+        dynamicOptions={dynamicOptions}
+        onLinkedBomUpdate={fetchLinkedBom}
+        onTableSave={(blockId, newData) => setData((prev: any) => ({ ...prev, [blockId]: newData }))}
+      />
 
       <Drawer title={`ویرایش ${data.name}`} width={720} onClose={() => setIsEditDrawerOpen(false)} open={isEditDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={5000}>
-        <SmartForm moduleConfig={moduleConfig} mode="edit" recordId={id} initialValues={data} onSuccess={() => { setIsEditDrawerOpen(false); fetchRecord(); }} onCancel={() => setIsEditDrawerOpen(false)} />
+        {React.createElement(SmartForm as any, { module: moduleConfig, recordId: id, onSuccess: () => { setIsEditDrawerOpen(false); fetchRecord(); }, onCancel: () => setIsEditDrawerOpen(false) })}
       </Drawer>
 
-      <Modal
-        title="قالب چاپ"
-        open={isPrintModalOpen}
-        onCancel={() => setIsPrintModalOpen(false)}
-        onOk={handlePrint}
-        okText="چاپ"
-        cancelText="انصراف"
-        width={760}
-        destroyOnClose
-      >
-        <div className="print-modal">
-          <div className="print-template-list">
-            {printTemplates.map(t => (
-              <button
-                key={t.id}
-                type="button"
-                className={`print-template-item ${selectedTemplateId === t.id ? 'active' : ''}`}
-                onClick={() => setSelectedTemplateId(t.id)}
-              >
-                <div className="print-template-title">{t.title}</div>
-                <div className="print-template-desc">{t.description}</div>
-              </button>
-            ))}
-          </div>
-          <div className="print-preview">
-            <div className="print-preview-inner">
-              {renderPrintCard()}
-            </div>
-          </div>
-        </div>
-      </Modal>
-
-      <div id="print-root" aria-hidden={!printMode}>
-        {renderPrintCard()}
-      </div>
+      <PrintSection
+        isPrintModalOpen={isPrintModalOpen}
+        onClose={() => setIsPrintModalOpen(false)}
+        onPrint={handlePrint}
+        printTemplates={printTemplates}
+        selectedTemplateId={selectedTemplateId}
+        onSelectTemplate={setSelectedTemplateId}
+        renderPrintCard={renderPrintCard}
+        printMode={printMode}
+      />
 
       <style>{`
         .animate-fadeIn { animation: fadeIn 0.5s ease-out; }

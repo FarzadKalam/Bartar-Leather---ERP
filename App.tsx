@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Refine } from "@refinedev/core";
 import { notificationProvider, ErrorComponent } from "@refinedev/antd";
 import { dataProvider } from "@refinedev/supabase";
@@ -18,10 +18,15 @@ import Layout from "./components/Layout";
 // صفحات (مدل قدیمی - فعلاً نگه می‌داریم تا سایت بالا بیاد)
 //import ModuleList from "./pages/ModuleList";
 import { ModuleListRefine } from "./pages/ModuleList_Refine";
-import { ModuleCreate } from "./pages/ModuleCreate";
 import ModuleShow from "./pages/ModuleShow";
+import "./App.css";
+import { ModuleCreate } from "./pages/ModuleCreate";
 
 function App() {
+  useEffect(() => {
+    document.body.style.fontFamily = 'Vazirmatn, sans-serif';
+  }, []);
+
   // تبدیل ماژول‌های پروژه به فرمت استاندارد Refine
   const resources = Object.values(MODULES).map((mod) => ({
     name: mod.id, 
@@ -61,7 +66,9 @@ function App() {
           >
             <Routes>
               {/* لایه اصلی اپلیکیشن */}
-              <Route element={<Layout><Outlet /></Layout>}>
+              <Route element={<Layout isDarkMode={false} toggleTheme={function (): void {
+                throw new Error("Function not implemented.");
+              } }><Outlet /></Layout>}>
                 
                 {/* روت اصلی: هدایت به محصولات */}
                 <Route index element={<NavigateToResource resource="products" />} />

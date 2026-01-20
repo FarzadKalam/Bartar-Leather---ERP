@@ -1,7 +1,21 @@
 
-import { Product, BOM, ProductionOrder } from './src/types';
+/**
+ * Mock Data for Development & Testing
+ * 
+ * این داده‌ها برای development استفاده می‌شوند اگر Supabase دسترسی‌پذیر نباشد.
+ * 
+ * نحوه استفاده:
+ * - اگر database فعال باشد: داده‌های real از Supabase استفاده می‌شوند
+ * - اگر database نباشد: این mock data استفاده می‌شود
+ * 
+ * برای استفاده صریح mock data:
+ * import { fetchProducts } from './utils/dataFallback';
+ * const products = await fetchProducts({ useMockData: true });
+ * 
+ * @see utils/dataFallback.ts برای helper functions
+ */
 
-export const MOCK_PRODUCTS: Product[] = [
+export const MOCK_PRODUCTS: any[] = [
   {
     id: '1',
     sku: 'LTHR-B001',
@@ -120,7 +134,7 @@ export const MOCK_PRODUCTS: Product[] = [
   },
 ];
 
-export const MOCK_BOMS: BOM[] = [
+export const MOCK_BOMS: any[] = [
     {
         id: '1',
         name: 'BOM کیف اداری برنارد',
@@ -149,7 +163,7 @@ export const MOCK_BOMS: BOM[] = [
     }
 ];
 
-export const MOCK_PRODUCTION_ORDERS: ProductionOrder[] = [
+export const MOCK_PRODUCTION_ORDERS: any[] = [
     {
         id: '1',
         name: 'تولید سفارش زمستانه - کیف برنارد',

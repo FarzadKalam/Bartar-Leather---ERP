@@ -53,7 +53,7 @@ const BomStructureRenderer: React.FC<BomStructureRendererProps> = ({
                         <EditableTable 
                           block={block}
                           initialData={bomData[block.id] || []} 
-                          moduleId="production_boms" // همیشه روی جدول BOM ذخیره می‌کند
+                          moduleId="production_boms"
                           recordId={bomData.id} 
                           relationOptions={relationOptions} 
                           dynamicOptions={dynamicOptions}
