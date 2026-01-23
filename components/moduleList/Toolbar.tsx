@@ -63,7 +63,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
           onChange={(val) => setViewMode(val as ViewMode)}
         />
 
-        {viewMode === "kanban" && kanbanEnabled && (
+        {viewMode === ViewMode.KANBAN && kanbanEnabled && (
           <Segmented
             options={kanbanGroupOptions}
             value={kanbanGroupBy || kanbanGroupOptions?.[0]?.value}

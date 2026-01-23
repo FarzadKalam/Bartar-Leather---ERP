@@ -3,6 +3,11 @@
 // اعداد فارسی برای نمایش (مقادیر داخلی انگلیسی باقی می‌ماند)
 // ==========================================
 
+import dayjs from 'dayjs';
+import jalaliday from 'jalaliday';
+
+dayjs.extend(jalaliday);
+
 /**
  * تبدیل اعداد انگلیسی به فارسی
  * 0-9 → ۰-۹
@@ -35,7 +40,7 @@ export const formatPersianPrice = (num: any, withComma = true): string => {
   const number = Number(num);
   if (isNaN(number)) return '-';
   
-  let formatted = number.toLocaleString('en-US');
+  let formatted = withComma ? number.toLocaleString('en-US') : number.toString();
   return toPersianNumber(formatted);
 };
 
@@ -118,8 +123,119 @@ export const formatPersianDecimal = (num: any, decimals = 2): string => {
  */
 export const formatPersianTime = (time: any): string => {
   if (!time) return '-';
+  const str = String(time);
+  const trimmed = str.includes(':') ? str.split(':').slice(0, 2).join(':') : str;
+  return toPersianNumber(trimmed);
+};
+
+/**
+ * فرمت امن تاریخ/زمان جلالی
+ * تبدیل هر تاریخی (timestamptz، ISO string، Dayjs) به فرمت جلالی
+ * 
+ * @param value - تاریخ ورودی (ISO string، timestamp، Dayjs object)
+ * @param format - فرمت خروجی (مثل 'YYYY/MM/DD' یا 'YYYY/MM/DD HH:mm')
+ * @returns string فرمت شده به جلالی یا خالی اگر نامعتبر باشد
+ */
+export const safeJalaliFormat = (value: any, format: string): string => {
+  if (!value) return '';
   
-  return toPersianNumber(String(time));
+  try {
+    let dayjsObj: any;
+    
+    // Check if it's already a Dayjs object
+    if (value && typeof value === 'object' && value.$d) {
+      // It's a Dayjs object, use the internal Date
+      dayjsObj = dayjs(value.$d);
+    } else {
+      // Check if the value string contains a Jalali year (1300-1500 range)
+      const valueStr = String(value);
+      const yearMatch = valueStr.match(/^(\d{4})/);
+      
+      if (yearMatch) {
+        const year = parseInt(yearMatch[1]);
+        
+        // If year is in Jalali range (1300-1500), it's already a Jalali string
+        // Just reformat it without parsing through dayjs
+        if (year >= 1300 && year <= 1500) {
+          // Parse Jalali date string: "1404-11-15 00:00" or "1404-11-15T00:00:00"
+          const dateTimeMatch = valueStr.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[\sT](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+          if (dateTimeMatch) {
+            const [, y, m, d, h, min] = dateTimeMatch;
+            
+            // Format based on requested format
+            if (format.includes('HH:mm')) {
+              // DATETIME format
+              const hour = h || '00';
+              const minute = min || '00';
+              return `${y}/${m.padStart(2, '0')}/${d.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+            } else if (format === 'HH:mm') {
+              // TIME format
+              const hour = h || '00';
+              const minute = min || '00';
+              return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
+            } else {
+              // DATE format
+              return `${y}/${m.padStart(2, '0')}/${d.padStart(2, '0')}`;
+            }
+          }
+        }
+      }
+      
+      // Parse as Gregorian and convert to Jalali
+      dayjsObj = dayjs(value);
+    }
+    
+    // Validate
+    if (!dayjsObj || !dayjsObj.isValid()) {
+      return '';
+    }
+    
+    const gregorianYear = dayjsObj.year();
+    if (gregorianYear < 1900 || gregorianYear > 2100) {
+      return '';
+    }
+    
+    // Convert to Jalali calendar for display
+    const jalaliDate = dayjsObj.calendar('jalali');
+    
+    // Check if we have a valid Jalali date
+    if (!jalaliDate || typeof jalaliDate.format !== 'function') {
+      console.error('Failed to convert to Jalali calendar:', value);
+      return '';
+    }
+    
+    return jalaliDate.format(format);
+    
+  } catch (e) {
+    console.error('Failed to format Jalali:', value, e);
+    return '';
+  }
+};
+
+/**
+ * تابع مرکزی برای parse کردن تاریخ
+ * هر نوع ورودی (ISO string، timestamp، Date object، Dayjs) را به Dayjs تبدیل می‌کند
+ * 
+ * @param rawValue - تاریخ ورودی
+ * @returns Dayjs object یا null اگر نامعتبر باشد
+ */
+export const parseDateValue = (rawValue: any): any => {
+  if (!rawValue) return null;
+  
+  try {
+    const dayjsObj = dayjs(rawValue);
+    
+    if (!dayjsObj.isValid()) return null;
+    
+    const gregorianYear = dayjsObj.year();
+    if (gregorianYear < 1900 || gregorianYear > 2100) return null;
+    
+    return dayjsObj;
+    
+  } catch (e) {
+    console.error('Failed to parse date:', rawValue, e);
+    return null;
+  }
 };
 
 /**

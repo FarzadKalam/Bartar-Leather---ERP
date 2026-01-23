@@ -13,6 +13,8 @@ interface TablesSectionProps {
   dynamicOptions: Record<string, any[]>;
   onLinkedBomUpdate: (bomId: string) => void;
   onTableSave: (blockId: string, newData: any[]) => void;
+  canViewField?: (fieldKey: string) => boolean;
+  readOnly?: boolean;
 }
 
 const TablesSection: React.FC<TablesSectionProps> = ({
@@ -25,6 +27,8 @@ const TablesSection: React.FC<TablesSectionProps> = ({
   dynamicOptions,
   onLinkedBomUpdate,
   onTableSave,
+  canViewField,
+  readOnly,
 }) => {
   if (linkedBomData) {
     return (
@@ -32,6 +36,8 @@ const TablesSection: React.FC<TablesSectionProps> = ({
         bomData={linkedBomData}
         relationOptions={relationOptions}
         dynamicOptions={dynamicOptions}
+        canViewField={canViewField}
+        readOnly={readOnly}
         onUpdate={() => onLinkedBomUpdate(linkedBomData.id)}
       />
     );
@@ -53,13 +59,15 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               recordId={recordId}
               relationOptions={relationOptions}
               dynamicOptions={dynamicOptions}
+              canViewField={canViewField}
+              readOnly={readOnly}
               onSaveSuccess={(newData) => onTableSave(block.id, newData)}
             />
           </div>
         ))}
       </div>
 
-      {hasAnyRows && (
+      {hasAnyRows && (canViewField ? canViewField('grand_total') !== false : true) && (
         <div className="bg-gradient-to-r from-gray-800 to-gray-900 dark:from-leather-900 dark:to-black text-white p-6 rounded-[2rem] shadow-xl mt-8 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-2xl shadow-inner">

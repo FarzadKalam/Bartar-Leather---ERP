@@ -2,7 +2,7 @@ import React from "react";
 import { Avatar, Checkbox, Popover, Tag } from "antd";
 import { AppstoreOutlined } from "@ant-design/icons";
 import { FieldType } from "../../types";
-import { formatPersianPrice } from "../../utils/persianNumberFormatter";
+import { formatPersianPrice, toPersianNumber, safeJalaliFormat } from "../../utils/persianNumberFormatter";
 
 export interface RenderCardItemProps {
   item: any;
@@ -12,10 +12,13 @@ export interface RenderCardItemProps {
   tagsField?: string;
   statusField?: string;
   categoryField?: string;
+  allUsers?: any[];
+  allRoles?: any[];
   selectedRowKeys: React.Key[];
   setSelectedRowKeys: (keys: React.Key[]) => void;
   navigate: (path: string) => void;
   minimal?: boolean;
+  canViewField?: (fieldKey: string) => boolean;
 }
 
 const RenderCardItem: React.FC<RenderCardItemProps> = ({
@@ -26,14 +29,18 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
   tagsField,
   statusField,
   categoryField,
+  allUsers = [],
+  allRoles = [],
   selectedRowKeys,
   setSelectedRowKeys,
   navigate,
   minimal = false,
+  canViewField,
 }) => {
   const isSelected = selectedRowKeys.includes(item.id);
   const imageUrl = imageField ? item[imageField] : null;
   const title = item.name || item.business_name || item.title || item.last_name || "بدون نام";
+  const isTasks = moduleId === 'tasks';
 
   const statusFieldConfig = moduleConfig?.fields.find(
     (f: any) => f.type === FieldType.STATUS || f.key === statusField,
@@ -44,6 +51,55 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
   const categoryFieldConfig = moduleConfig?.fields.find((f: any) => f.key === categoryField);
   const category = categoryField ? item[categoryField] : null;
   const categoryLabel = categoryFieldConfig?.options?.find((o: any) => o.value === category)?.label || category;
+
+  const assigneeId = item.assignee_id;
+  const assigneeType = item.assignee_type;
+  const dueDate = item.due_date;
+  const assigneeAllowed = canViewField ? canViewField('assignee_id') !== false : true;
+  const dueAllowed = canViewField ? canViewField('due_date') !== false : true;
+  const categoryAllowed = canViewField ? canViewField(categoryFieldConfig?.key || 'related_to_module') !== false : true;
+
+  const renderAssignee = () => {
+    if (!assigneeId) {
+      return <span className="text-[10px] text-gray-400">-</span>;
+    }
+    if (assigneeType === 'user') {
+      const user = allUsers.find((u: any) => u.id === assigneeId);
+      if (user) {
+        return (
+          <div className="flex items-center gap-1 min-w-0">
+            <Avatar size={18} src={user.avatar_url}>
+              {!user.avatar_url && user.full_name?.[0]}
+            </Avatar>
+            <span className="text-[10px] text-gray-600 dark:text-gray-300 truncate max-w-[90px]">
+              {user.full_name}
+            </span>
+          </div>
+        );
+      }
+    }
+    if (assigneeType === 'role') {
+      const role = allRoles.find((r: any) => r.id === assigneeId);
+      if (role) {
+        return (
+          <div className="flex items-center gap-1 min-w-0">
+            <Avatar size={18} className="bg-blue-100 text-blue-600">R</Avatar>
+            <span className="text-[10px] text-gray-600 dark:text-gray-300 truncate max-w-[90px]">
+              {role.title}
+            </span>
+          </div>
+        );
+      }
+    }
+    return <span className="text-[10px] text-gray-400">نامشخص</span>;
+  };
+
+  const renderDueDate = () => {
+    if (!dueDate) return <span className="text-[10px] text-gray-400">-</span>;
+    const formatted = safeJalaliFormat(dueDate, 'YYYY/MM/DD HH:mm');
+    if (!formatted) return <span className="text-[10px] text-gray-400">-</span>;
+    return <span className="text-[10px] text-gray-600 dark:text-gray-300 dir-ltr">{toPersianNumber(formatted)}</span>;
+  };
 
   const toggleSelect = (e: any) => {
     e.stopPropagation();
@@ -67,13 +123,15 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
       </div>
 
       <div className="flex gap-2 mb-2">
-        <Avatar
-          shape="square"
-          size={minimal ? 40 : 54}
-          src={imageUrl}
-          icon={<AppstoreOutlined />}
-          className="rounded-lg bg-gray-50 border border-gray-100 dark:bg-gray-800 dark:border-gray-700 shrink-0 object-cover"
-        />
+        {!isTasks && (
+          <Avatar
+            shape="square"
+            size={minimal ? 40 : 54}
+            src={imageUrl}
+            icon={<AppstoreOutlined />}
+            className="rounded-lg bg-gray-50 border border-gray-100 dark:bg-gray-800 dark:border-gray-700 shrink-0 object-cover"
+          />
+        )}
         <div className="min-w-0 flex-1 pr-6">
           <h4
             className={`font-bold text-gray-800 dark:text-white truncate mb-0.5 ${minimal ? "text-xs" : "text-sm"}`}
@@ -84,6 +142,20 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
           <div className="text-[10px] text-gray-400 font-mono mb-1">
             {item.system_code || item.manual_code || "---"}
           </div>
+          {isTasks && category && categoryAllowed && (
+            <Tag
+              color="default"
+              style={{
+                fontSize: "10px",
+                lineHeight: "16px",
+                margin: 0,
+                backgroundColor: "#f0f0f0",
+                color: "#262626",
+              }}
+            >
+              {categoryLabel}
+            </Tag>
+          )}
         </div>
       </div>
 
@@ -91,13 +163,13 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
         <>
           <div className="flex justify-between gap-2 mb-2 px-0">
             <div className="flex items-center gap-2 flex-wrap flex-1">
-              {statusOption && (
+              {statusOption && (canViewField ? canViewField(statusFieldConfig?.key || 'status') !== false : true) && (
                 <Tag color={statusOption.color || "default"} style={{ fontSize: "10px", lineHeight: "16px", margin: 0 }}>
                   {statusOption.label}
                 </Tag>
               )}
 
-              {category && (
+              {category && (canViewField ? canViewField(categoryFieldConfig?.key || 'category') !== false : true) && (
                 <Tag
                   color="default"
                   style={{
@@ -152,24 +224,60 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
           </div>
 
           <div className="mt-auto pt-2 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center gap-2 text-xs">
-            {item.buy_price && (
-              <div className="flex flex-col gap-0">
-                <span className="text-gray-500 dark:text-gray-400 text-[8px]">خرید</span>
-                <span className="font-bold text-gray-700 dark:text-gray-300 persian-number text-[11px]">
-                  {formatPersianPrice(item.buy_price, true)}
-                </span>
-              </div>
-            )}
-            {item.sell_price && (
-              <div className="flex flex-col gap-0">
-                <span className="text-gray-500 dark:text-gray-400 text-[8px]">فروش</span>
-                <span className="font-bold text-gray-700 dark:text-gray-300 persian-number text-[11px]">
-                  {formatPersianPrice(item.sell_price, true)}
-                </span>
-              </div>
+            {isTasks ? (
+              <>
+                {assigneeAllowed && (
+                  <div className="flex flex-col gap-0">
+                    <span className="text-gray-500 dark:text-gray-400 text-[8px]">مسئول</span>
+                    {renderAssignee()}
+                  </div>
+                )}
+                {dueAllowed && (
+                  <div className="flex flex-col gap-0 text-right">
+                    <span className="text-gray-500 dark:text-gray-400 text-[8px]">مهلت انجام</span>
+                    {renderDueDate()}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {item.buy_price && (canViewField ? canViewField('buy_price') !== false : true) && (
+                  <div className="flex flex-col gap-0">
+                    <span className="text-gray-500 dark:text-gray-400 text-[8px]">خرید</span>
+                    <span className="font-bold text-gray-700 dark:text-gray-300 persian-number text-[11px]">
+                      {formatPersianPrice(item.buy_price, true)}
+                    </span>
+                  </div>
+                )}
+                {item.sell_price && (canViewField ? canViewField('sell_price') !== false : true) && (
+                  <div className="flex flex-col gap-0">
+                    <span className="text-gray-500 dark:text-gray-400 text-[8px]">فروش</span>
+                    <span className="font-bold text-gray-700 dark:text-gray-300 persian-number text-[11px]">
+                      {formatPersianPrice(item.sell_price, true)}
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>
+      )}
+
+      {minimal && isTasks && (assigneeAllowed || dueAllowed) && (
+        <div className="mt-auto pt-2 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center gap-2 text-xs">
+          {assigneeAllowed && (
+            <div className="flex flex-col gap-0">
+              <span className="text-gray-500 dark:text-gray-400 text-[8px]">مسئول</span>
+              {renderAssignee()}
+            </div>
+          )}
+          {dueAllowed && (
+            <div className="flex flex-col gap-0 text-right">
+              <span className="text-gray-500 dark:text-gray-400 text-[8px]">مهلت انجام</span>
+              {renderDueDate()}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

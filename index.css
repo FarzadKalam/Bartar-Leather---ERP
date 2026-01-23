@@ -16,6 +16,7 @@
 .persian-number {
   font-family: 'Vazirmatn', system-ui, sans-serif;
   font-weight: 600;
+  font-feature-settings: "ss01";
 }
 
 /* اسکرول‌بار سفارشی */
@@ -118,6 +119,27 @@
 
 .dark .custom-erp-table .ant-pagination-total-text {
   color: rgb(156, 163, 175) !important;
+}
+
+/* تنظیمات تقویم جلالی - رنگ جمعه */
+.ant-picker-calendar .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.ant-picker-dropdown .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.ant-picker-calendar .ant-picker-content thead tr th:nth-child(6),
+.ant-picker-dropdown .ant-picker-content thead tr th:nth-child(6) {
+  color: #c58f60 !important; /* رنگ تم طلایی برای جمعه */
+}
+
+.ant-picker-calendar .ant-picker-cell:nth-child(6):not(.ant-picker-cell-in-view) .ant-picker-cell-inner,
+.ant-picker-dropdown .ant-picker-cell:nth-child(6):not(.ant-picker-cell-in-view) .ant-picker-cell-inner {
+  color: rgba(197, 143, 96, 0.4) !important; /* رنگ محو برای روزهای خارج از ماه */
+}
+
+/* حالت دارک */
+.dark .ant-picker-calendar .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.dark .ant-picker-dropdown .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.dark .ant-picker-calendar .ant-picker-content thead tr th:nth-child(6),
+.dark .ant-picker-dropdown .ant-picker-content thead tr th:nth-child(6) {
+  color: #c58f60 !important;
 }
 
 /* برای موبایل - کوچک‌تر کنید */

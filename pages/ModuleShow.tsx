@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Button, Tag, Spin, App, Input, InputNumber, Select, Drawer, Avatar, QRCode } from 'antd';
+import { Button, Tag, Spin, App, Input, InputNumber, Select, Avatar, QRCode } from 'antd';
+import { DatePicker as JalaliDatePicker, TimePicker as JalaliTimePicker } from 'antd-jalali';
 import { EditOutlined, CheckOutlined, CloseOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
@@ -9,16 +10,15 @@ import SmartForm from '../components/SmartForm';
 import RelatedSidebar from '../components/Sidebar/RelatedSidebar';
 import DynamicSelectField from '../components/DynamicSelectField';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
-import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
+import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
+import { jalaliDatePickerLocale } from '../utils/jalaliLocale';
 import dayjs from 'dayjs';
-import jalaliday from 'jalaliday';
+import type { Dayjs } from 'dayjs';
 import HeaderActions from '../components/moduleShow/HeaderActions';
 import HeroSection from '../components/moduleShow/HeroSection';
 import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
 import TablesSection from '../components/moduleShow/TablesSection';
 import PrintSection from '../components/moduleShow/PrintSection';
-
-dayjs.extend(jalaliday);
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -42,6 +42,8 @@ const ModuleShow: React.FC = () => {
   const [, setUploadingImage] = useState(false);
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
+  const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
+  const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
 
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [allRoles, setAllRoles] = useState<any[]>([]);
@@ -90,6 +92,57 @@ const ModuleShow: React.FC = () => {
   useEffect(() => {
     fetchRecord();
   }, [fetchRecord]);
+
+  const fetchFieldPermissions = useCallback(async () => {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.role_id) return;
+
+      const { data: role } = await supabase
+        .from('org_roles')
+        .select('permissions')
+        .eq('id', profile.role_id)
+        .single();
+
+      const modulePerms = role?.permissions?.[moduleId] || {};
+      const perms = modulePerms.fields || {};
+      setFieldPermissions(perms);
+      setModulePermissions({
+        view: modulePerms.view,
+        edit: modulePerms.edit,
+        delete: modulePerms.delete
+      });
+    } catch (err) {
+      console.warn('Could not fetch field permissions:', err);
+    }
+  }, [moduleId]);
+
+  useEffect(() => {
+    fetchFieldPermissions();
+  }, [fetchFieldPermissions]);
+
+  const canViewField = useCallback(
+    (fieldKey: string) => {
+      if (Object.prototype.hasOwnProperty.call(fieldPermissions, fieldKey)) {
+        return fieldPermissions[fieldKey] !== false;
+      }
+      return true;
+    },
+    [fieldPermissions]
+  );
+
+  const canViewModule = modulePermissions.view !== false;
+  const canEditModule = modulePermissions.edit !== false;
+  const canDeleteModule = modulePermissions.delete !== false;
 
   useEffect(() => {
     if (!printMode) return;
@@ -165,16 +218,13 @@ const ModuleShow: React.FC = () => {
         } else {
           const { targetModule, filter } = field.relationConfig;
           try {
-            const { data: relData } = await supabase.from(targetModule).select('id, name, system_code').limit(200);
+            const filterKeys = filter ? Object.keys(filter) : [];
+            const filterSelect = filterKeys.length > 0 ? `, ${filterKeys.join(', ')}` : '';
+            let query = supabase.from(targetModule).select(`id, name, system_code${filterSelect}`).limit(200);
+            if (filter) query = query.match(filter);
+            const { data: relData } = await query;
             if (relData) {
-              let filteredData = relData;
-              if (filter) {
-                filteredData = relData.filter((item: any) => {
-                  return Object.keys(filter).every(k => item[k] === filter[k]);
-                });
-              }
-                        
-              const options = filteredData.map((i: any) => ({ 
+              const options = relData.map((i: any) => ({ 
                 label: i.system_code ? `${i.name} (${i.system_code})` : i.name, 
                 value: i.id,
                 name: i.name,
@@ -293,6 +343,7 @@ const ModuleShow: React.FC = () => {
   }, [id, moduleId, msg]);
 
   const saveEdit = async (key: string) => {
+    if (!canEditModule) return;
     setSavingField(key);
     let newValue = tempValues[key];
     if (newValue === '' || newValue === undefined) newValue = null;
@@ -305,7 +356,11 @@ const ModuleShow: React.FC = () => {
     } catch (error: any) { msg.error(error.message); } finally { setSavingField(null); }
   };
 
-  const startEdit = (key: string, value: any) => { setEditingFields(prev => ({ ...prev, [key]: true })); setTempValues(prev => ({ ...prev, [key]: value })); };
+  const startEdit = (key: string, value: any) => {
+    if (!canEditModule) return;
+    setEditingFields(prev => ({ ...prev, [key]: true }));
+    setTempValues(prev => ({ ...prev, [key]: value }));
+  };
   const cancelEdit = (key: string) => { setEditingFields(prev => ({ ...prev, [key]: false })); };
 
   const checkVisibility = (logic: any) => {
@@ -379,9 +434,16 @@ const ModuleShow: React.FC = () => {
     if (field.type === FieldType.CHECKBOX) return value ? 'بله' : 'خیر';
     if (field.type === FieldType.PRICE) return `${Number(value).toLocaleString()} ریال`;
     if (field.type === FieldType.PERCENTAGE) return `${value}%`;
-    if (field.type === FieldType.DATE || field.type === FieldType.DATETIME) {
-      const date = dayjs(value);
-      return date.isValid() ? (date as any).calendar('jalali').format('YYYY/MM/DD') : String(value);
+    if (field.type === FieldType.DATE) {
+      const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+      return formatted ? toPersianNumber(formatted) : String(value);
+    }
+    if (field.type === FieldType.TIME) {
+      return formatPersianTime(value);
+    }
+    if (field.type === FieldType.DATETIME) {
+      const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+      return formatted ? toPersianNumber(formatted) : String(value);
     }
     if (field.type === FieldType.STATUS || field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT || field.type === FieldType.RELATION) {
       return String(getOptionLabel(field, value));
@@ -400,6 +462,7 @@ const ModuleShow: React.FC = () => {
     return moduleConfig.fields
       .filter(f => f.type !== FieldType.IMAGE && f.type !== FieldType.JSON && f.type !== FieldType.READONLY_LOOKUP)
       .filter(f => !f.logic || checkVisibility(f.logic))
+      .filter(f => canViewField(f.key))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(f => ({ ...f, value: data[f.key] }))
       .filter(f => hasValue(f.value));
@@ -456,8 +519,16 @@ const ModuleShow: React.FC = () => {
   ];
 
   if (!moduleConfig || !data) return loading ? <div className="flex h-screen items-center justify-center"><Spin size="large" /></div> : null;
+  if (!canViewModule) {
+    return (
+      <div className="flex h-screen items-center justify-center text-gray-400">
+        دسترسی مشاهده برای این ماژول ندارید.
+      </div>
+    );
+  }
 
   const renderSmartField = (field: any, isHeader = false) => {
+    if (!canViewField(field.key)) return null;
     const isEditing = editingFields[field.key];
     const value = data[field.key];
     let baseValue = value ?? undefined;
@@ -472,6 +543,13 @@ const ModuleShow: React.FC = () => {
     }
     
     const tempValue = tempValues[field.key] !== undefined ? tempValues[field.key] : baseValue;
+
+    const renderPersianDateCell = (current: Dayjs) => {
+      const formatted = safeJalaliFormat(current, 'D');
+      const fallback = current && (current as any).isValid?.() ? current.format('D') : '';
+      const display = formatted || fallback;
+      return <div className="ant-picker-cell-inner">{display ? toPersianNumber(display) : ''}</div>;
+    };
 
     if (isEditing) {
       let inputNode;
@@ -508,6 +586,60 @@ const ModuleShow: React.FC = () => {
            inputNode = <InputNumber formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={value => value!.replace(/\$\s?|(,*)/g, '')} value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
       } else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
            inputNode = <InputNumber value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
+      } else if (field.type === FieldType.DATE) {
+           inputNode = (
+             <JalaliDatePicker
+               className="w-full"
+               value={parseDateValue(tempValue)}
+               onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: date ? date.format('YYYY-MM-DD') : null }))}
+               placeholder="انتخاب تاریخ"
+               format={(value: Dayjs | null) => {
+                 const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+                 return formatted ? toPersianNumber(formatted) : '';
+               }}
+               locale={jalaliDatePickerLocale}
+               popupClassName="persian-number"
+               dateRender={renderPersianDateCell}
+               getPopupContainer={(trigger: HTMLElement) => trigger.parentElement || document.body}
+               popupStyle={{ zIndex: 1600 }}
+             />
+           );
+      } else if (field.type === FieldType.TIME) {
+           inputNode = (
+             <JalaliTimePicker
+               className="w-full"
+              value={tempValue ? dayjs(tempValue, ['HH:mm', 'HH:mm:ss']) : null}
+               onChange={(time: Dayjs | Dayjs[] | null) => {
+                 const picked = Array.isArray(time) ? time[0] : time;
+                 setTempValues(prev => ({ ...prev, [field.key]: picked ? picked.format('HH:mm') : null }));
+               }}
+               placeholder="انتخاب زمان"
+               format={(value: Dayjs | null) => (value ? toPersianNumber(value.format('HH:mm')) : '')}
+               locale={jalaliDatePickerLocale}
+               popupClassName="persian-number"
+               getPopupContainer={(trigger: HTMLElement) => trigger.parentElement || document.body}
+               popupStyle={{ zIndex: 1600 }}
+             />
+           );
+      } else if (field.type === FieldType.DATETIME) {
+           inputNode = (
+             <JalaliDatePicker
+               className="w-full"
+               showTime={{ format: 'HH:mm', showSecond: false }}
+               value={parseDateValue(tempValue)}
+               onChange={(datetime: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: datetime ? datetime.format('YYYY-MM-DD HH:mm') : null }))}
+               placeholder="انتخاب تاریخ و زمان"
+               format={(value: Dayjs | null) => {
+                 const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+                 return formatted ? toPersianNumber(formatted) : '';
+               }}
+               locale={jalaliDatePickerLocale}
+               popupClassName="persian-number"
+               dateRender={renderPersianDateCell}
+               getPopupContainer={(trigger: HTMLElement) => trigger.parentElement || document.body}
+               popupStyle={{ zIndex: 1600 }}
+             />
+           );
       } else {
            inputNode = <Input value={tempValue} onChange={e => setTempValues(prev => ({ ...prev, [field.key]: e.target.value }))} />;
       }
@@ -519,6 +651,25 @@ const ModuleShow: React.FC = () => {
     else if (field.type === FieldType.PRICE) {
         const persianPrice = formatPersianPrice(value);
         displayContent = <span className="persian-number font-bold text-lg">{persianPrice} <span className="text-[10px] text-gray-500 font-sans font-normal">تومان</span></span>;
+    }
+    else if (field.type === FieldType.DATE) {
+      const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+      if (!formatted) {
+        displayContent = <span className="text-gray-300 text-xs italic">---</span>;
+      } else {
+        displayContent = <span className="persian-number font-bold text-lg">{toPersianNumber(formatted)}</span>;
+      }
+    }
+    else if (field.type === FieldType.TIME) {
+      displayContent = <span className="persian-number font-bold text-lg">{formatPersianTime(value)}</span>;
+    }
+    else if (field.type === FieldType.DATETIME) {
+      const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+      if (!formatted) {
+        displayContent = <span className="text-gray-300 text-xs italic">---</span>;
+      } else {
+        displayContent = <span className="persian-number font-bold text-lg">{toPersianNumber(formatted)}</span>;
+      }
     }
     else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
         const persianNum = toPersianNumber(value);
@@ -573,8 +724,8 @@ const ModuleShow: React.FC = () => {
     else if (field.type === FieldType.STOCK) displayContent = <span className={`font-mono font-bold ${value < (data.reorder_point || 10) ? 'text-red-500' : 'text-green-600'}`}>{value}</span>;
     else displayContent = <span className="font-medium">{value}</span>;
 
-    if (isHeader) return <div className="group flex items-center gap-2 cursor-pointer" onClick={() => !field.readonly && startEdit(field.key, value)}>{displayContent}{!field.readonly && <EditOutlined className="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity text-xs" />}</div>;
-    return <div className="group flex items-center justify-between min-h-[32px] hover:bg-gray-50 dark:hover:bg-white/5 px-3 rounded-lg -mx-3 transition-colors cursor-pointer border border-transparent hover:border-gray-100 dark:hover:border-gray-700" onClick={() => !field.readonly && startEdit(field.key, value)}><div className="text-gray-800 dark:text-gray-200">{displayContent}</div>{!field.readonly && <EditOutlined className="text-leather-400 opacity-0 group-hover:opacity-100 transition-opacity" />}</div>;
+    if (isHeader) return <div className="group flex items-center gap-2 cursor-pointer" onClick={() => !field.readonly && canEditModule && startEdit(field.key, value)}>{displayContent}{!field.readonly && canEditModule && <EditOutlined className="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity text-xs" />}</div>;
+    return <div className="group flex items-center justify-between min-h-[32px] hover:bg-gray-50 dark:hover:bg-white/5 px-3 rounded-lg -mx-3 transition-colors cursor-pointer border border-transparent hover:border-gray-100 dark:hover:border-gray-700" onClick={() => !field.readonly && canEditModule && startEdit(field.key, value)}><div className="text-gray-800 dark:text-gray-200">{displayContent}</div>{!field.readonly && canEditModule && <EditOutlined className="text-leather-400 opacity-0 group-hover:opacity-100 transition-opacity" />}</div>;
   };
 
   const fieldGroups = moduleConfig.blocks?.filter(b => b.type === BlockType.FIELD_GROUP && checkVisibility(b));
@@ -606,6 +757,8 @@ const ModuleShow: React.FC = () => {
         onPrint={() => setIsPrintModalOpen(true)}
         onEdit={() => setIsEditDrawerOpen(true)}
         onDelete={handleDelete}
+        canEdit={canEditModule}
+        canDelete={canDeleteModule}
       />
 
       <HeroSection
@@ -621,6 +774,8 @@ const ModuleShow: React.FC = () => {
         getAssigneeOptions={getAssigneeOptions}
         assigneeIcon={assigneeIcon}
         onImageUpdate={handleImageUpdate}
+        canViewField={canViewField}
+        canEditModule={canEditModule}
       />
 
       <FieldGroupsTabs
@@ -628,6 +783,7 @@ const ModuleShow: React.FC = () => {
         moduleConfig={moduleConfig}
         renderSmartField={renderSmartField}
         checkVisibility={checkVisibility}
+        canViewField={canViewField}
       />
 
       <TablesSection
@@ -638,13 +794,23 @@ const ModuleShow: React.FC = () => {
         recordId={id!}
         relationOptions={relationOptions}
         dynamicOptions={dynamicOptions}
+        canViewField={canViewField}
+        readOnly={!canEditModule}
         onLinkedBomUpdate={fetchLinkedBom}
         onTableSave={(blockId, newData) => setData((prev: any) => ({ ...prev, [blockId]: newData }))}
       />
 
-      <Drawer title={`ویرایش ${data.name}`} width={720} onClose={() => setIsEditDrawerOpen(false)} open={isEditDrawerOpen} styles={{ body: { paddingBottom: 80 } }} destroyOnClose zIndex={5000}>
-        {React.createElement(SmartForm as any, { module: moduleConfig, recordId: id, onSuccess: () => { setIsEditDrawerOpen(false); fetchRecord(); }, onCancel: () => setIsEditDrawerOpen(false) })}
-      </Drawer>
+      {isEditDrawerOpen && (
+        <SmartForm
+          module={moduleConfig}
+          visible={isEditDrawerOpen}
+          recordId={id}
+          onCancel={() => {
+            setIsEditDrawerOpen(false);
+            fetchRecord();
+          }}
+        />
+      )}
 
       <PrintSection
         isPrintModalOpen={isPrintModalOpen}

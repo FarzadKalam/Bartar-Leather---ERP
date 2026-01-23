@@ -6,9 +6,10 @@ interface FieldGroupsTabsProps {
   moduleConfig: any;
   renderSmartField: (field: any) => React.ReactNode;
   checkVisibility: (logic: any) => boolean;
+  canViewField?: (fieldKey: string) => boolean;
 }
 
-const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({ fieldGroups, moduleConfig, renderSmartField, checkVisibility }) => {
+const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({ fieldGroups, moduleConfig, renderSmartField, checkVisibility, canViewField }) => {
   if (!fieldGroups || fieldGroups.length === 0) return null;
 
   return (
@@ -23,6 +24,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({ fieldGroups, moduleCo
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6">
                 {moduleConfig.fields
                   .filter((f: any) => f.blockId === block.id)
+                  .filter((f: any) => (canViewField ? canViewField(f.key) !== false : true))
                   .map((f: any) => (!f.logic || checkVisibility(f.logic)) && (
                     <div key={f.key} className="flex flex-col gap-1">
                       <span className="text-xs text-gray-400">{f.labels.fa}</span>

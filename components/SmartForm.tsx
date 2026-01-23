@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Form, Button, message, Spin, Divider, Select, Input } from 'antd';
-import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
+import { SaveOutlined, CloseOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import EditableTable from './EditableTable';
@@ -23,6 +23,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
+  const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
+  const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
   const [optionsLoaded, setOptionsLoaded] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [allRoles, setAllRoles] = useState<any[]>([]);
@@ -58,10 +61,72 @@ const SmartForm: React.FC<SmartFormProps> = ({
     }
   }, [visible, recordId]);
 
+  const fetchFieldPermissions = useCallback(async () => {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.role_id) return;
+
+      const { data: role } = await supabase
+        .from('org_roles')
+        .select('permissions')
+        .eq('id', profile.role_id)
+        .single();
+
+      const modulePerms = role?.permissions?.[module.id] || {};
+      const perms = modulePerms.fields || {};
+      setFieldPermissions(perms);
+      setModulePermissions({
+        view: modulePerms.view,
+        edit: modulePerms.edit,
+        delete: modulePerms.delete
+      });
+    } catch (err) {
+      console.warn('Could not fetch field permissions:', err);
+    }
+  }, [module.id]);
+
+  useEffect(() => {
+    fetchFieldPermissions();
+  }, [fetchFieldPermissions]);
+
+  const canViewField = useCallback(
+    (fieldKey: string) => {
+      if (Object.prototype.hasOwnProperty.call(fieldPermissions, fieldKey)) {
+        return fieldPermissions[fieldKey] !== false;
+      }
+      return true;
+    },
+    [fieldPermissions]
+  );
+
+  const canViewModule = modulePermissions.view !== false;
+  const canEditModule = modulePermissions.edit !== false;
+
   const fetchAllRelationOptions = async () => {
     const relationFields = module.fields.filter(f => f.type === FieldType.RELATION);
     const dynamicFields = module.fields.filter(f => f.dynamicOptionsCategory);
     const tableBlocks = module.blocks?.filter(b => b.type === BlockType.TABLE) || [];
+
+    const dynamicCategories = new Set<string>();
+    dynamicFields.forEach(field => {
+      if (field.dynamicOptionsCategory) dynamicCategories.add(field.dynamicOptionsCategory);
+    });
+    tableBlocks.forEach(block => {
+      if (block.tableColumns) {
+        block.tableColumns.forEach(col => {
+          if (col.dynamicOptionsCategory) dynamicCategories.add(col.dynamicOptionsCategory);
+        });
+      }
+    });
     
     // جمع‌آوری همه fetchها برای اجرای موازی
     const fetchPromises: Promise<{ key: string; options: any[] }>[] = [];
@@ -99,14 +164,27 @@ const SmartForm: React.FC<SmartFormProps> = ({
     });
 
     // اجرای موازی همه fetchها
-    const results = await Promise.all(fetchPromises);
+    const [results, dynamicResults] = await Promise.all([
+      Promise.all(fetchPromises),
+      Promise.all(
+        Array.from(dynamicCategories).map(category =>
+          fetchDynamicOptions(category).then(options => ({ category, options }))
+        )
+      )
+    ]);
     
     const newOptions: Record<string, any[]> = { ...relationOptions };
     results.forEach(result => {
       newOptions[result.key] = result.options;
     });
 
+    const newDynamicOptions: Record<string, any[]> = { ...dynamicOptions };
+    dynamicResults.forEach(result => {
+      newDynamicOptions[result.category] = result.options;
+    });
+
     setRelationOptions(newOptions);
+    setDynamicOptions(newDynamicOptions);
   };
 
   const fetchOptionsForRelation = async (config: any) => {
@@ -358,6 +436,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   };
 
   const checkVisibility = (logic: any) => {
+    if (isBulkEdit) return true;
     if (!logic) return true;
     const { field, operator, value } = logic;
     const fieldValue = formData[field];
@@ -372,12 +451,42 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
   if (!visible) return null;
   if (!module || !module.fields) return null;
+  if (!canViewModule) {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
+        <div className="bg-white dark:bg-[#1e1e1e] w-full max-w-2xl rounded-3xl shadow-2xl p-8 text-center">
+          <div className="text-gray-500">دسترسی مشاهده برای این ماژول ندارید.</div>
+          <div className="mt-4">
+            <Button onClick={onCancel}>بستن</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const sortedBlocks = [...(module.blocks || [])].sort((a, b) => a.order - b.order);
+  const tableBlocks = sortedBlocks.filter(b => b.type === BlockType.TABLE);
   // ✅ Exclude assignee_id from header fields as it's handled in ModuleShow hero section
   const headerFields = module.fields
     .filter(f => f.location === FieldLocation.HEADER && f.key !== 'assignee_id')
+    .filter(f => canViewField(f.key))
     .sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  const hasAnyRows = tableBlocks.some(b => (formData[b.id] || []).length > 0);
+
+  const calculateGrandTotal = () => {
+    let total = 0;
+    tableBlocks.forEach(block => {
+      const rows = formData[block.id] || [];
+      if (Array.isArray(rows)) {
+        rows.forEach((row: any) => {
+          const val = row.total_price || ((parseFloat(row.usage || row.qty) || 0) * (parseFloat(row.buy_price) || 0));
+          total += val;
+        });
+      }
+    });
+    return total;
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
@@ -473,12 +582,13 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
               {/* بلوک‌ها (Blocks) */}
               {sortedBlocks.map(block => {
-                if (block.visibleIf && !checkVisibility(block.visibleIf)) return null;
+                if (!isBulkEdit && block.visibleIf && !checkVisibility(block.visibleIf)) return null;
 
                 // حالت ۱: بلوک گروه فیلد
                 if (block.type === BlockType.FIELD_GROUP || block.type === BlockType.DEFAULT) {
                   const blockFields = module.fields
                     .filter(f => f.blockId === block.id)
+                    .filter(f => canViewField(f.key))
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
                   
                   if (blockFields.length === 0) return null;
@@ -491,14 +601,16 @@ const SmartForm: React.FC<SmartFormProps> = ({
                       </Divider>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                         {blockFields.map(field => {
-                          if (field.logic?.visibleIf && !checkVisibility(field.logic.visibleIf)) return null;
+                          if (!isBulkEdit && field.logic?.visibleIf && !checkVisibility(field.logic.visibleIf)) return null;
+                          const editableField = canEditModule ? field : { ...field, readonly: true };
                           return (
                             <SmartFieldRenderer 
                               key={field.key}
-                              field={field} 
+                              field={editableField} 
                               value={formData[field.key]}
                               options={relationOptions[field.key]}
                               onChange={(val) => {
+                                if (!canEditModule) return;
                                 form.setFieldValue(field.key, val);
                                 setFormData({ ...form.getFieldsValue(), [field.key]: val });
                               }}
@@ -527,15 +639,18 @@ const SmartForm: React.FC<SmartFormProps> = ({
                         <div className="px-4 pt-4">
                              {module.fields
                                 .filter(f => f.blockId === block.id)
+                                .filter(f => canViewField(f.key))
                                 .map(field => {
-                                    if (field.logic?.visibleIf && !checkVisibility(field.logic.visibleIf)) return null;
+                                  if (!isBulkEdit && field.logic?.visibleIf && !checkVisibility(field.logic.visibleIf)) return null;
+                                  const editableField = canEditModule ? field : { ...field, readonly: true };
                                     return (
                                         <div key={field.key} className="mb-4 max-w-md">
                                              <SmartFieldRenderer
-                                                field={field}
+                                        field={editableField}
                                                 value={formData[field.key]}
                                                 options={relationOptions[field.key]}
                                                 onChange={(val) => {
+                                          if (!canEditModule) return;
                                                     form.setFieldValue(field.key, val);
                                                     setFormData({ ...form.getFieldsValue(), [field.key]: val });
                                                 }}
@@ -555,6 +670,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                 initialData={formData[block.id] || []}
                                 mode={externalRecordId ? 'external_view' : 'local'}
                                 moduleId={module.id}
+                              dynamicOptions={dynamicOptions}
+                                canViewField={canViewField}
+                                readOnly={!canEditModule}
                                 externalSource={{
                                     moduleId: block.externalDataConfig?.targetModule,
                                     recordId: externalRecordId,
@@ -562,6 +680,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                 }}
                                 relationOptions={relationOptions} 
                                 onChange={(newData) => {
+                                  if (!canEditModule) return;
                                     form.setFieldValue(block.id, newData);
                                 }}
                             />
@@ -572,6 +691,25 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 
                 return null;
               })}
+
+              {tableBlocks.length > 0 && hasAnyRows && (canViewField('grand_total')) && (
+                <div className="mt-6 bg-gradient-to-r from-gray-800 to-gray-900 dark:from-leather-900 dark:to-black text-white p-6 rounded-[2rem] shadow-xl flex flex-col md:flex-row justify-between items-center gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-2xl shadow-inner">
+                      <CalculatorOutlined />
+                    </div>
+                    <div>
+                      <h3 className="text-white font-bold text-base m-0">جمع کل</h3>
+                      <div className="text-xs text-white/60">مجموع تمام اقلام جدول‌ها</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <div className="text-3xl font-black font-mono tracking-tight text-white drop-shadow-md">
+                      {calculateGrandTotal().toLocaleString()} <span className="text-sm font-sans font-normal opacity-70">تومان</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
             </Form>
           )}
@@ -584,6 +722,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
             type="primary" 
             onClick={() => form.submit()} 
             loading={loading} 
+            disabled={!canEditModule}
             icon={<SaveOutlined />} 
             className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/20"
           >

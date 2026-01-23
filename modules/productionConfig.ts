@@ -1,4 +1,5 @@
 import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, FieldNature } from '../types';
+import { createBomTableColumns } from './productsConfig';
 
 // تعریف بلاک‌های جدول BOM با قابلیت محاسباتی
 const BOM_BLOCKS = {
@@ -7,65 +8,48 @@ const BOM_BLOCKS = {
     titles: { fa: 'بخش چرم', en: 'Leather Section' }, 
     type: BlockType.TABLE,
     order: 1,
-    tableColumns: [
-      { 
-        key: 'item_id', title: 'انتخاب چرم', type: FieldType.RELATION, 
-        relationConfig: { targetModule: 'products', targetField: 'name', filter: { category: 'leather' } } 
-      },
-      // فیلدهای قابل ویرایش (اما با قابلیت پر شدن اولیه)
-      { key: 'leather_type', title: 'نوع', type: FieldType.SELECT, options: [{label:'گاوی', value:'cow'}, {label:'بزی', value:'goat'}, {label:'گوسفندی', value:'sheep'}] },
-      { key: 'leather_color', title: 'رنگ', type: FieldType.SELECT, dynamicOptionsCategory: 'leather_color' },
-      { key: 'buy_price', title: 'نرخ خرید (واحد)', type: FieldType.PRICE },
-      
-      { key: 'usage', title: 'مقدار مصرف', type: FieldType.NUMBER },
-      { key: 'unit', title: 'واحد', type: FieldType.TEXT, defaultValue: 'فوت' },
-      
-      // ستون محاسباتی
-      { key: 'total_price', title: 'بهای تمام شده', type: FieldType.PRICE, readonly: true, isCalculated: true }
-    ]
+    tableColumns: createBomTableColumns(
+      { targetModule: 'products', targetField: 'name', filter: { category: 'leather' } },
+      'leatherSpec',
+      'مقدار مصرف',
+      'فوت'
+    )
   },
   lining: { 
     id: 'items_lining', 
     titles: { fa: 'بخش آستر', en: 'Lining Section' }, 
     type: BlockType.TABLE,
     order: 2,
-    tableColumns: [
-      { 
-        key: 'item_id', title: 'انتخاب آستر', type: FieldType.RELATION, 
-        relationConfig: { targetModule: 'products', targetField: 'name', filter: { category: 'lining' } } 
-      },
-      { key: 'lining_material', title: 'جنس', type: FieldType.SELECT, dynamicOptionsCategory: 'lining_material' },
-      { key: 'lining_color', title: 'رنگ', type: FieldType.SELECT, dynamicOptionsCategory: 'general_color' },
-      { key: 'buy_price', title: 'نرخ خرید', type: FieldType.PRICE },
-      { key: 'usage', title: 'مقدار مصرف', type: FieldType.NUMBER },
-      { key: 'total_price', title: 'بهای تمام شده', type: FieldType.PRICE, readonly: true, isCalculated: true }
-    ]
+    tableColumns: createBomTableColumns(
+      { targetModule: 'products', targetField: 'name', filter: { category: 'lining' } },
+      'liningSpec',
+      'مقدار مصرف',
+      'متر'
+    )
   },
   fitting: {
       id: 'items_fitting',
       titles: { fa: 'بخش یراق', en: 'Fittings Section' },
       type: BlockType.TABLE,
       order: 3,
-      tableColumns: [
-          { key: 'item_id', title: 'انتخاب یراق', type: FieldType.RELATION, relationConfig: { targetModule: 'products', targetField: 'name', filter: { category: 'fitting' } } },
-          { key: 'fitting_type', title: 'نوع', type: FieldType.SELECT, dynamicOptionsCategory: 'fitting_type' },
-          { key: 'buy_price', title: 'نرخ خرید', type: FieldType.PRICE },
-          { key: 'usage', title: 'تعداد', type: FieldType.NUMBER },
-          { key: 'total_price', title: 'بهای تمام شده', type: FieldType.PRICE, readonly: true, isCalculated: true }
-      ]
+      tableColumns: createBomTableColumns(
+        { targetModule: 'products', targetField: 'name', filter: { category: 'fitting' } },
+        'yaraghSpec',
+        'تعداد',
+        ''
+      )
   },
   accessory: {
       id: 'items_accessory',
       titles: { fa: 'بخش خرجکار', en: 'Accessories Section' },
       type: BlockType.TABLE,
       order: 4,
-      tableColumns: [
-          { key: 'item_id', title: 'انتخاب خرجکار', type: FieldType.RELATION, relationConfig: { targetModule: 'products', targetField: 'name', filter: { category: 'accessory' } } },
-          { key: 'acc_material', title: 'جنس', type: FieldType.SELECT, dynamicOptionsCategory: 'acc_material' },
-          { key: 'buy_price', title: 'نرخ خرید', type: FieldType.PRICE },
-          { key: 'usage', title: 'تعداد', type: FieldType.NUMBER },
-          { key: 'total_price', title: 'بهای تمام شده', type: FieldType.PRICE, readonly: true, isCalculated: true }
-      ]
+      tableColumns: createBomTableColumns(
+        { targetModule: 'products', targetField: 'name', filter: { category: 'accessory' } },
+        'kharjkarSpec',
+        'تعداد',
+        ''
+      )
   },
   labor: {
       id: 'items_labor',

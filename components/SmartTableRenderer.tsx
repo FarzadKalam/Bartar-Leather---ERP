@@ -1,14 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Table, Tag, Avatar, Input, Button, Space, Checkbox, Popover } from 'antd';
+import { Table, Tag, Avatar, Input, Button, Space, Popover } from 'antd';
 import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { ModuleDefinition, FieldType } from '../types';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
-import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
-import dayjs from 'dayjs';
+import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat } from '../utils/persianNumberFormatter';
 import type { InputRef } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
-import { Link } from 'react-router-dom';  // برای لینک به صفحه جزئیات
 
 interface SmartTableRendererProps {
   moduleConfig: ModuleDefinition | null | undefined;
@@ -23,6 +21,7 @@ interface SmartTableRendererProps {
   relationOptions?: Record<string, any[]>;  // ✅ گزینه‌های relation برای نمایش برچسب‌های فارسی
   allUsers?: any[];  // ✅ لیست کاربران
   allRoles?: any[];  // ✅ لیست نقش‌ها
+  canViewField?: (fieldKey: string) => boolean;
 }
 
 const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({ 
@@ -37,7 +36,8 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   dynamicOptions = {},  // ✅ اضافه شد
   relationOptions = {},   // ✅ اضافه شد
   allUsers = [],  // ✅ اضافه شد
-  allRoles = []   // ✅ اضافه شد
+  allRoles = [],   // ✅ اضافه شد
+  canViewField
 }) => {
   const searchInput = useRef<InputRef>(null);
   const [scrollHeight, setScrollHeight] = useState<number>(500);
@@ -60,7 +60,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   if (!moduleConfig || !moduleConfig.fields) return null;
 
   // --- لاجیک جستجوی ستونی (بهینه شده) ---
-  const handleSearch = (selectedKeys: string[], confirm: (param?: FilterConfirmProps) => void) => {
+  const handleSearch = (_selectedKeys: string[], confirm: (param?: FilterConfirmProps) => void) => {
     confirm();
   };
 
@@ -116,7 +116,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   });
 
   // ✅ فیلتر تگ‌ها (برای ستون‌های تگ) - مشابه MULTI_SELECT
-  const getTagFilterProps = (dataIndex: string, title: string) => {
+  const getTagFilterProps = (dataIndex: string, _title: string) => {
     const allTags = new Map<string, string>();
     data.forEach((record: any) => {
       const tags = record[dataIndex];
@@ -145,13 +145,15 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   // --- ساخت ستون‌ها ---
   let tableFields = moduleConfig.fields
     .filter(f => f.isTableColumn)
+    .filter(f => (canViewField ? canViewField(f.key) !== false : true))
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
   // اگر visibleColumns مشخص است، از آن استفاده کن
   if (visibleColumns && visibleColumns.length > 0) {
       tableFields = visibleColumns
         .map(colKey => moduleConfig.fields.find(f => f.key === colKey))
-        .filter(f => f !== undefined) as any[];
+        .filter(f => f !== undefined)
+        .filter(f => (canViewField ? canViewField((f as any).key) !== false : true)) as any[];
   }
   // Fallback: اگر هیچ visibleColumns یا isTableColumn نیست
   else if (tableFields.length === 0) {
@@ -220,7 +222,17 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
             return <Avatar src={value} icon={<AppstoreOutlined />} shape="square" size="default" className="bg-gray-100 border border-gray-200" />;
         }
         if (field.type === FieldType.DATE && value) {
-            return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{dayjs(value).calendar('jalali').format('YYYY/MM/DD')}</span>;
+          const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+          if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
+        }
+        if (field.type === FieldType.TIME && value) {
+          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{formatPersianTime(value)}</span>;
+        }
+        if (field.type === FieldType.DATETIME && value) {
+          const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+          if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
         }
         if (field.type === FieldType.STATUS) {
             const opt = field.options?.find(o => o.value === value);
@@ -333,7 +345,8 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   });
 
   // ✅ اضافه کردن ستون assignee به انتهای تمام جداول
-  columns.push({
+  if (!canViewField || canViewField('assignee_id') !== false) {
+    columns.push({
     title: <span className="text-[11px] text-gray-500">مسئول</span>,
     dataIndex: 'assignee_id',
     key: 'assignee',
@@ -374,7 +387,8 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
       
       return <span className="text-[10px] text-gray-400">نامشخص</span>;
     }
-  });
+    });
+    }
 
   return (
     <div className="custom-erp-table">

@@ -10,9 +10,12 @@ interface GridViewProps {
   tagsField?: string;
   statusField?: string;
   categoryField?: string;
+  allUsers?: any[];
+  allRoles?: any[];
   selectedRowKeys: React.Key[];
   setSelectedRowKeys: (keys: React.Key[]) => void;
   navigate: (path: string) => void;
+  canViewField?: (fieldKey: string) => boolean;
 }
 
 const GridView: React.FC<GridViewProps> = ({
@@ -23,9 +26,12 @@ const GridView: React.FC<GridViewProps> = ({
   tagsField,
   statusField,
   categoryField,
+  allUsers,
+  allRoles,
   selectedRowKeys,
   setSelectedRowKeys,
   navigate,
+  canViewField,
 }) => {
   if (!data?.length) {
     return <Empty description="داده‌ای یافت نشد" className="py-10" />;
@@ -43,9 +49,12 @@ const GridView: React.FC<GridViewProps> = ({
           tagsField={tagsField}
           statusField={statusField}
           categoryField={categoryField}
+          allUsers={allUsers}
+          allRoles={allRoles}
           selectedRowKeys={selectedRowKeys}
           setSelectedRowKeys={setSelectedRowKeys}
           navigate={navigate}
+          canViewField={canViewField}
         />
       ))}
     </div>

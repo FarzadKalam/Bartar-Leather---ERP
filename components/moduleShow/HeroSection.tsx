@@ -9,8 +9,8 @@ import {
   EditOutlined,
   HistoryOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import { FieldLocation } from '../../types';
+import { FieldLocation, FieldType } from '../../types';
+import { toPersianNumber, safeJalaliFormat } from '../../utils/persianNumberFormatter';
 import TagInput from '../TagInput';
 
 interface HeroSectionProps {
@@ -26,6 +26,8 @@ interface HeroSectionProps {
   getAssigneeOptions: () => any[];
   assigneeIcon: React.ReactNode;
   onImageUpdate: (file: File) => Promise<boolean> | boolean;
+  canViewField?: (fieldKey: string) => boolean;
+  canEditModule?: boolean;
 }
 
 const HeroSection: React.FC<HeroSectionProps> = ({
@@ -41,35 +43,42 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   getAssigneeOptions,
   assigneeIcon,
   onImageUpdate,
+  canViewField,
+  canEditModule = true,
 }) => {
+  const imageField = moduleConfig?.fields?.find((f: any) => f.type === FieldType.IMAGE);
+  const canShowImage = !!imageField && (canViewField ? canViewField(imageField.key) !== false : true);
+
   return (
     <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6 relative overflow-hidden animate-fadeIn">
       <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-leather-500 to-leather-800 opacity-80"></div>
 
       <div className="flex flex-col lg:flex-row gap-8 items-stretch">
         {/* تصویر */}
-        <div className="w-full lg:w-56 h-48 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
-          {data.image_url ? (
-            <Image
-              src={data.image_url}
-              className="w-full h-full object-cover"
-              wrapperStyle={{ width: '100%', height: '100%' }}
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            />
-          ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-              <LoadingOutlined className="text-3xl opacity-20" />
-              <span className="text-xs">بدون تصویر</span>
+        {canShowImage && (
+          <div className="w-full lg:w-56 h-48 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
+            {data.image_url ? (
+              <Image
+                src={data.image_url}
+                className="w-full h-full object-cover"
+                wrapperStyle={{ width: '100%', height: '100%' }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-2">
+                <LoadingOutlined className="text-3xl opacity-20" />
+                <span className="text-xs">بدون تصویر</span>
+              </div>
+            )}
+            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center backdrop-blur-sm">
+              <Upload showUploadList={false} beforeUpload={onImageUpdate}>
+                <Button type="primary" icon={<UploadOutlined />} className="bg-leather-500 border-none" disabled={!canEditModule}>
+                  تغییر تصویر
+                </Button>
+              </Upload>
             </div>
-          )}
-          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center backdrop-blur-sm">
-            <Upload showUploadList={false} beforeUpload={onImageUpdate}>
-              <Button type="primary" icon={<UploadOutlined />} className="bg-leather-500 border-none">
-                تغییر تصویر
-              </Button>
-            </Upload>
           </div>
-        </div>
+        )}
 
         {/* محتوا */}
         <div className="flex-1 w-full flex flex-col justify-between">
@@ -85,41 +94,47 @@ const HeroSection: React.FC<HeroSectionProps> = ({
               </div>
 
               {/* بخش انتخاب مسئول */}
-              <div className="flex items-center bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-full pl-1 pr-3 py-1 gap-2">
-                <span className="text-xs text-gray-400">مسئول:</span>
-                <Select
-                  bordered={false}
-                  value={data.assignee_id ? `${data.assignee_type}_${data.assignee_id}` : null}
-                  onChange={handleAssigneeChange}
-                  placeholder="انتخاب کنید"
-                  className="min-w-[140px] font-bold text-gray-700 dark:text-gray-300"
-                  dropdownStyle={{ minWidth: 200 }}
-                  options={getAssigneeOptions()}
-                  optionRender={(option) => (
-                    <Space>
-                      <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
-                      {option.data.label}
-                    </Space>
-                  )}
-                />
-                <div className="w-6 h-6 flex items-center justify-center">{assigneeIcon}</div>
-              </div>
+              {(canViewField ? canViewField('assignee_id') !== false : true) && (
+                <div className="flex items-center bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-full pl-1 pr-3 py-1 gap-2">
+                  <span className="text-xs text-gray-400">مسئول:</span>
+                  <Select
+                    bordered={false}
+                    value={data.assignee_id ? `${data.assignee_type}_${data.assignee_id}` : null}
+                    onChange={handleAssigneeChange}
+                    placeholder="انتخاب کنید"
+                    className="min-w-[140px] font-bold text-gray-700 dark:text-gray-300"
+                    dropdownStyle={{ minWidth: 200 }}
+                    options={getAssigneeOptions()}
+                    optionRender={(option) => (
+                      <Space>
+                        <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
+                        {option.data.label}
+                      </Space>
+                    )}
+                    disabled={!canEditModule}
+                  />
+                  <div className="w-6 h-6 flex items-center justify-center">{assigneeIcon}</div>
+                </div>
+              )}
             </div>
 
             {/* --- کامپوننت مدیریت تگ --- */}
-            <div className="mb-6">
-              <TagInput
-                recordId={data.id}
-                moduleId={moduleId}
-                initialTags={currentTags}
-                onChange={onTagsChange}
-              />
-            </div>
+            {(canViewField ? canViewField('tags') !== false : true) && (
+              <div className="mb-6">
+                <TagInput
+                  recordId={data.id}
+                  moduleId={moduleId}
+                  initialTags={currentTags}
+                  onChange={onTagsChange}
+                />
+              </div>
+            )}
 
             {/* فیلدهای هدر */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mt-6">
               {moduleConfig.fields
                 .filter((f: any) => f.location === FieldLocation.HEADER && !['name', 'image_url', 'system_code', 'tags'].includes(f.key))
+                .filter((f: any) => (canViewField ? canViewField(f.key) !== false : true))
                 .map((f: any) => (
                   <div key={f.key} className="flex flex-col gap-1 border-r last:border-0 border-gray-100 dark:border-gray-700 px-4 first:pr-0">
                     <span className="text-xs text-gray-400 uppercase tracking-wider">{f.labels.fa}</span>
@@ -165,7 +180,11 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 <div className="flex flex-col">
                   <span className="opacity-70">زمان ایجاد</span>
                   <span className="font-bold text-gray-700 dark:text-gray-300" dir="ltr">
-                    {data.created_at ? (dayjs(data.created_at) as any).calendar('jalali').format('YYYY/MM/DD - HH:mm') : '-'}
+                    {(() => {
+                      if (!data.created_at) return '-';
+                      const formatted = safeJalaliFormat(data.created_at, 'YYYY/MM/DD - HH:mm');
+                      return formatted ? toPersianNumber(formatted) : '-';
+                    })()}
                   </span>
                 </div>
               </div>
@@ -185,7 +204,11 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 <div className="flex flex-col">
                   <span className="opacity-70">زمان ویرایش</span>
                   <span className="font-bold text-gray-700 dark:text-gray-300" dir="ltr">
-                    {data.updated_at ? (dayjs(data.updated_at) as any).calendar('jalali').format('YYYY/MM/DD - HH:mm') : '-'}
+                    {(() => {
+                      if (!data.updated_at) return '-';
+                      const formatted = safeJalaliFormat(data.updated_at, 'YYYY/MM/DD - HH:mm');
+                      return formatted ? toPersianNumber(formatted) : '-';
+                    })()}
                   </span>
                 </div>
               </div>

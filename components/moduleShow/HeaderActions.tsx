@@ -12,6 +12,8 @@ interface HeaderActionsProps {
   onPrint: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 const HeaderActions: React.FC<HeaderActionsProps> = ({
@@ -24,6 +26,8 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
   onPrint,
   onEdit,
   onDelete,
+  canEdit = true,
+  canDelete = true,
 }) => {
   return (
     <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -58,21 +62,25 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
         <Popover content={<QRCode value={shareUrl} bordered={false} />} trigger="click">
           <Button icon={<QrcodeOutlined />} className="hover:text-leather-600 hover:border-leather-600">QR</Button>
         </Popover>
-        <Button
-          icon={<EditOutlined />}
-          onClick={onEdit}
-          className="hover:text-leather-600 hover:border-leather-600"
-        >
-          ویرایش
-        </Button>
-        <Button
-          icon={<DeleteOutlined />}
-          danger
-          onClick={onDelete}
-          className="hover:text-leather-600 hover:border-leather-600"
-        >
-          حذف
-        </Button>
+        {canEdit && (
+          <Button
+            icon={<EditOutlined />}
+            onClick={onEdit}
+            className="hover:text-leather-600 hover:border-leather-600"
+          >
+            ویرایش
+          </Button>
+        )}
+        {canDelete && (
+          <Button
+            icon={<DeleteOutlined />}
+            danger
+            onClick={onDelete}
+            className="hover:text-leather-600 hover:border-leather-600"
+          >
+            حذف
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
-import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, DatePicker, TimePicker } from 'antd';
+import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App } from 'antd';
+import { DatePicker as JalaliDatePicker, TimePicker as JalaliTimePicker } from 'antd-jalali';
 import { UploadOutlined, LoadingOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType } from '../types';
+import { toPersianNumber, formatPersianTime, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
+import { jalaliDatePickerLocale } from '../utils/jalaliLocale';
 import { supabase } from '../supabaseClient';
 import DynamicSelectField from './DynamicSelectField';
 import TagInput from './TagInput';
 import dayjs from 'dayjs';
-import jalaliday from 'jalaliday';
-
-// ✅ Enable Jalali calendar
-dayjs.extend(jalaliday);
+import type { Dayjs } from 'dayjs';
 
 interface SmartFieldRendererProps {
   field: ModuleField;
@@ -39,6 +39,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const isRequired = field?.validation?.required || false;
   const isReadonly = field?.readonly || false;
   const fieldOptions = field?.options || options || [];
+
+  const renderPersianDateCell = (current: Dayjs) => {
+    const formatted = safeJalaliFormat(current, 'D');
+    const fallback = current && (current as any).isValid?.() ? current.format('D') : '';
+    const display = formatted || fallback;
+    return <div className="ant-picker-cell-inner">{display ? toPersianNumber(display) : ''}</div>;
+  };
 
   // تابع آپلود تصویر به Supabase Storage
   const handleImageUpload = async (file: File) => {
@@ -230,34 +237,61 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
       case FieldType.DATE:
         return (
-          <DatePicker 
+          <JalaliDatePicker 
             className="w-full"
-            onChange={(date) => onChange(date ? date.format('YYYY-MM-DD') : null)}
+            value={parseDateValue(value)}
+            onChange={(date: Dayjs | null) => onChange(date ? date.format('YYYY-MM-DD') : null)}
             placeholder="انتخاب تاریخ"
             picker="date"
-            format="jYYYY/jMM/jDD"
+            format={(val: Dayjs | null) => {
+              const formatted = safeJalaliFormat(val, 'YYYY/MM/DD');
+              return formatted ? toPersianNumber(formatted) : '';
+            }}
+            locale={jalaliDatePickerLocale}
+            popupClassName="persian-number"
+            dateRender={renderPersianDateCell}
+            getPopupContainer={(trigger: HTMLElement) => trigger.parentElement || document.body}
+            popupStyle={{ zIndex: 1600 }}
           />
         );
 
       case FieldType.TIME:
         return (
-          <TimePicker 
+          <JalaliTimePicker 
             className="w-full"
-            onChange={(time) => onChange(time ? time.format('HH:mm:ss') : null)}
+            value={value ? dayjs(value, ['HH:mm', 'HH:mm:ss']) : null}
+            onChange={(time: Dayjs | Dayjs[] | null) => {
+              const picked = Array.isArray(time) ? time[0] : time;
+              onChange(picked ? picked.format('HH:mm') : null);
+            }}
             placeholder="انتخاب زمان"
-            format="HH:mm:ss"
+            format={(val: Dayjs | null) => (val ? toPersianNumber(val.format('HH:mm')) : '')}
+            showSecond={false}
             use12Hours={false}
+            locale={jalaliDatePickerLocale}
+            popupClassName="persian-number"
+            getPopupContainer={(trigger: HTMLElement) => trigger.parentElement || document.body}
+            popupStyle={{ zIndex: 1600 }}
           />
         );
 
       case FieldType.DATETIME:
         return (
-          <DatePicker 
+          <JalaliDatePicker 
             className="w-full"
-            onChange={(datetime) => onChange(datetime ? datetime.format('YYYY-MM-DD HH:mm:ss') : null)}
+            showTime={{ format: 'HH:mm', showSecond: false }}
+            value={parseDateValue(value)}
+            onChange={(datetime: Dayjs | null) => onChange(datetime ? datetime.format('YYYY-MM-DD HH:mm') : null)}
             placeholder="انتخاب تاریخ و زمان"
-            showTime
-            format="jYYYY/jMM/jDD HH:mm:ss"
+            format={(val: Dayjs | null) => {
+              const formatted = safeJalaliFormat(val, 'YYYY/MM/DD HH:mm');
+              return formatted ? toPersianNumber(formatted) : '';
+            }}
+            locale={jalaliDatePickerLocale}
+            popupClassName="persian-number"
+            dateRender={renderPersianDateCell}
+            getPopupContainer={(trigger: HTMLElement) => trigger.parentElement || document.body}
+            popupStyle={{ zIndex: 1600 }}
           />
         );
 
@@ -285,9 +319,17 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
      if (fieldType === FieldType.CHECKBOX) return value ? 'بله' : 'خیر';
      if (fieldType === FieldType.IMAGE && value) return <Image src={value} width={50} className="rounded" />;
      if (fieldType === FieldType.PRICE) return <span className="font-mono">{Number(value).toLocaleString()}</span>;
-     if (fieldType === FieldType.DATE && value) return <span className="text-gray-600 font-mono">{dayjs(value).calendar('jalali').format('jYYYY/jMM/jDD')}</span>;
-     if (fieldType === FieldType.TIME && value) return <span className="text-gray-600 font-mono">{value}</span>;
-     if (fieldType === FieldType.DATETIME && value) return <span className="text-gray-600 font-mono">{dayjs(value).calendar('jalali').format('jYYYY/jMM/jDD HH:mm:ss')}</span>;
+     if (fieldType === FieldType.DATE && value) {
+       const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+       if (!formatted) return <span className="text-gray-600 font-mono">-</span>;
+       return <span className="text-gray-600 font-mono">{toPersianNumber(formatted)}</span>;
+     }
+    if (fieldType === FieldType.TIME && value) return <span className="text-gray-600 font-mono">{formatPersianTime(value)}</span>;
+     if (fieldType === FieldType.DATETIME && value) {
+       const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+       if (!formatted) return <span className="text-gray-600 font-mono">-</span>;
+       return <span className="text-gray-600 font-mono">{toPersianNumber(formatted)}</span>;
+     }
      if (fieldType === FieldType.TAGS && recordId && moduleId) {
        return (
          <TagInput
@@ -316,7 +358,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         valuePropName: 'value',
         getValueFromEvent: (date: any) => date ? date.format('YYYY-MM-DD') : null,
         getValueProps: (value: any) => ({
-          value: value ? dayjs(value) : null,
+          value: parseDateValue(value),
         }),
       };
     }
@@ -325,9 +367,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       return {
         ...baseProps,
         valuePropName: 'value',
-        getValueFromEvent: (time: any) => time ? time.format('HH:mm:ss') : null,
+        getValueFromEvent: (time: any) => time ? time.format('HH:mm') : null,
         getValueProps: (value: any) => ({
-          value: value ? dayjs(value, 'HH:mm:ss') : null,
+          value: value ? dayjs(value, ['HH:mm', 'HH:mm:ss']) : null,
         }),
       };
     }
@@ -336,9 +378,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       return {
         ...baseProps,
         valuePropName: 'value',
-        getValueFromEvent: (datetime: any) => datetime ? datetime.format('YYYY-MM-DD HH:mm:ss') : null,
+        getValueFromEvent: (datetime: any) => datetime ? datetime.format('YYYY-MM-DD HH:mm') : null,
         getValueProps: (value: any) => ({
-          value: value ? dayjs(value) : null,
+          value: parseDateValue(value),
         }),
       };
     }

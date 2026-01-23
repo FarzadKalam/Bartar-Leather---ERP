@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useTable } from "@refinedev/antd";
 import { CrudFilters, useDeleteMany, useUpdate } from "@refinedev/core";
 import { useNavigate, useParams } from "react-router-dom";
@@ -29,6 +29,8 @@ export const ModuleListRefine = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [currentView, setCurrentView] = useState<SavedView | null>(null);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [editRecordId, setEditRecordId] = useState<string | null>(null);
+  const [isBulkEditMode, setIsBulkEditMode] = useState(false);
   const [kanbanGroupBy, setKanbanGroupBy] = useState<string>("");
   const [visibleColumns, setVisibleColumns] = useState<string[]>([]);  // ✅ ستون‌های انتخاب‌شده
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});  // ✅ اضافه شد
@@ -38,6 +40,8 @@ export const ModuleListRefine = () => {
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [allRoles, setAllRoles] = useState<any[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
+  const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: moduleId,
@@ -54,6 +58,15 @@ export const ModuleListRefine = () => {
   const allData = tableQueryResult.data?.data || [];
 
   useEffect(() => {
+    if (isFullscreen) {
+      document.body.classList.add("overflow-hidden");
+    } else {
+      document.body.classList.remove("overflow-hidden");
+    }
+    return () => document.body.classList.remove("overflow-hidden");
+  }, [isFullscreen]);
+
+  useEffect(() => {
     setViewMode(moduleConfig?.defaultViewMode || ViewMode.LIST);
     setCurrentView(null);
     setSelectedRowKeys([]);
@@ -61,13 +74,69 @@ export const ModuleListRefine = () => {
     setGridPageSize(20);
     setKanbanGroupBy("");
     setSearchTerm("");
+    setEditRecordId(null);
+    setIsBulkEditOpen(false);
+    setIsBulkEditMode(false);
   }, [moduleId, moduleConfig?.defaultViewMode]);
+
+  const fetchPermissions = useCallback(async () => {
+    if (!moduleId) return;
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.role_id) return;
+
+      const { data: role } = await supabase
+        .from('org_roles')
+        .select('permissions')
+        .eq('id', profile.role_id)
+        .single();
+
+      const modulePerms = role?.permissions?.[moduleId] || {};
+      setModulePermissions({
+        view: modulePerms.view,
+        edit: modulePerms.edit,
+        delete: modulePerms.delete
+      });
+      setFieldPermissions(modulePerms.fields || {});
+    } catch (err) {
+      console.warn('Could not fetch permissions:', err);
+    }
+  }, [moduleId]);
+
+  useEffect(() => {
+    fetchPermissions();
+  }, [fetchPermissions]);
+
+  const canViewField = useCallback(
+    (fieldKey: string) => {
+      if (Object.prototype.hasOwnProperty.call(fieldPermissions, fieldKey)) {
+        return fieldPermissions[fieldKey] !== false;
+      }
+      return true;
+    },
+    [fieldPermissions]
+  );
+
+  const canViewModule = modulePermissions.view !== false;
+  const canEditModule = modulePermissions.edit !== false;
+  const canDeleteModule = modulePermissions.delete !== false;
 
   // ✅ Define field keys FIRST (before any useMemo/useEffect that uses them)
   const imageField = moduleConfig?.fields.find(f => f.type === FieldType.IMAGE)?.key;
   const tagsField = moduleConfig?.fields.find(f => f.type === FieldType.TAGS)?.key;
   const statusField = moduleConfig?.fields.find(f => f.type === FieldType.STATUS)?.key;
-  const categoryField = moduleConfig?.fields.find(f => f.key === 'category' || f.key === 'product_category')?.key;
+  const categoryField = moduleId === 'tasks'
+    ? 'related_to_module'
+    : moduleConfig?.fields.find(f => f.key === 'category' || f.key === 'product_category')?.key;
 
   // ✅ Merge tags into allData
   const enrichedData = useMemo(() => {
@@ -329,6 +398,13 @@ export const ModuleListRefine = () => {
 
   const handleBulkEditOpen = () => {
       if (selectedRowKeys.length === 0) return;
+      if (selectedRowKeys.length === 1) {
+        setEditRecordId(String(selectedRowKeys[0]));
+        setIsBulkEditMode(false);
+      } else {
+        setEditRecordId(null);
+        setIsBulkEditMode(true);
+      }
       setIsBulkEditOpen(true);
   };
 
@@ -380,6 +456,13 @@ export const ModuleListRefine = () => {
   };
 
   if (!moduleId || !moduleConfig) return null;
+  if (!canViewModule) {
+    return (
+      <div className="p-6">
+        <Empty description="دسترسی مشاهده برای این ماژول ندارید" />
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 md:p-6 max-w-[1800px] mx-auto animate-fadeIn pb-20 h-[calc(100vh-64px)] flex flex-col">
@@ -398,7 +481,7 @@ export const ModuleListRefine = () => {
             />
             </div>
 
-            {selectedRowKeys.length === 0 && (
+            {selectedRowKeys.length === 0 && canEditModule && (
             <Button
                 type="primary"
                 icon={<PlusOutlined />}
@@ -427,8 +510,8 @@ export const ModuleListRefine = () => {
         <BulkActionsBar
           selectedCount={selectedRowKeys.length}
           onClear={() => setSelectedRowKeys([])}
-          onEdit={selectedRowKeys.length ? handleBulkEditOpen : undefined}
-          onDelete={selectedRowKeys.length ? handleBulkDelete : undefined}
+          onEdit={selectedRowKeys.length && canEditModule ? handleBulkEditOpen : undefined}
+          onDelete={selectedRowKeys.length && canDeleteModule ? handleBulkDelete : undefined}
           onExport={selectedRowKeys.length ? handleExport : undefined}
         />
         </div>
@@ -473,6 +556,7 @@ export const ModuleListRefine = () => {
                     relationOptions={relationOptions}
                     allUsers={allUsers}
                     allRoles={allRoles}
+                    canViewField={canViewField}
                   />
                 </div>
                )}
@@ -489,6 +573,9 @@ export const ModuleListRefine = () => {
                               selectedRowKeys={selectedRowKeys}
                               setSelectedRowKeys={setSelectedRowKeys}
                               navigate={navigate}
+                              canViewField={canViewField}
+                              allUsers={allUsers}
+                              allRoles={allRoles}
                             />
                             
                   {/* Load More Button */}
@@ -535,6 +622,9 @@ export const ModuleListRefine = () => {
                               setSelectedRowKeys={setSelectedRowKeys}
                               navigate={navigate}
                               minimal={true}
+                              canViewField={canViewField}
+                              allUsers={allUsers}
+                              allRoles={allRoles}
                             />
                           ))}
                         </div>
@@ -564,10 +654,16 @@ export const ModuleListRefine = () => {
            <SmartForm 
                module={moduleConfig}
                visible={isBulkEditOpen}
-               onCancel={() => setIsBulkEditOpen(false)}
-               onSave={handleBulkSave}
-               title={`ویرایش گروهی ${selectedRowKeys.length} مورد`}
-               isBulkEdit={true}
+               recordId={editRecordId || undefined}
+               onCancel={() => {
+                 setIsBulkEditOpen(false);
+                 setEditRecordId(null);
+                 setIsBulkEditMode(false);
+                 tableQueryResult.refetch();
+               }}
+               onSave={isBulkEditMode ? handleBulkSave : undefined}
+               title={isBulkEditMode ? `ویرایش گروهی ${selectedRowKeys.length} مورد` : `ویرایش مورد انتخابی`}
+               isBulkEdit={isBulkEditMode}
            />
        )}
     </div>
