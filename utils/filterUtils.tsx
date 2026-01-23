@@ -1,10 +1,9 @@
 import React from 'react';
-import { Input, InputNumber, Select, DatePicker, Button, Space } from 'antd';
+import { Input, InputNumber, Select, Button, Space } from 'antd';
 import { SearchOutlined, FilterOutlined } from '@ant-design/icons';
 import { FieldType, FilterOperator } from '../types';
 import dayjs from 'dayjs';
 
-const { RangePicker } = DatePicker;
 
 // نگاشت نوع فیلد به عملگر پیش‌فرض
 export const getMessageForOperator = (op: FilterOperator) => {

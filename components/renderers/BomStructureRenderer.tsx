@@ -1,5 +1,5 @@
 import React from 'react';
-import { Divider, Typography } from 'antd';
+import { Divider } from 'antd';
 import { CalculatorOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { productionBomModule } from '../../modules/productionConfig';
@@ -11,13 +11,17 @@ interface BomStructureRendererProps {
   relationOptions: any;
   dynamicOptions: any;
   onUpdate: () => void;
+    canViewField?: (fieldKey: string) => boolean;
+    readOnly?: boolean;
 }
 
 const BomStructureRenderer: React.FC<BomStructureRendererProps> = ({ 
   bomData, 
   relationOptions, 
   dynamicOptions, 
-  onUpdate 
+    onUpdate,
+    canViewField,
+    readOnly 
 }) => {
 
   // محاسبه جمع کل شناسنامه تولید
@@ -53,10 +57,12 @@ const BomStructureRenderer: React.FC<BomStructureRendererProps> = ({
                         <EditableTable 
                           block={block}
                           initialData={bomData[block.id] || []} 
-                          moduleId="production_boms" // همیشه روی جدول BOM ذخیره می‌کند
+                          moduleId="production_boms"
                           recordId={bomData.id} 
                           relationOptions={relationOptions} 
                           dynamicOptions={dynamicOptions}
+                                                    canViewField={canViewField}
+                                                    readOnly={readOnly}
                           onSaveSuccess={onUpdate}
                         />
                     </div>
@@ -65,6 +71,7 @@ const BomStructureRenderer: React.FC<BomStructureRendererProps> = ({
         </div>
 
         {/* کارت محاسبه بهای تمام شده */}
+        {(canViewField ? canViewField('grand_total') !== false : true) && (
         <div className="bg-gradient-to-r from-gray-800 to-gray-900 dark:from-leather-900 dark:to-black text-white p-6 rounded-[2rem] shadow-xl mt-8 flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-2xl shadow-inner">
@@ -81,6 +88,7 @@ const BomStructureRenderer: React.FC<BomStructureRendererProps> = ({
                 </div>
             </div>
         </div>
+        )}
     </div>
   );
 };

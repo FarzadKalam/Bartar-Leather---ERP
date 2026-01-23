@@ -55,7 +55,7 @@ const FilterBuilder: React.FC<FilterBuilderProps> = ({ module, filters, onChange
 
     switch (field.type) {
       case FieldType.TEXT:
-      case FieldType.TEXTAREA:
+      case FieldType.LONG_TEXT:
         return [
           { label: 'شامل (متن)', value: 'contains' },
           { label: 'دقیقاً برابر', value: 'eq' },
@@ -72,7 +72,7 @@ const FilterBuilder: React.FC<FilterBuilderProps> = ({ module, filters, onChange
         ];
       case FieldType.SELECT:
       case FieldType.STATUS:
-      case FieldType.BOOLEAN:
+      case FieldType.CHECKBOX:
         return [
           { label: 'برابر با', value: 'eq' },
           { label: 'نابرابر با', value: 'ne' },
@@ -86,7 +86,7 @@ const FilterBuilder: React.FC<FilterBuilderProps> = ({ module, filters, onChange
     const field = module.fields.find(f => f.key === filter.field);
     if (!field) return <Input disabled />;
 
-    if (field.type === FieldType.BOOLEAN) {
+    if (field.type === FieldType.CHECKBOX) {
         return <Switch checked={!!filter.value} onChange={(v) => updateFilter(filter.id, 'value', v)} />;
     }
 

@@ -1,86 +1,287 @@
-# Mehrbanoo Leather ERP (BARTAR)
+# Bartar Leather ERP (مهربانو)
 
-A modern, modular Enterprise Resource Planning (ERP) system tailored for manufacturing and retail businesses, built with React, TypeScript, and Supabase.
+یک سیستم جامع مدیریت منابع سازمانی (ERP) مدرن و ماژولار برای صنایع تولیدی و خرده‌فروشی، ساخته شده با React، TypeScript و Supabase.
 
-## 🌟 Key Features
+## 🌟 ویژگی‌های کلیدی
 
-- **Modular Architecture:** Fully dynamic module generation (Products, CRM, SCM, Production).
-- **Advanced Views:** Switch between **List**, **Grid**, and **Kanban** views instantly.
-- **Smart Components:** Auto-generated forms and tables based on configuration files.
-- **Production Management:** hierarchical BOM (Bill of Materials) visualization.
-- **Role-Based Access Control (RBAC):** Granular permission management.
-- **Tagging System:** Flexible categorization for all records.
-- **Localization:** Full Persian (Farsi) support with Jalali calendar integration.
-- **UI/UX:** Dark/Light mode, responsive design for mobile & desktop.
+- **معماری ماژولار:** تولید خودکار ماژول‌ها (محصولات، CRM، SCM، تولید)
+- **نماهای پیشرفته:** تغییر فوری بین نمای **لیست**، **گرید** و **کانبان**
+- **کامپوننت‌های هوشمند:** فرم‌ها و جداول خودکار بر اساس فایل‌های Configuration
+- **مدیریت تولید:** نمایش سلسله‌مراتبی BOM (شناسنامه مواد)
+- **کنترل دسترسی مبتنی بر نقش (RBAC):** مدیریت دقیق مجوزها
+- **سیستم تگ‌گذاری:** دسته‌بندی انعطاف‌پذیر برای همه رکوردها
+- **بومی‌سازی:** پشتیبانی کامل از زبان فارسی با تقویم جلالی
+- **UI/UX:** حالت تیره/روشن، طراحی واکنش‌گرا برای موبایل و دسکتاپ
 
-## 🛠 Tech Stack
+## 🛠 فناوری‌های استفاده شده
 
 - **Frontend:** React 18, TypeScript, Vite
 - **UI Library:** Ant Design (v5), Tailwind CSS
-- **State/Logic:** React Router v6, React Hooks
+- **State/Logic:** React Router v6, React Hooks, Refine Framework
 - **Backend/DB:** Supabase (PostgreSQL)
 - **Icons:** Ant Design Icons
-- **Date Handling:** Day.js + JalaliDay
+- **تاریخ:** Day.js + JalaliDay
 
-## 🚀 Getting Started
+## 🚀 شروع به کار
 
-### Prerequisites
-- Node.js (v16 or higher)
-- npm or yarn
-- A Supabase project URL and Anon Key
+### پیش‌نیازها
+- Node.js (نسخه 18 یا بالاتر)
+- npm یا yarn
+- یک پروژه Supabase با URL و Anon Key
 
-### Installation
+### نصب
 
-1. **Clone the repository:**
+1. **کلون کردن مخزن:**
    ```bash
    git clone <repository-url>
    cd bartar-leather-erp
-Install dependencies:
+   ```
 
-Bash
+2. **نصب وابستگی‌ها:**
+   ```bash
+   npm install
+   ```
 
-npm install
-Environment Setup: Create a .env file in the root directory:
+3. **تنظیم محیط:**
+   یک فایل `.env` در پوشه اصلی ایجاد کنید:
+   ```env
+   VITE_SUPABASE_URL=your_supabase_project_url
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+   
+   **نکته:** کلیدها را از Dashboard Supabase خود دریافت کنید:
+   - Project Settings → API → Project URL
+   - Project Settings → API → anon/public key
 
-Code snippet
+4. **راه‌اندازی دیتابیس:**
+   - فایل `database.sql` را در Supabase SQL Editor اجرا کنید
+   - جداول و RLS Policies ایجاد می‌شوند
+   - داده‌های نمونه (اختیاری) را اضافه کنید
 
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-Run Development Server:
+5. **اجرای سرور توسعه:**
+   ```bash
+   npm run dev
+   ```
+   
+   برنامه در `http://localhost:5173` در دسترس خواهد بود.
 
-Bash
+## 🗂 ساختار پروژه
 
-npm run dev
-🗂 Project Structure
-/src
+```
+/
+├── components/           # کامپوننت‌های قابل استفاده مجدد UI
+│   ├── SmartForm.tsx            # سیستم فرم داینامیک
+│   ├── SmartTableRenderer.tsx   # رندر کننده جدول
+│   ├── SmartFieldRenderer.tsx   # رندر کننده فیلد
+│   ├── EditableTable.tsx        # جداول قابل ویرایش
+│   ├── TagInput.tsx             # سیستم تگ‌گذاری
+│   ├── ViewManager.tsx          # مدیریت نماهای سفارشی
+│   ├── FilterBuilder.tsx        # ساخت فیلتر پیشرفته
+│   ├── renderers/               # رندرکننده‌های تخصصی
+│   │   └── BomStructureRenderer.tsx
+│   └── Sidebar/                 # کامپوننت‌های سایدبار
+│       ├── RelatedSidebar.tsx
+│       ├── ActivityPanel.tsx
+│       └── RelatedRecordsPanel.tsx
+├── modules/              # تعاریف ماژول‌ها (قلب سیستم)
+│   ├── productsConfig.ts        # ماژول محصولات
+│   ├── customerConfig.ts        # ماژول مشتریان
+│   ├── supplierConfig.ts        # ماژول تامین‌کنندگان
+│   ├── productionConfig.ts      # ماژول تولید (BOM)
+│   └── tasksConfig.ts           # ماژول وظایف
+├── pages/                # صفحات اصلی برنامه
+│   ├── ModuleList_Refine.tsx    # صفحه لیست (Grid/List/Kanban)
+│   ├── ModuleShow.tsx           # صفحه نمایش تک رکورد
+│   ├── ModuleCreate.tsx         # صفحه ایجاد رکورد جدید
+│   └── Settings/                # تنظیمات سیستم
+│       ├── SettingsPage.tsx
+│       ├── CompanyTab.tsx
+│       ├── UsersTab.tsx
+│       └── RolesTab.tsx
+├── utils/                # توابع کمکی
+│   └── filterUtils.tsx          # توابع فیلترینگ
+├── types.ts              # تعاریف TypeScript Interfaces
+├── moduleRegistry.ts     # رجیستری مرکزی ماژول‌ها
+├── supabaseClient.ts     # کلاینت اتصال دیتابیس
+├── App.tsx               # نقطه ورود اصلی
+├── database.sql          # اسکریپت ساخت دیتابیس
+└── tailwind.config.js    # تنظیمات Tailwind CSS
+```
 
-/components: Reusable UI components (SmartForm, SmartTable, TagInput, etc.)
+## 🧩 نحوه اضافه کردن ماژول جدید
 
-/modules: Configuration files for each module (productsConfig, customerConfig, etc.)
+### مثال: ایجاد ماژول "Invoices"
 
-/pages: Main page layouts (ModuleList, ModuleShow, Settings)
+#### 1. ساخت جدول در Supabase
+```sql
+CREATE TABLE invoices (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  invoice_number text UNIQUE NOT NULL,
+  customer_id uuid REFERENCES customers(id),
+  total_amount int8,
+  status text DEFAULT 'draft',
+  created_at timestamptz DEFAULT now()
+);
+```
 
-/types: TypeScript interfaces and enums.
+#### 2. ایجاد فایل Configuration
+ایجاد `modules/invoicesConfig.ts`:
+```typescript
+import { ModuleDefinition, FieldType, FieldLocation } from '../types';
 
-moduleRegistry.ts: Central registry to register new modules.
+export const invoicesConfig: ModuleDefinition = {
+  id: 'invoices',
+  titles: { fa: 'فاکتورها', en: 'Invoices' },
+  table: 'invoices',
+  fields: [
+    {
+      key: 'invoice_number',
+      labels: { fa: 'شماره فاکتور', en: 'Invoice #' },
+      type: FieldType.TEXT,
+      location: FieldLocation.HEADER,
+      validation: { required: true },
+      isTableColumn: true
+    },
+    {
+      key: 'customer_id',
+      labels: { fa: 'مشتری', en: 'Customer' },
+      type: FieldType.RELATION,
+      location: FieldLocation.HEADER,
+      relationConfig: {
+        targetModule: 'customers',
+        targetField: 'last_name'
+      },
+      isTableColumn: true
+    },
+    // ... سایر فیلدها
+  ],
+  blocks: [],
+  relatedTabs: []
+};
+```
 
-🧩 How to Add a New Module
-Create a table in Supabase.
+#### 3. ثبت در Registry
+در `moduleRegistry.ts`:
+```typescript
+import { invoicesConfig } from './modules/invoicesConfig';
 
-Create a config file in src/modules/ (e.g., taskConfig.ts).
+export const MODULES: Record<string, ModuleDefinition> = {
+  // ... ماژول‌های موجود
+  invoices: invoicesConfig,
+};
+```
 
-Define fields, types, and view settings in the config.
+#### 4. اضافه کردن به Sidebar (اختیاری)
+در `components/Layout.tsx`:
+```typescript
+<Menu.Item key="/invoices" icon={<FileTextOutlined />}>
+  <Link to="/invoices">فاکتورها</Link>
+</Menu.Item>
+```
 
-Import and register the module in src/moduleRegistry.ts.
+✅ **تمام!** حالا می‌توانید به `/invoices` بروید.
 
-Add the route to the Sidebar in Layout.tsx (Optional).
+## 🔗 سیستم ارتباطات (Relations)
 
-🤝 Contributing
-This project is currently under active development.
+### رابطه One-to-Many
+```typescript
+{
+  key: 'supplier_id',
+  type: FieldType.RELATION,
+  relationConfig: {
+    targetModule: 'suppliers',
+    targetField: 'business_name'
+  }
+}
+```
 
-Lead Developer: Farzad
+### رابطه معکوس (Reverse Relation)
+در `supplierConfig.ts`:
+```typescript
+relatedTabs: [
+  {
+    name: 'products',
+    label: 'محصولات',
+    icon: 'ShoppingCart',
+    relationField: 'supplier_id',  // کلید خارجی در products
+    displayFields: ['name', 'category', 'stock']
+  }
+]
+```
 
-AI Partner: Gemini
+📖 **مستندات کامل:** `RELATIONS_GUIDE.md`
 
-📄 License
+## 📊 سیستم BOM (شناسنامه تولید)
+
+برای محصولات نهایی، سیستم BOM هزینه‌های تولید را محاسبه می‌کند:
+
+- **بخش چرم:** مواد اولیه چرمی
+- **بخش آستر:** پارچه‌های آستری
+- **بخش یراق:** قطعات فلزی
+- **بخش خرجکار:** مواد جانبی
+- **بخش دستمزد:** هزینه‌های نیروی کار
+
+**فرمول:** `بهای تمام شده = مقدار مصرف × قیمت خرید`
+
+## 🔒 امنیت و RBAC
+
+### نقش‌های کاربری:
+- **ADMIN:** دسترسی کامل
+- **SALES:** مدیریت فروش و مشتریان
+- **WAREHOUSE:** مدیریت انبار
+- **PRODUCTION:** مدیریت تولید
+- **VIEWER:** فقط مشاهده
+
+### مجوزهای سطح فیلد:
+```typescript
+fieldAccess: {
+  viewRoles: [UserRole.ADMIN, UserRole.SALES],
+  editRoles: [UserRole.ADMIN]
+}
+```
+
+⚠️ **توجه:** RLS Policies در Supabase باید تکمیل شوند.
+
+## 🎨 تم و طراحی
+
+- **حالت تاریک/روشن:** کاملاً پشتیبانی شده
+- **رنگ اصلی:** نارنجی چرمی (`#c58f60`)
+- **فونت:** Vazirmatn (فارسی)
+- **طراحی واکنش‌گرا:** Mobile-first approach
+
+## 🐛 عیب‌یابی
+
+### مشکل: "Cannot read property of undefined"
+**راه‌حل:** بررسی کنید فیلد در config و دیتابیس موجود باشد.
+
+### مشکل: دراپ‌داون‌ها باز نمی‌شوند
+**راه‌حل:** اضافه کردن `getPopupContainer` به کامپوننت Select.
+
+### مشکل: تصاویر آپلود نمی‌شوند
+**راه‌حل:** بررسی مجوزهای Storage Bucket در Supabase.
+
+### مشکل: روابط نمایش داده نمی‌شوند
+**راه‌حل:** بررسی کنید `relationConfig.targetModule` با ID ماژول مطابقت دارد.
+
+## 📚 مستندات اضافی
+
+- 📖 **راهنمای پروژه:** `PROJECT_GUIDE.md`
+- 🏗️ **معماری فنی:** `ARCHITECTURE.md`
+- 🔗 **راهنمای روابط:** `RELATIONS_GUIDE.md`
+- 🗄️ **طراحی دیتابیس:** `DATABASE_SCHEMA.md`
+
+## 🤝 مشارکت
+
+این پروژه در حال توسعه فعال است.
+
+- **توسعه‌دهنده اصلی:** Farzad
+- **شریک هوش مصنوعی:** Claude (Anthropic)
+
+## 📄 مجوز
+
 Private / Proprietary
+
+---
+
+**آخرین به‌روزرسانی:** 7 ژانویه 2026  
+**نسخه:** 4.0

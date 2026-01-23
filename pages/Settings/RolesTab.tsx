@@ -3,6 +3,7 @@ import { Tree, Checkbox, Button, Input, message, Empty, Divider, Switch, Collaps
 import { PlusOutlined, DeleteOutlined, SaveOutlined, LockOutlined, TeamOutlined } from '@ant-design/icons';
 import { supabase } from '../../supabaseClient';
 import { MODULES } from '../../moduleRegistry';
+import { BlockType } from '../../types';
 
 const { Panel } = Collapse;
 
@@ -96,6 +97,36 @@ const RolesTab: React.FC = () => {
     key: role.id,
   }));
 
+  const getPermissionFields = (module: any) => {
+    const fieldMap = new Map<string, any>();
+
+    module.fields.forEach((field: any) => {
+      fieldMap.set(field.key, field);
+    });
+
+    module.blocks?.forEach((block: any) => {
+      if (block.type !== BlockType.TABLE) return;
+      block.tableColumns?.forEach((col: any) => {
+        if (!fieldMap.has(col.key)) {
+          fieldMap.set(col.key, {
+            key: col.key,
+            labels: { fa: col.title || col.key }
+          });
+        }
+      });
+    });
+
+    const hasTableBlocks = module.blocks?.some((block: any) => block.type === BlockType.TABLE);
+    if (hasTableBlocks && !fieldMap.has('grand_total')) {
+      fieldMap.set('grand_total', {
+        key: 'grand_total',
+        labels: { fa: 'جمع کل' }
+      });
+    }
+
+    return Array.from(fieldMap.values());
+  };
+
   return (
     <div className="flex flex-col md:flex-row gap-6 h-[70vh]">
       {/* سایدبار لیست نقش‌ها */}
@@ -151,7 +182,7 @@ const RolesTab: React.FC = () => {
                                     <div className="pl-6 pt-2">
                                         <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">دسترسی به فیلدها</Divider>
                                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                            {module.fields.map(field => (
+                                          {getPermissionFields(module).map((field: any) => (
                                                 <div key={field.key} className="flex items-center gap-2 text-sm bg-gray-50 dark:bg-white/5 p-2 rounded border border-transparent dark:border-gray-800">
                                                     <Switch 
                                                         size="small" 

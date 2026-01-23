@@ -35,7 +35,7 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
   }, [moduleId]);
 
   const fetchViews = async () => {
-    const { data } = await supabase.from('saved_views').select('*').eq('module_id', moduleId);
+    const { data } = await supabase.from('saved_views').select('*').eq('module_id', moduleId).order('created_at', { ascending: false });
     const defaultView: SavedView = { 
         id: 'default_all', 
         module_id: moduleId, 
@@ -83,11 +83,10 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
     }
 
     const validFilters = (config.filters || []).filter(f =>
-  f.field &&
-  f.operator &&
-  !(f.value === undefined || f.value === null)
-);
-
+      f.field &&
+      f.operator &&
+      !(f.value === undefined || f.value === null)
+    );
 
     const cleanConfig: ViewConfig = { ...config, filters: validFilters };
 
@@ -99,22 +98,37 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
     };
 
     try {
-        let savedData;
+        let savedData: SavedView | null;
         if (editingViewId) {
-            const { data, error } = await supabase.from('saved_views').update(payload).eq('id', editingViewId).select().single();
+            const { data, error } = await supabase
+              .from('saved_views')
+              .update(payload)
+              .eq('id', editingViewId)
+              .select()
+              .single();
             if (error) throw error;
             savedData = data;
-            setViews(prev => prev.map(v => v.id === editingViewId ? savedData : v));
+            if (savedData) {
+                setViews(prev => prev.map(v => v.id === editingViewId ? savedData! : v));
+            }
             message.success('ذخیره شد');
         } else {
-            const { data, error } = await supabase.from('saved_views').insert([payload]).select().single();
+            const { data, error } = await supabase
+              .from('saved_views')
+              .insert([payload])
+              .select()
+              .single();
             if (error) throw error;
             savedData = data;
-            setViews(prev => [...prev, savedData]);
+            if (savedData) {
+                setViews(prev => [...prev, savedData!]);
+            }
             message.success('ایجاد شد');
         }
         setIsModalOpen(false);
-        onViewChange(savedData, savedData.config);
+        if (savedData) {
+            onViewChange(savedData, savedData.config);
+        }
     } catch (err: any) {
         message.error('خطا: ' + err.message);
     }

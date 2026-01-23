@@ -1,38 +1,66 @@
-import React, { useRef, useState } from 'react';
-import { Table, Tag, Avatar, Input, Button, Space, Checkbox } from 'antd';
-import { AppstoreOutlined, SearchOutlined } from '@ant-design/icons';
+import React, { useRef, useState, useEffect } from 'react';
+import { Table, Tag, Avatar, Input, Button, Space, Popover } from 'antd';
+import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { ModuleDefinition, FieldType } from '../types';
-import dayjs from 'dayjs';
+import { getSingleOptionLabel } from '../utils/optionHelpers';
+import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat } from '../utils/persianNumberFormatter';
 import type { InputRef } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
-import { Link } from 'react-router-dom'; 
 
 interface SmartTableRendererProps {
   moduleConfig: ModuleDefinition | null | undefined;
   data: any[];
   loading: boolean;
-  rowSelection?: any; // اضافه شده برای انتخاب گروهی
+  visibleColumns?: string[];  // ✅ ستون‌های انتخاب‌شده از View
+  rowSelection?: any;
   onRow?: (record: any) => any;
   onChange?: (pagination: any, filters: any, sorter: any) => void;
   pagination?: any;
+  dynamicOptions?: Record<string, any[]>;  // ✅ گزینه‌های dynamic برای نمایش برچسب‌های فارسی
+  relationOptions?: Record<string, any[]>;  // ✅ گزینه‌های relation برای نمایش برچسب‌های فارسی
+  allUsers?: any[];  // ✅ لیست کاربران
+  allRoles?: any[];  // ✅ لیست نقش‌ها
+  canViewField?: (fieldKey: string) => boolean;
 }
 
 const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({ 
   moduleConfig, 
   data, 
   loading, 
+  visibleColumns,  // ✅ اضافه شد
   rowSelection, 
   onRow,
   onChange,
-  pagination
+  pagination,
+  dynamicOptions = {},  // ✅ اضافه شد
+  relationOptions = {},   // ✅ اضافه شد
+  allUsers = [],  // ✅ اضافه شد
+  allRoles = [],   // ✅ اضافه شد
+  canViewField
 }) => {
   const searchInput = useRef<InputRef>(null);
+  const [scrollHeight, setScrollHeight] = useState<number>(500);
+
+  // ✅ Responsive scroll height
+  useEffect(() => {
+    const updateScrollHeight = () => {
+      if (window.innerWidth < 768) {
+        setScrollHeight(250); // موبایل
+      } else {
+        setScrollHeight(440); // دسکتاپ (15 rows approx)
+      }
+    };
+    
+    updateScrollHeight();
+    window.addEventListener('resize', updateScrollHeight);
+    return () => window.removeEventListener('resize', updateScrollHeight);
+  }, []);
 
   if (!moduleConfig || !moduleConfig.fields) return null;
 
   // --- لاجیک جستجوی ستونی (بهینه شده) ---
-  const handleSearch = (selectedKeys: string[], confirm: (param?: FilterConfirmProps) => void) => {
+  const handleSearch = (_selectedKeys: string[], confirm: (param?: FilterConfirmProps) => void) => {
     confirm();
   };
 
@@ -76,7 +104,6 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     filterIcon: (filtered: boolean) => (
       <SearchOutlined style={{ color: filtered ? '#c58f60' : undefined }} />
     ),
-    // فیلترینگ کلاینت‌ساید ساده و سریع
     onFilter: (value, record) => {
         const text = record[dataIndex] ? record[dataIndex].toString() : '';
         return text.toLowerCase().includes((value as string).toLowerCase());
@@ -88,37 +115,106 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     },
   });
 
+  // ✅ فیلتر تگ‌ها (برای ستون‌های تگ) - مشابه MULTI_SELECT
+  const getTagFilterProps = (dataIndex: string, _title: string) => {
+    const allTags = new Map<string, string>();
+    data.forEach((record: any) => {
+      const tags = record[dataIndex];
+      if (Array.isArray(tags)) {
+        tags.forEach((tag: any) => {
+          const tagValue = typeof tag === 'string' ? tag : (tag.title || tag.label || tag.id);
+          allTags.set(tagValue, tagValue);
+        });
+      }
+    });
+
+    return {
+      filters: Array.from(allTags.values()).map(tag => ({ text: tag, value: tag })),
+      multiple: true,
+      onFilter: (value: string, record: any) => {
+        const tags = record[dataIndex];
+        if (!Array.isArray(tags)) return false;
+        return tags.some((tag: any) => {
+          const tagValue = typeof tag === 'string' ? tag : (tag.title || tag.label || tag.id);
+          return tagValue === value;
+        });
+      }
+    };
+  };
+
   // --- ساخت ستون‌ها ---
   let tableFields = moduleConfig.fields
     .filter(f => f.isTableColumn)
+    .filter(f => (canViewField ? canViewField(f.key) !== false : true))
     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
-  // Fallback
-  if (tableFields.length === 0) {
+  // اگر visibleColumns مشخص است، از آن استفاده کن
+  if (visibleColumns && visibleColumns.length > 0) {
+      tableFields = visibleColumns
+        .map(colKey => moduleConfig.fields.find(f => f.key === colKey))
+        .filter(f => f !== undefined)
+        .filter(f => (canViewField ? canViewField((f as any).key) !== false : true)) as any[];
+  }
+  // Fallback: اگر هیچ visibleColumns یا isTableColumn نیست
+  else if (tableFields.length === 0) {
       tableFields = moduleConfig.fields.filter(f => 
           ['name', 'title', 'business_name', 'system_code', 'sell_price', 'stock_quantity', 'status', 'mobile_1', 'rank'].includes(f.key)
       );
   }
 
+  // ✅ ترتیب مجدد ستون‌ها: اول تصویر، سپس نام، سپس تگ‌ها، سپس بقیه
+  const tagsField = tableFields.find(f => f.type === FieldType.TAGS);
+  const imageField = tableFields.find(f => f.type === FieldType.IMAGE);
+  const keyField = tableFields.find(f => f.isKey || ['name', 'title', 'business_name'].includes(f.key));
+  const otherFields = tableFields.filter(f => f !== tagsField && f !== imageField && f !== keyField);
+  
+  if (imageField && keyField && tagsField) {
+    tableFields = [imageField, keyField, tagsField, ...otherFields];
+  } else if (keyField && tagsField) {
+    tableFields = [keyField, tagsField, ...otherFields];
+  } else if (imageField && keyField) {
+    tableFields = [imageField, keyField, ...otherFields];
+  } else if (keyField) {
+    tableFields = [keyField, ...otherFields];
+  }
+
   const columns: ColumnsType<any> = tableFields.map(field => {
-    // تشخیص اینکه آیا ستون باید قابلیت جستجو داشته باشد
     const isSearchable = field.type === FieldType.TEXT || field.key.includes('name') || field.key.includes('code') || field.key.includes('title');
+    const isTagField = field.type === FieldType.TAGS;
 
     return {
       title: <span className="text-[11px] text-gray-500">{field.labels.fa}</span>,
       dataIndex: field.key,
       key: field.key,
-      width: field.key === 'id' ? 60 : undefined,
+      width: field.key === 'id' ? 60 : isTagField ? 140 : undefined,
       
-      // اضافه کردن قابلیت جستجو اگر متنی باشد
       ...(isSearchable ? getColumnSearchProps(field.key, field.labels.fa) : {}),
+      ...(isTagField ? getTagFilterProps(field.key, field.labels.fa) : {}),
 
-      // فیلتر وضعیت‌ها
-      filters: (field.type === FieldType.STATUS || field.type === FieldType.SELECT) && field.options 
-          ? field.options.map(o => ({ text: o.label, value: o.value }))
+      filters: !isTagField && (field.type === FieldType.STATUS || field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT || field.type === FieldType.RELATION || field.type === FieldType.USER)
+          ? (() => {
+              let options: any[] = [];
+              if (field.options) {
+                options = field.options.map(o => ({ text: o.label, value: o.value }));
+              } else if ((field as any).dynamicOptionsCategory) {
+                const category = (field as any).dynamicOptionsCategory;
+                const dynopts = dynamicOptions[category] || [];
+                options = dynopts.map(o => ({ text: o.label, value: o.value }));
+              } else if (field.type === FieldType.RELATION || field.type === FieldType.USER) {
+                const rellopts = relationOptions[field.key] || relationOptions[(field as any).relationConfig?.targetModule] || relationOptions['profiles'] || [];
+                options = rellopts.map(o => ({ text: o.label, value: o.value }));
+              }
+              return options.length > 0 ? options : undefined;
+            })()
           : undefined,
-      onFilter: (field.type === FieldType.STATUS || field.type === FieldType.SELECT)
-          ? (value, record) => record[field.key] === value
+      onFilter: !isTagField && (field.type === FieldType.STATUS || field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT || field.type === FieldType.RELATION || field.type === FieldType.USER)
+          ? (value, record) => {
+              const recordValue = record[field.key];
+              if (field.type === FieldType.MULTI_SELECT && Array.isArray(recordValue)) {
+                return recordValue.includes(value);
+              }
+              return recordValue === value;
+            }
           : undefined,
 
       render: (value: any, record: any) => {
@@ -126,24 +222,118 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
             return <Avatar src={value} icon={<AppstoreOutlined />} shape="square" size="default" className="bg-gray-100 border border-gray-200" />;
         }
         if (field.type === FieldType.DATE && value) {
-            return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{dayjs(value).calendar('jalali').format('YYYY/MM/DD')}</span>;
+          const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+          if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
+        }
+        if (field.type === FieldType.TIME && value) {
+          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{formatPersianTime(value)}</span>;
+        }
+        if (field.type === FieldType.DATETIME && value) {
+          const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+          if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
         }
         if (field.type === FieldType.STATUS) {
             const opt = field.options?.find(o => o.value === value);
-            return <Tag color={opt?.color || 'default'} style={{fontSize: '10px', marginRight: 0}}>{opt?.label || value}</Tag>;
+            const label = opt?.label || value;
+            return <Tag color={opt?.color || 'default'} style={{fontSize: '10px', marginRight: 0}}>{label}</Tag>;
+        }
+        if (field.type === FieldType.SELECT) {
+            const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions);
+            return <span className="text-xs text-gray-600 dark:text-gray-300">{label}</span>;
+        }
+        if (field.type === FieldType.RELATION) {
+            const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions);
+            return <span className="text-xs text-leather-600 hover:underline font-medium">{label}</span>;
+        }
+        if (field.type === FieldType.USER) {
+            if (!value) return '-';
+            // Try to find the label from relationOptions
+            const userLabel = 
+              relationOptions[field.key]?.find((o: any) => o.value === value)?.label ||
+              relationOptions['profiles']?.find((o: any) => o.value === value)?.label || 
+              value;
+            return <span className="text-xs text-leather-600 hover:underline font-medium">{userLabel}</span>;
+        }
+        if (field.type === FieldType.TAGS) {
+            if (!Array.isArray(value) || value.length === 0) return '-';
+            
+            const firstTag = value.slice(0, 1);
+            const remainingTags = value.slice(1);
+            
+            return (
+              <div className="flex flex-wrap gap-1 items-center">
+                {firstTag.map((tag: any, idx: number) => {
+                  const tagTitle = typeof tag === 'string' ? tag : tag.title || tag.label;
+                  const tagColor = typeof tag === 'string' ? 'blue' : (tag.color || 'blue');
+                  return (
+                    <Tag key={idx} color={tagColor} style={{fontSize: '9px', marginRight: 0, padding: '1px 4px', lineHeight: '14px'}}>
+                      {tagTitle}
+                    </Tag>
+                  );
+                })}
+                {remainingTags.length > 0 && (
+                  <Popover
+                    content={
+                      <div className="flex flex-wrap gap-1">
+                        {remainingTags.map((tag: any, idx: number) => {
+                          const tagTitle = typeof tag === 'string' ? tag : tag.title || tag.label;
+                          const tagColor = typeof tag === 'string' ? 'blue' : (tag.color || 'blue');
+                          return (
+                            <Tag key={idx} color={tagColor} style={{fontSize: '9px', marginRight: 0, padding: '2px 6px'}}>
+                              {tagTitle}
+                            </Tag>
+                          );
+                        })}
+                      </div>
+                    }
+                    title={`${remainingTags.length} برچسب بیشتر`}
+                    trigger="click"
+                  >
+                    <span className="text-[9px] text-gray-500 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded font-medium cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-600">
+                      +{remainingTags.length}
+                    </span>
+                  </Popover>
+                )}
+              </div>
+            );
+        }
+        if (field.type === FieldType.MULTI_SELECT) {
+            if (!Array.isArray(value) || value.length === 0) return '-';
+            return (
+              <div className="flex flex-wrap gap-1">
+                {value.map((val: any, idx: number) => {
+                  const label = getSingleOptionLabel(field, val, dynamicOptions, relationOptions);
+                  return (
+                    <Tag key={idx} color="default" style={{fontSize: '9px', marginRight: 0, backgroundColor: '#fef3c7', borderColor: '#d97706', color: '#92400e'}} className="font-medium">
+                      {label}
+                    </Tag>
+                  );
+                })}
+              </div>
+            );
         }
         if (field.type === FieldType.PRICE) {
             if (!value) return '-';
-            return <span className="font-bold text-gray-700 dark:text-gray-300 text-xs">{Number(value).toLocaleString()}</span>;
+            const persianPrice = formatPersianPrice(value, true);
+            return <span className="font-bold text-gray-700 dark:text-gray-300 text-xs persian-number">{persianPrice}</span>;
         }
-        if (field.type === FieldType.STOCK) {
-             const reorderPoint = record.reorder_point || 10;
-             const color = value <= 0 ? 'red' : value <= reorderPoint ? 'orange' : 'green';
-             return <span style={{ color }} className="font-bold text-xs">{value}</span>;
+        if (field.type === FieldType.STOCK || field.type === FieldType.NUMBER) {
+             const persianNum = toPersianNumber(value);
+             if (field.type === FieldType.STOCK) {
+               const reorderPoint = record.reorder_point || 10;
+               const color = value <= 0 ? 'red' : value <= reorderPoint ? 'orange' : 'green';
+               return <span style={{ color }} className="font-bold text-xs persian-number">{persianNum}</span>;
+             }
+             return <span className="text-xs text-gray-600 dark:text-gray-300 persian-number">{persianNum}</span>;
+        }
+        if (field.type === FieldType.PERCENTAGE) {
+             const persianPercent = toPersianNumber(Number(value).toFixed(1)) + '%';
+             return <span className="text-xs text-gray-600 dark:text-gray-300 persian-number">{persianPercent}</span>;
         }
         if (field.isKey || ['name', 'title', 'business_name'].includes(field.key)) {
-             // لینک به صفحه جزئیات با جلوگیری از Propagation (برای اینکه کلیک روی ردیف تداخل نکنه)
-            return (
+             return (
                 <span className="text-leather-600 font-bold text-sm hover:underline">
                     {value}
                 </span>
@@ -154,25 +344,78 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     };
   });
 
+  // ✅ اضافه کردن ستون assignee به انتهای تمام جداول
+  if (!canViewField || canViewField('assignee_id') !== false) {
+    columns.push({
+    title: <span className="text-[11px] text-gray-500">مسئول</span>,
+    dataIndex: 'assignee_id',
+    key: 'assignee',
+    width: 120,
+    render: (_: any, record: any) => {
+      const assigneeId = record.assignee_id;
+      const assigneeType = record.assignee_type;
+      
+      if (!assigneeId) {
+        return <span className="text-[10px] text-gray-300">-</span>;
+      }
+      
+      if (assigneeType === 'user') {
+        const user = allUsers.find(u => u.id === assigneeId);
+        if (user) {
+          return (
+            <div className="flex items-center gap-1">
+              {user.avatar_url ? (
+                <Avatar src={user.avatar_url} size="small" />
+              ) : (
+                <Avatar icon={<UserOutlined />} size="small" />
+              )}
+              <span className="text-[10px] text-gray-600 dark:text-gray-300 truncate max-w-[80px]">{user.full_name}</span>
+            </div>
+          );
+        }
+      } else if (assigneeType === 'role') {
+        const role = allRoles.find(r => r.id === assigneeId);
+        if (role) {
+          return (
+            <div className="flex items-center gap-1">
+              <Avatar icon={<TeamOutlined />} size="small" className="bg-blue-100 text-blue-600" />
+              <span className="text-[10px] text-gray-600 dark:text-gray-300 truncate max-w-[80px]">{role.title}</span>
+            </div>
+          );
+        }
+      }
+      
+      return <span className="text-[10px] text-gray-400">نامشخص</span>;
+    }
+    });
+    }
+
   return (
-    <Table 
-        columns={columns} 
-        dataSource={data} 
-        rowKey="id" 
-        loading={loading} 
-        size="small" 
-        pagination={pagination || { pageSize: 20, position: ['bottomCenter'], size: 'small' }} 
-        onChange={onChange}
-        className="custom-erp-table h-full"
-        scroll={{ x: true, y: 'calc(100vh - 240px)' }}
-        // 🔥 اتصال انتخاب گروهی
-        rowSelection={rowSelection ? {
-            type: 'checkbox',
-            ...rowSelection,
-            columnWidth: 40,
+    <div className="custom-erp-table">
+      <Table 
+          columns={columns} 
+          dataSource={data} 
+          rowKey="id" 
+          loading={loading} 
+          size="small" 
+          pagination={pagination || { 
+              pageSize: 20, 
+              position: ['bottomCenter'], 
+              size: 'small',
+              showSizeChanger: true,
+              showTotal: (total, range) => `${toPersianNumber(range[0])}-${toPersianNumber(range[1])} از ${toPersianNumber(total)}`
+          }} 
+          onChange={onChange}
+          scroll={{ x: 'max-content', y: scrollHeight }}
+          // 🔥 اتصال انتخاب گروهی
+          rowSelection={rowSelection ? {
+              type: 'checkbox',
+              ...rowSelection,
+              columnWidth: 40,
         } : undefined}
         onRow={onRow}
-    />
+      />
+    </div>
   );
 };
 

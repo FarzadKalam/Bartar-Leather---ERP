@@ -66,20 +66,21 @@ export const ModuleCreate = () => {
         <div className="bg-white dark:bg-[#1a1a1a] rounded-[1.5rem] p-6 shadow-sm border border-gray-100 dark:border-gray-800">
             <SmartForm 
                 module={moduleConfig}
-                visible={true} 
-                embedded={true}
+                visible={true}
                 onCancel={() => navigate(-1)} 
                 
                 // این تابع فقط وقتی اجرا میشه که فرم ولیدیت شده باشه
-                onSave={(values) => {
-                    // هندل کردن ذخیره توسط Refine انجام میشه، اینجا فقط لاگ میزنیم یا کارهای جانبی
-                    console.log("Submitting:", values); 
+                onSave={async (values) => {
+                    console.log("📤 Submitting to Refine:", values);
+                    try {
+                        // استفاده از onFinish که Refine فراهم کرده
+                        await formProps.onFinish?.(values);
+                        console.log("✅ Submit successful!");
+                    } catch (err: any) {
+                        console.error("❌ Submit failed:", err);
+                        throw err; // پرتاب مجدد برای نمایش خطا
+                    }
                 }}
-                
-                // --- اتصال حیاتی ---
-                form={form}           
-                formProps={formProps} 
-                isLoading={isSubmitting}
             />
         </div>
     </div>
