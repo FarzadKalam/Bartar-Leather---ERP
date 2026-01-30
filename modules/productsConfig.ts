@@ -1,4 +1,4 @@
-import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, LogicOperator, FieldNature } from '../types';
+import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, LogicOperator, FieldNature, RowCalculationType, SummaryCalculationType } from '../types';
 
 // ====== 1. تعریف تمام فیلدها ======
 const fieldsArray: any[] = [
@@ -191,6 +191,7 @@ const BLOCKS = {
     icon: 'SkinOutlined', 
     order: 10, 
     type: BlockType.TABLE,
+    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
     tableColumns: createBomTableColumns(
       { targetModule: 'products', targetField: 'name', filter: { category: 'leather' } },
       'leatherSpec',
@@ -205,6 +206,7 @@ const BLOCKS = {
     icon: 'BgColorsOutlined', 
     order: 11, 
     type: BlockType.TABLE,
+    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
     tableColumns: createBomTableColumns(
       { targetModule: 'products', targetField: 'name', filter: { category: 'lining' } },
       'liningSpec',
@@ -219,6 +221,7 @@ const BLOCKS = {
     icon: 'ToolOutlined', 
     order: 12, 
     type: BlockType.TABLE,
+    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
     tableColumns: createBomTableColumns(
       { targetModule: 'products', targetField: 'name', filter: { category: 'fitting' } },
       'yaraghSpec',
@@ -233,6 +236,7 @@ const BLOCKS = {
     icon: 'ScissorOutlined', 
     order: 13, 
     type: BlockType.TABLE,
+    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
     tableColumns: createBomTableColumns(
       { targetModule: 'products', targetField: 'name', filter: { category: 'accessory' } },
       'kharjkarSpec',

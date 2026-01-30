@@ -44,7 +44,7 @@ const BomStructureRenderer: React.FC<BomStructureRendererProps> = ({
 
   return (
     <div className="space-y-6 animate-fadeIn">
-        <Divider orientation="left" className="text-leather-600 border-leather-600 font-bold">
+        <Divider orientation="right" className="text-leather-600 border-leather-600 font-bold">
             <span className="whitespace-normal text-wrap leading-relaxed">
                 📋 ساختار محصول (برگرفته از: <Link to={`/production_boms/${bomData.id}`} className="text-leather-600 hover:underline">{bomData.name}</Link>)
             </span>

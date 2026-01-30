@@ -163,8 +163,7 @@ const ModuleShow: React.FC = () => {
   const fetchOptions = useCallback(async (recordData: any = null) => {
     if (!moduleConfig) return;
     
-    const dynFields = [...moduleConfig.fields.filter(f => (f as any).dynamicOptionsCategory)];
-    moduleConfig.blocks?.forEach(b => {
+    const dynFields: any[] = [...moduleConfig.fields.filter(f => (f as any).dynamicOptionsCategory)];    moduleConfig.blocks?.forEach(b => {
       if (b.type === BlockType.TABLE && b.tableColumns) {
         b.tableColumns.forEach(c => {
           if ((c.type === FieldType.SELECT || c.type === FieldType.MULTI_SELECT) && (c as any).dynamicOptionsCategory) {
@@ -184,8 +183,7 @@ const ModuleShow: React.FC = () => {
     }
     setDynamicOptions(dynOpts);
 
-    const relFields = [...moduleConfig.fields.filter(f => f.type === FieldType.RELATION)];
-    moduleConfig.blocks?.forEach(b => {
+        const relFields: any[] = [...moduleConfig.fields.filter(f => f.type === FieldType.RELATION)];    moduleConfig.blocks?.forEach(b => {
       if (b.type === BlockType.TABLE && b.tableColumns) {
         b.tableColumns.forEach(c => {
           if (c.type === FieldType.RELATION) relFields.push({ ...c, key: `${b.id}_${c.key}` }); 
@@ -787,17 +785,10 @@ const ModuleShow: React.FC = () => {
       />
 
       <TablesSection
-        linkedBomData={linkedBomData}
-        standardTableBlocks={standardTableBlocks || []}
+        module={moduleConfig}
         data={data}
-        moduleId={moduleId}
-        recordId={id!}
         relationOptions={relationOptions}
         dynamicOptions={dynamicOptions}
-        canViewField={canViewField}
-        readOnly={!canEditModule}
-        onLinkedBomUpdate={fetchLinkedBom}
-        onTableSave={(blockId, newData) => setData((prev: any) => ({ ...prev, [blockId]: newData }))}
       />
 
       {isEditDrawerOpen && (

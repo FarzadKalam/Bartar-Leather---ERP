@@ -1,15 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Avatar, Button, Tag, Spin, Tabs, Statistic, Descriptions } from 'antd';
-import { UserOutlined, MailOutlined, PhoneOutlined, SafetyCertificateOutlined, CalendarOutlined, ArrowRightOutlined, CheckCircleOutlined } from '@ant-design/icons';
-// اصلاح مسیر ایمپورت: فقط یک نقطه چین (../) کافیست
+import { 
+  Avatar, Button, Tag, Spin, Tabs, Statistic, Descriptions, message, Badge 
+} from 'antd';
+import { 
+  UserOutlined, ArrowRightOutlined, CheckCircleOutlined, 
+  CloseCircleOutlined, IdcardOutlined, SafetyCertificateOutlined, EditOutlined 
+} from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import dayjs from 'dayjs';
+import { profilesModule } from '../modules/profilesConfig'; // کانفیگ جدید را ایمپورت کنید
+import { FieldType, FieldDef } from '../types';
 
 const ProfilePage: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState<any>(null);
+  const [record, setRecord] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,112 +25,189 @@ const ProfilePage: React.FC = () => {
   const fetchProfile = async () => {
     setLoading(true);
     let userId = id;
-    
-    // اگر آیدی نبود، فرض می‌کنیم کاربر لاگین شده است
+    let userEmail = '';
+
+    // 1. دریافت شناسه و ایمیل کاربر (چه لاگین شده چه از پارامتر)
     if (!userId) {
-        const { data: currentUser } = await supabase.from('profiles').select('id').limit(1).single();
-        if (currentUser) userId = currentUser.id;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+            userId = user.id;
+            userEmail = user.email || '';
+        }
+    } else {
+        // اگر داریم پروفایل کس دیگری را می‌بینیم، باید ایمیلش را جداگانه بگیریم (اگر ادمین باشیم)
+        // فعلا فرض می‌کنیم ایمیل فقط برای خود کاربر در دسترس است یا در پروفایل ذخیره شده
     }
 
     if (userId) {
-        const { data } = await supabase.from('profiles').select('*, org_roles(title)').eq('id', userId).single();
-        setProfile(data);
+        // 2. دریافت اطلاعات از جدول پروفایل + سازمان
+        const { data, error } = await supabase
+            .from(profilesModule.table)
+            .select(`
+                *,
+                organizations (name)
+            `)
+            .eq('id', userId)
+            .single();
+
+        if (error) {
+            console.error('Error fetching profile:', error);
+            message.error('خطا در دریافت پروفایل');
+        } else {
+            // 3. ترکیب داده‌ها (ایمیل را به دیتای پروفایل اضافه می‌کنیم تا ماژولار نمایش داده شود)
+            setRecord({
+                ...data,
+                email: userEmail || data.email, // اولویت با ایمیل جدول Auth
+                // هندل کردن رابطه‌ها برای دسترسی راحت‌تر
+                organizations: Array.isArray(data.organizations) ? data.organizations[0] : data.organizations
+            });
+        }
     }
     setLoading(false);
   };
 
+  // --- تابع رندر کننده هوشمند فیلدها ---
+  const renderFieldValue = (field: FieldDef, value: any, allData: any) => {
+    if (value === null || value === undefined || value === '') return <span className="text-gray-400">---</span>;
+
+    switch (field.type) {
+        case FieldType.BOOLEAN:
+            return value ? 
+                <Tag color="green" icon={<CheckCircleOutlined />}>فعال</Tag> : 
+                <Tag color="red" icon={<CloseCircleOutlined />}>غیرفعال</Tag>;
+        
+        case FieldType.DATE:
+            return <span dir="ltr">{dayjs(value).format('YYYY/MM/DD')}</span>;
+
+        case FieldType.RELATION:
+            // خواندن نام از جدول جوین شده (مثلاً organizations.name)
+            const relData = allData[field.relation?.table || ''];
+            const displayVal = relData ? relData[field.relation?.displayKey || 'name'] : value;
+            return <span className="font-medium text-leather-600 dark:text-leather-400">{displayVal}</span>;
+
+        case FieldType.SELECT:
+            const option = field.options?.find(opt => opt.value === value);
+            return option ? <Tag color={option.color}>{option.label}</Tag> : value;
+
+        default: // TEXT, etc.
+            return <span className="text-gray-700 dark:text-gray-300">{value}</span>;
+    }
+  };
+
   if (loading) return <div className="flex h-screen items-center justify-center"><Spin size="large" /></div>;
-  if (!profile) return <div className="text-center mt-20 dark:text-gray-400">کاربر یافت نشد</div>;
+  if (!record) return null;
+
+  // جدا کردن فیلدهای اصلی برای نمایش در کارت هدر
+  const mainFields = profilesModule.fields.filter(f => ['full_name', 'job_title', 'is_active'].includes(f.key));
+  // بقیه فیلدها برای نمایش در تب جزئیات
+  const detailFields = profilesModule.fields.filter(f => !['full_name', 'job_title', 'is_active'].includes(f.key));
 
   return (
-    <div className="max-w-5xl mx-auto p-4 md:p-8 animate-fadeIn">
-      <Button icon={<ArrowRightOutlined />} type="text" className="mb-4 dark:text-gray-300" onClick={() => navigate(-1)}>بازگشت</Button>
+    <div className="max-w-6xl mx-auto p-4 md:p-8 animate-fadeIn">
+      {/* هدر و دکمه بازگشت */}
+      <div className="flex items-center justify-between mb-6">
+        <Button 
+            icon={<ArrowRightOutlined />} 
+            type="text" 
+            className="text-gray-600 dark:text-gray-300" 
+            onClick={() => navigate(-1)}
+        >
+            بازگشت
+        </Button>
+      </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* کارت سمت چپ: اطلاعات اصلی */}
-        <div className="md:col-span-1">
-            <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] p-6 text-center shadow-sm border border-gray-200 dark:border-gray-800 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-leather-500 to-leather-700"></div>
-                <div className="relative -mt-10 mb-4">
-                    <Avatar 
-                        size={120} 
-                        src={profile.avatar_url} 
-                        icon={<UserOutlined />} 
-                        className="bg-white border-4 border-white dark:border-[#1a1a1a] shadow-lg text-leather-500"
-                    />
-                </div>
-                <h1 className="text-2xl font-black text-gray-800 dark:text-white m-0">{profile.full_name}</h1>
-                <p className="text-gray-500 dark:text-gray-400 mb-4">{profile.org_roles?.title || 'بدون نقش سازمانی'}</p>
-                
-                <div className="flex justify-center gap-2 mb-6">
-                    <Tag color={profile.is_active ? 'green' : 'red'} icon={profile.is_active ? <CheckCircleOutlined /> : undefined}>
-                        {profile.is_active ? 'حساب فعال' : 'حساب غیرفعال'}
-                    </Tag>
-                </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* --- ستون سمت چپ: خلاصه پروفایل --- */}
+        <div className="lg:col-span-1">
+            <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] text-center shadow-sm border border-gray-200 dark:border-gray-800 relative overflow-hidden sticky top-24 pb-8">
+                <div className="h-32 bg-gradient-to-br from-leather-600 to-leather-800 relative"></div>
 
-                <div className="text-right space-y-3">
-                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-white/5 p-3 rounded-xl border border-transparent dark:border-gray-800">
-                        <MailOutlined className="text-leather-500 text-lg" />
-                        <span className="text-sm truncate" title={profile.email}>{profile.email}</span>
+                <div className="px-6 relative -mt-16">
+                    <Avatar 
+                        size={128} 
+                        src={record.avatar_url} 
+                        icon={<UserOutlined />} 
+                        className="bg-white border-4 border-white dark:border-[#1a1a1a] shadow-xl text-leather-500 text-5xl mb-4"
+                    >
+                        {record.full_name?.[0]?.toUpperCase()}
+                    </Avatar>
+
+                    {/* نمایش فیلدهای اصلی (نام، شغل، وضعیت) */}
+                    <h1 className="text-2xl font-black text-gray-800 dark:text-white mb-1">
+                        {record.full_name || 'کاربر'}
+                    </h1>
+                    <p className="text-leather-500 font-medium mb-2">
+                        {record.job_title}
+                    </p>
+                    <div className="mb-6">
+                        {renderFieldValue(profilesModule.fields.find(f => f.key === 'is_active')!, record.is_active, record)}
                     </div>
-                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-white/5 p-3 rounded-xl border border-transparent dark:border-gray-800">
-                        <PhoneOutlined className="text-leather-500 text-lg" />
-                        <span className="text-sm font-mono">{profile.mobile_1}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-white/5 p-3 rounded-xl border border-transparent dark:border-gray-800">
-                        <SafetyCertificateOutlined className="text-leather-500 text-lg" />
-                        <span className="text-sm">{profile.org_roles?.title || 'دسترسی عادی'}</span>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <Button type="primary" icon={<EditOutlined />} className="bg-leather-500 rounded-xl">ویرایش</Button>
+                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300">تغییر رمز</Button>
                     </div>
                 </div>
             </div>
         </div>
 
-        {/* محتوای سمت راست: جزئیات */}
-        <div className="md:col-span-2">
+        {/* --- ستون سمت راست: جزئیات کامل (رندر داینامیک) --- */}
+        <div className="lg:col-span-2 space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <StatisticCard title="سابقه فعالیت" value={dayjs().diff(dayjs(record.created_at), 'day')} suffix=" روز" />
+                <StatisticCard title="نقش سیستم" value={renderFieldValue(profilesModule.fields.find(f => f.key === 'role')!, record.role, record)} />
+            </div>
+
             <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] p-6 shadow-sm border border-gray-200 dark:border-gray-800 min-h-[400px]">
                 <Tabs 
-                    className="dark:text-gray-200"
                     items={[
                         {
                             key: '1',
-                            label: 'عملکرد و آمار',
+                            label: <span><IdcardOutlined /> مشخصات فردی و سازمانی</span>,
                             children: (
-                                <div className="grid grid-cols-2 gap-4 mt-4">
-                                    <div className="bg-gray-50 dark:bg-white/5 p-6 rounded-2xl text-center border border-gray-100 dark:border-gray-800">
-                                        <Statistic title={<span className="dark:text-gray-400">تسک‌های تکمیل شده</span>} value={12} valueStyle={{ color: '#d4a373', fontWeight: 'bold' }} />
-                                    </div>
-                                    <div className="bg-gray-50 dark:bg-white/5 p-6 rounded-2xl text-center border border-gray-100 dark:border-gray-800">
-                                        <Statistic title={<span className="dark:text-gray-400">روزهای عضویت</span>} value={dayjs().diff(dayjs(profile.created_at), 'day')} prefix={<CalendarOutlined />} valueStyle={{ color: '#aaa' }} />
-                                    </div>
+                                <div className="mt-6">
+                                    <Descriptions 
+                                        bordered 
+                                        column={1} 
+                                        className="custom-descriptions"
+                                    >
+                                        {/* حلقه روی تمام فیلدها برای ساخت سطرها */}
+                                        {detailFields.map(field => (
+                                            <Descriptions.Item key={field.key} label={field.label}>
+                                                {renderFieldValue(field, record[field.key], record)}
+                                            </Descriptions.Item>
+                                        ))}
+                                    </Descriptions>
                                 </div>
                             )
                         },
                         {
                             key: '2',
-                            label: 'اطلاعات تکمیلی',
-                            children: (
-                                <Descriptions column={1} className="mt-4" bordered>
-                                    <Descriptions.Item label="تاریخ ایجاد حساب" labelStyle={{width: '150px'}}>{dayjs(profile.created_at).format('YYYY/MM/DD')}</Descriptions.Item>
-                                    <Descriptions.Item label="شماره اضطراری">{profile.mobile_2 || '-'}</Descriptions.Item>
-                                    <Descriptions.Item label="بیوگرافی">{profile.bio || '-'}</Descriptions.Item>
-                                </Descriptions>
-                            )
+                            label: <span><SafetyCertificateOutlined /> امنیت</span>,
+                            children: <div className="py-10 text-center text-gray-400">اطلاعات امنیتی</div>
                         }
                     ]} 
                 />
             </div>
         </div>
       </div>
+
       <style>{`
-        .dark .ant-descriptions-item-label { background-color: #262626 !important; color: #aaa !important; border-color: #303030 !important; }
-        .dark .ant-descriptions-item-content { background-color: #1a1a1a !important; color: #ddd !important; border-color: #303030 !important; }
-        .dark .ant-descriptions-row { border-color: #303030 !important; }
-        .dark .ant-descriptions-view { border-color: #303030 !important; }
-        .dark .ant-tabs-tab { color: #888; }
-        .dark .ant-tabs-tab-active .ant-tabs-tab-btn { color: white !important; }
+        .dark .custom-descriptions .ant-descriptions-item-label { background-color: #262626; color: #aaa; border-color: #303030; }
+        .dark .custom-descriptions .ant-descriptions-item-content { background-color: #1a1a1a; color: #ddd; border-color: #303030; }
+        .dark .custom-descriptions .ant-descriptions-view { border-color: #303030; }
       `}</style>
     </div>
   );
 };
+
+const StatisticCard = ({ title, value, suffix }: any) => (
+    <div className="bg-white dark:bg-[#1a1a1a] p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col items-center justify-center">
+        <span className="text-gray-500 dark:text-gray-400 text-sm mb-2">{title}</span>
+        <div className="text-lg font-bold text-gray-800 dark:text-white">
+            {value} <span className="text-sm text-gray-400 font-normal">{suffix}</span>
+        </div>
+    </div>
+);
 
 export default ProfilePage;

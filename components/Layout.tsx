@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout as AntLayout, Menu, Button, Avatar, Badge, Dropdown } from 'antd';
+import { Layout as AntLayout, Menu, Button, Avatar, Badge, Dropdown, message, Modal } from 'antd';
 import { 
   DashboardOutlined, 
   SkinOutlined, 
@@ -19,9 +19,11 @@ import {
   CheckSquareOutlined,
   GoldOutlined,
   SunOutlined,
+  ExclamationCircleOutlined,
   MoonOutlined
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { supabase } from '../supabaseClient'; // 👈 ایمپورت سوپابیس
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -35,11 +37,18 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
   const [collapsed, setCollapsed] = useState(true);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [currentUser, setCurrentUser] = useState<any>(null); // برای نمایش آواتار واقعی
   
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
+    const getUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUser(user);
+    };
+    getUser();
+
     const handleResize = () => {
       const width = window.innerWidth;
       const mobile = width < 768;
@@ -56,6 +65,27 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  const handleLogout = () => {
+    Modal.confirm({
+      title: 'خروج از حساب کاربری',
+      icon: <ExclamationCircleOutlined />,
+      content: 'آیا مطمئن هستید که می‌خواهید خارج شوید؟',
+      okText: 'بله، خروج',
+      cancelText: 'انصراف',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const { error } = await supabase.auth.signOut();
+          if (error) throw error;
+          navigate('/login');
+          message.success('با موفقیت خارج شدید');
+        } catch (error) {
+          message.error('خطا در خروج از سیستم');
+        }
+      },
+    });
+  };
 
   const menuItems = [
     { key: '/', icon: <DashboardOutlined />, label: 'داشبورد' },
@@ -83,10 +113,18 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
     items: [
       {
         key: 'profile',
-        label: <span onClick={() => navigate('/profile')}>پروفایل کاربری</span>,
+        label: 'پروفایل کاربری',
         icon: <UserOutlined />,
+        onClick: () => navigate('/profile'), // هدایت به پروفایل
       },
-      { key: 'logout', label: 'خروج', icon: <LogoutOutlined />, danger: true },
+      { type: 'divider' as const },
+      { 
+        key: 'logout', 
+        label: 'خروج', 
+        icon: <LogoutOutlined />, 
+        danger: true,
+        onClick: handleLogout // اتصال تابع خروج
+      },
     ],
   };
 
@@ -199,9 +237,16 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
             <div className="w-[1px] h-6 bg-gray-300 dark:bg-gray-700 mx-1"></div>
             <Badge count={5} size="small" color="#c58f60"><Button type="text" shape="circle" icon={<BellOutlined className="text-gray-500 dark:text-gray-400" />} /></Badge>
             {/* اصلاح: قرار دادن آواتار در div برای رفع وارنینگ */}
-            <Dropdown menu={userMenu} placement="bottomLeft">
-                <div>
-                   <Avatar size="small" src="https://i.pravatar.cc/150?u=a1" className="border border-leather-500 cursor-pointer shadow-lg" />
+            <Dropdown menu={userMenu} placement="bottomLeft" trigger={['click']}>
+                <div className="cursor-pointer transition-transform hover:scale-105">
+                   {/* استفاده از متادیتای کاربر لاگین شده برای آواتار */}
+                   <Avatar 
+                     size="small" 
+                     src={currentUser?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=a1"} 
+                     className="border border-leather-500 shadow-lg" 
+                   >
+                     {currentUser?.email?.[0]?.toUpperCase()}
+                   </Avatar>
                 </div>
             </Dropdown>
           </div>

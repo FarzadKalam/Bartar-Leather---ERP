@@ -1,21 +1,24 @@
 import { useEffect } from "react";
-import { Refine } from "@refinedev/core";
+import { Refine, Authenticated } from "@refinedev/core"; // Authenticated اضافه شد
 import { notificationProvider, ErrorComponent } from "@refinedev/antd";
 import { dataProvider } from "@refinedev/supabase";
-import routerBindings, { NavigateToResource, UnsavedChangesNotifier, DocumentTitleHandler } from "@refinedev/react-router-v6";
+import { authProvider } from "./authProvider";
+import routerBindings, { NavigateToResource, UnsavedChangesNotifier, DocumentTitleHandler, CatchAllNavigate } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider, App as AntdApp } from "antd";
 import faIR from "antd/locale/fa_IR";
+import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/Settings/SettingsPage";
 import { JalaliLocaleListener } from "antd-jalali";
 import dayjs from "dayjs";
 import jalaliday from "jalaliday";
 import "dayjs/locale/fa";
 
-// Configure Jalali calendar with Persian locale
-dayjs.extend(jalaliday);
+// 1. ایمپورت کردن صفحه لاگین (مسیر فایل را چک کن)
+import Login from "./pages/Login"; // اگر فایل را در پوشه pages گذاشتی بنویس: "./pages/Login"
 
-// Set Persian locale with custom Jalali month names
+// ... (تنظیمات تقویم جلالی که داشتی - بدون تغییر) ...
+dayjs.extend(jalaliday);
 const faLocale = {
   name: 'fa',
   weekdays: 'شنبه_یک‌شنبه_دوشنبه_سه‌شنبه_چهارشنبه_پنج‌شنبه_جمعه'.split('_'),
@@ -49,18 +52,13 @@ const faLocale = {
     yy: '%d سال'
   }
 };
-
 dayjs.locale('fa', faLocale as any);
 dayjs.calendar('jalali');
-
 
 // فایل‌های پروژه
 import { supabase } from "./supabaseClient";
 import { MODULES } from "./moduleRegistry";
 import Layout from "./components/Layout";
-
-// صفحات (مدل قدیمی - فعلاً نگه می‌داریم تا سایت بالا بیاد)
-//import ModuleList from "./pages/ModuleList";
 import { ModuleListRefine } from "./pages/ModuleList_Refine";
 import ModuleShow from "./pages/ModuleShow";
 import "./App.css";
@@ -71,8 +69,6 @@ function App() {
     document.body.style.fontFamily = 'Vazirmatn, sans-serif';
   }, []);
 
-
-  // تبدیل ماژول‌های پروژه به فرمت استاندارد Refine
   const resources = Object.values(MODULES).map((mod) => ({
     name: mod.id, 
     list: `/${mod.id}`,
@@ -99,7 +95,8 @@ function App() {
         <JalaliLocaleListener />
         <AntdApp>
           <Refine
-            dataProvider={dataProvider(supabase)} 
+            dataProvider={dataProvider(supabase)}
+            authProvider={authProvider}
             notificationProvider={notificationProvider}
             routerProvider={routerBindings}
             resources={resources} 
@@ -110,22 +107,36 @@ function App() {
             }}
           >
             <Routes>
-              {/* لایه اصلی اپلیکیشن */}
-              <Route element={<Layout isDarkMode={false} toggleTheme={function (): void {
-                throw new Error("Function not implemented.");
-              } }><Outlet /></Layout>}>
-                
+              {/* 3. روت لاگین باید بیرون از Layout باشد (بدون سایدبار) */}
+              <Route path="/login" element={<Login />} />
+
+              {/* 4. روت‌های محافظت شده (داخل Layout) */}
+              <Route
+                element={
+                  <Authenticated
+                    key="authenticated-inner"
+                    fallback={<CatchAllNavigate to="/login" />}
+                  >
+                    <Layout isDarkMode={false} toggleTheme={() => {}}>
+                      <Outlet />
+                    </Layout>
+                  </Authenticated>
+                }
+              >
                 {/* روت اصلی: هدایت به محصولات */}
                 <Route index element={<NavigateToResource resource="products" />} />
 
+                <Route path="/profile" element={<ProfilePage />} />
                 {/* روت‌های داینامیک ماژول‌ها */}
                 <Route path="/:moduleId">
                   <Route index element={<ModuleListRefine />} />
                   <Route path="create" element={<ModuleCreate />} />
-                  <Route path="create" element={<ModuleShow />} />
+                  {/* نکته: اینجا قبلاً دوتا create داشتی، دومی رو کامنت کردم چون تکراری بود */}
+                  {/* <Route path="create" element={<ModuleShow />} /> */}
                   <Route path=":id" element={<ModuleShow />} />
                   <Route path=":id/edit" element={<ModuleShow />} />
                 </Route>
+
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="*" element={<ErrorComponent />} />
               </Route>

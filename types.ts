@@ -1,6 +1,3 @@
-// @refinedev/core types are available but not always used directly
-// import { LogicalFilter } from "@refinedev/core"; // TODO: استفاده شود اگر filter logic پیچیده شود
-
 // --- ENUMS ---
 
 export enum ModuleNature {
@@ -13,6 +10,16 @@ export enum ModuleNature {
   CRM = 'crm',
   TASK = 'task',
   FINANCE = 'finance'
+}
+
+export enum RowCalculationType {
+  SIMPLE_MULTIPLY = 'simple_multiply', // تعداد * قیمت (برای BOM)
+  INVOICE_ROW = 'invoice_row',         // (تعداد * قیمت) - تخفیف + مالیات (برای فاکتور)
+}
+
+export enum SummaryCalculationType {
+  SUM_ALL_ROWS = 'sum_all_rows',       // جمع ساده همه جداول (برای BOM)
+  INVOICE_FINANCIALS = 'invoice_financials', // جمع کل، دریافتی، مانده (برای فاکتور)
 }
 
 export enum ViewMode {
@@ -55,6 +62,7 @@ export enum FieldType {
   PHONE = 'phone',
   JSON = 'json',
   TAGS = 'tags',
+  PERCENTAGE_OR_AMOUNT = 'percentage_or_amount',
   READONLY_LOOKUP = 'readonly_lookup'
 }
 
@@ -172,12 +180,35 @@ export interface BlockDefinition {
   order: number;
   icon?: string;
   visibleIf?: any;
-  tableColumns?: any[];
+  tableColumns?: {
+    key: string;
+    title: string;
+    type: FieldType;
+    width?: number;
+    showTotal?: boolean; // <--- این خط جدید است: برای نمایش جمع کل در پایین ستون
+    relationConfig?: { targetModule: string; targetField: string; };
+  rowCalculationType?: RowCalculationType;
+  }[];
   // ویژگی اتصال به دیتای خارجی
   externalDataConfig?: {
     relationFieldKey: string;
     targetModule: string;
     targetColumn: string;
+  };
+  populateConfig?: {
+    relationFieldKey: string;
+    targetModule: string;
+    sourceColumn: string;
+    columnMapping?: Record<string, string>;
+  };
+
+summaryConfig?: {
+    calculationType: SummaryCalculationType; // 👈 نام فیلد calculationType است (با c کوچک)
+    fieldMapping?: {
+      total?: string;
+      received?: string;
+      remaining?: string;
+    }
   };
 }
 
