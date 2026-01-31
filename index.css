@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -178,3 +179,185 @@
     font-size: 10px !important;
   }
 }
+=======
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Import Vazir font for Persian numbers */
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap');
+
+/* تنظیمات فونت وزیرمتن */
+@layer base {
+  html {
+    font-family: 'Vazirmatn', system-ui, sans-serif;
+  }
+}
+
+/* Persian number font for better display */
+.persian-number {
+  font-family: 'Vazirmatn', system-ui, sans-serif;
+  font-weight: 600;
+  font-feature-settings: "ss01";
+}
+
+/* اسکرول‌بار سفارشی */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent; 
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db; 
+  border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: #1f1f1f;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #424242; 
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c58f60; 
+}
+
+/* جدول ERP - تنظیمات pagination */
+.custom-erp-table {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.custom-erp-table .ant-table-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.custom-erp-table .ant-table-container {
+  flex: 1;
+  overflow: hidden;
+}
+
+.custom-erp-table .ant-table {
+  margin-bottom: 0 !important;
+}
+
+.custom-erp-table .ant-table-body {
+  overflow-y: auto !important;
+}
+
+.custom-erp-table .ant-pagination {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  padding: 12px 16px !important;
+  background: #ffffff !important;
+  border-top: 1px solid rgb(229, 231, 235) !important;
+  flex-shrink: 0;
+}
+
+.dark .custom-erp-table .ant-pagination {
+  background: #1a1a1a !important;
+  border-top-color: rgb(55, 65, 81) !important;
+}
+
+.custom-erp-table .ant-pagination-item,
+.custom-erp-table .ant-pagination-prev,
+.custom-erp-table .ant-pagination-next,
+.custom-erp-table .ant-pagination-jump-next,
+.custom-erp-table .ant-pagination-jump-prev {
+  min-width: 32px !important;
+  height: 32px !important;
+  line-height: 30px !important;
+  border-radius: 4px !important;
+  font-size: 13px !important;
+}
+
+.custom-erp-table .ant-pagination-item-active {
+  border-color: #c58f60 !important;
+  background-color: #fef3c7 !important;
+}
+
+.custom-erp-table .ant-pagination-item-link {
+  border-color: #d5d5d5 !important;
+}
+
+.dark .custom-erp-table .ant-pagination-item-link {
+  border-color: #424242 !important;
+}
+
+.custom-erp-table .ant-pagination-total-text {
+  font-size: 12px !important;
+  color: rgb(107, 114, 128) !important;
+  margin: 0 4px !important;
+}
+
+.dark .custom-erp-table .ant-pagination-total-text {
+  color: rgb(156, 163, 175) !important;
+}
+
+/* تنظیمات تقویم جلالی - رنگ جمعه */
+.ant-picker-calendar .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.ant-picker-dropdown .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.ant-picker-calendar .ant-picker-content thead tr th:nth-child(6),
+.ant-picker-dropdown .ant-picker-content thead tr th:nth-child(6) {
+  color: #c58f60 !important; /* رنگ تم طلایی برای جمعه */
+}
+
+.ant-picker-calendar .ant-picker-cell:nth-child(6):not(.ant-picker-cell-in-view) .ant-picker-cell-inner,
+.ant-picker-dropdown .ant-picker-cell:nth-child(6):not(.ant-picker-cell-in-view) .ant-picker-cell-inner {
+  color: rgba(197, 143, 96, 0.4) !important; /* رنگ محو برای روزهای خارج از ماه */
+}
+
+/* حالت دارک */
+.dark .ant-picker-calendar .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.dark .ant-picker-dropdown .ant-picker-cell:nth-child(6) .ant-picker-cell-inner,
+.dark .ant-picker-calendar .ant-picker-content thead tr th:nth-child(6),
+.dark .ant-picker-dropdown .ant-picker-content thead tr th:nth-child(6) {
+  color: #c58f60 !important;
+}
+
+/* برای موبایل - کوچک‌تر کنید */
+@media (max-width: 640px) {
+  .custom-erp-table {
+    height: auto;
+  }
+  
+  .custom-erp-table .ant-table-wrapper {
+    height: auto;
+  }
+  
+  .custom-erp-table .ant-table-container {
+    height: auto;
+    max-height: 300px;
+  }
+
+  .custom-erp-table .ant-pagination {
+    padding: 10px 8px !important;
+    gap: 3px !important;
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+  }
+  
+  .custom-erp-table .ant-pagination-item,
+  .custom-erp-table .ant-pagination-prev,
+  .custom-erp-table .ant-pagination-next {
+    min-width: 26px !important;
+    height: 26px !important;
+    line-height: 24px !important;
+    font-size: 11px !important;
+  }
+  
+  .custom-erp-table .ant-pagination-total-text {
+    font-size: 10px !important;
+  }
+}
+>>>>>>> 0de9c9462de5035ffc3abdf4bc52404abbceee8f

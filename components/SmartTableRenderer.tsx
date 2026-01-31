@@ -7,7 +7,10 @@ import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliForma
 import type { InputRef } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
+<<<<<<< HEAD
 import ProductionStagesField from './ProductionStagesField';
+=======
+>>>>>>> 0de9c9462de5035ffc3abdf4bc52404abbceee8f
 
 interface SmartTableRendererProps {
   moduleConfig: ModuleDefinition | null | undefined;
@@ -257,6 +260,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
               value;
             return <span className="text-xs text-leather-600 hover:underline font-medium">{userLabel}</span>;
         }
+<<<<<<< HEAD
         if (field.type === FieldType.PROGRESS_STAGES) {
              return (
                <div style={{ minWidth: 200 }}>
@@ -269,6 +273,8 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
              );
           }
           
+=======
+>>>>>>> 0de9c9462de5035ffc3abdf4bc52404abbceee8f
         if (field.type === FieldType.TAGS) {
             if (!Array.isArray(value) || value.length === 0) return '-';
             
