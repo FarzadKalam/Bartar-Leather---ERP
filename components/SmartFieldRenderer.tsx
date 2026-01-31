@@ -10,6 +10,7 @@ import DynamicSelectField from './DynamicSelectField';
 import TagInput from './TagInput';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
+import ProductionStagesField from './ProductionStagesField';
 
 interface SmartFieldRendererProps {
   field: ModuleField;
@@ -220,6 +221,17 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       case FieldType.LONG_TEXT:
         return <Input.TextArea {...commonProps} onChange={e => onChange(e.target.value)} rows={compactMode ? 1 : 4} />;
       
+      case FieldType.PROGRESS_STAGES:
+        return (
+            <ProductionStagesField 
+                recordId={recordId} 
+                // اگر در حال ویرایش هستیم یا کامپکت نیستیم، قابلیت ویرایش داشته باشد
+                // اما در حالت Create (وقتی recordId نیست)، کامپوننت خودش پیام میدهد
+                readOnly={!forceEditMode && !compactMode} 
+                compact={compactMode} 
+            />
+        );
+
       case FieldType.NUMBER:
       case FieldType.PRICE:
       case FieldType.PERCENTAGE:
@@ -234,7 +246,14 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 parser={fieldType === FieldType.PRICE ? val => val!.replace(/\$\s?|(,*)/g, '') : undefined}
             />
         );
-
+      case FieldType.PROGRESS_STAGES:
+    return (
+      <ProductionStagesField 
+        recordId={recordId} // شناسه رکورد فعلی (سفارش تولید)
+        readOnly={!forceEditMode && !compactMode} // در حالت نمایش فقط خواندنی باشد
+        compact={compactMode} // در حالت لیست (جدول) فشرده باشد
+      />
+    );
       case FieldType.SELECT:
       case FieldType.STATUS:
         if (field.dynamicOptionsCategory) {

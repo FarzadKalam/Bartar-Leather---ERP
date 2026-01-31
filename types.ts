@@ -62,6 +62,7 @@ export enum FieldType {
   PHONE = 'phone',
   JSON = 'json',
   TAGS = 'tags',
+  PROGRESS_STAGES = 'progress_stages',
   PERCENTAGE_OR_AMOUNT = 'percentage_or_amount',
   READONLY_LOOKUP = 'readonly_lookup'
 }

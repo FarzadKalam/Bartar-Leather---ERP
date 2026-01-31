@@ -100,6 +100,16 @@ export const productionOrderModule: ModuleDefinition = {
     { key: 'bom_id', labels: { fa: 'انتخاب شناسنامه (BOM)', en: 'Select BOM' }, type: FieldType.RELATION, location: FieldLocation.HEADER, order: 2, relationConfig: { targetModule: 'production_boms', targetField: 'name' } },
     { key: 'quantity', labels: { fa: 'تعداد تولید', en: 'Production Qty' }, type: FieldType.NUMBER, location: FieldLocation.HEADER, order: 3, validation: { required: true } },
     { key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4, options: [{ label: 'در انتظار', value: 'pending', color: 'orange' }, { label: 'در حال تولید', value: 'in_progress', color: 'blue' }, { label: 'تکمیل شده', value: 'completed', color: 'green' }], defaultValue: 'pending', isTableColumn: true },
+    { 
+      key: 'production_stages', 
+      labels: { fa: 'مراحل تولید', en: 'Stages' }, 
+      type: FieldType.PROGRESS_STAGES, // 👈 استفاده از تایپ جدید
+      location: FieldLocation.BLOCK, 
+      blockId: 'baseInfo', // یا هر بلاک دیگری
+      order: 10, 
+      isTableColumn: true, // نمایش در لیست
+      nature: FieldNature.STANDARD 
+    }
   ],
   blocks: [
     // نمایش اقلام BOM مرتبط

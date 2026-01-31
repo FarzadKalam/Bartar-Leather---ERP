@@ -300,7 +300,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
                            if (field.type === FieldType.RELATION) options = relationOptions[field.key];
                            return (
                              <SmartFieldRenderer 
-                               key={field.key} field={field} value={fieldValue}
+                               key={field.key}
+                               field={field}
+                               value={fieldValue}
+                               recordId={recordId}
                                onChange={(val) => {
                                  if (!isReadOnly) { form.setFieldValue(field.key, val); setFormData({ ...form.getFieldsValue(), [field.key]: val }); }
                                }}
