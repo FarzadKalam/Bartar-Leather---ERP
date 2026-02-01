@@ -66,6 +66,13 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Keep sidebar open on dashboard for non-mobile devices
+  useEffect(() => {
+    if (!isMobile && location.pathname === '/') {
+      setCollapsed(false);
+    }
+  }, [location.pathname, isMobile]);
+
   const handleLogout = () => {
     Modal.confirm({
       title: 'خروج از حساب کاربری',
@@ -209,7 +216,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
       <AntLayout 
         className="bg-gray-100 dark:bg-[#141414] transition-all duration-300 min-h-screen flex flex-col"
         style={{ 
-          paddingRight: isMobile ? 0 : 80, 
+          paddingRight: isMobile ? 0 : (collapsed ? 80 : 260), 
           width: '100%' 
         }}
       >

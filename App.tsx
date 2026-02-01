@@ -3,7 +3,7 @@ import { Refine, Authenticated } from "@refinedev/core"; // Authenticated اضا
 import { notificationProvider, ErrorComponent } from "@refinedev/antd";
 import { dataProvider } from "@refinedev/supabase";
 import { authProvider } from "./authProvider";
-import routerBindings, { NavigateToResource, UnsavedChangesNotifier, DocumentTitleHandler, CatchAllNavigate } from "@refinedev/react-router-v6";
+import routerBindings, { UnsavedChangesNotifier, DocumentTitleHandler, CatchAllNavigate } from "@refinedev/react-router-v6";
 import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider, App as AntdApp } from "antd";
 import faIR from "antd/locale/fa_IR";
@@ -16,6 +16,7 @@ import "dayjs/locale/fa";
 
 // 1. ایمپورت کردن صفحه لاگین (مسیر فایل را چک کن)
 import Login from "./pages/Login"; // اگر فایل را در پوشه pages گذاشتی بنویس: "./pages/Login"
+import Dashboard from "./pages/Dashboard";
 
 // ... (تنظیمات تقویم جلالی که داشتی - بدون تغییر) ...
 dayjs.extend(jalaliday);
@@ -123,8 +124,8 @@ function App() {
                   </Authenticated>
                 }
               >
-                {/* روت اصلی: هدایت به محصولات */}
-                <Route index element={<NavigateToResource resource="products" />} />
+                {/* روت اصلی: داشبورد */}
+                <Route index element={<Dashboard />} />
 
                 <Route path="/profile" element={<ProfilePage />} />
                 {/* روت‌های داینامیک ماژول‌ها */}
