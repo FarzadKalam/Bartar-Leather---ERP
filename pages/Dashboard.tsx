@@ -27,6 +27,9 @@ interface DashboardStats {
   recentActivity: any[];
   monthlySales: { month: string; amount: number; }[];
   topSellingProducts: { product: string; quantity: number; }[];
+  monthlyGrowth?: number;
+  totalProductsCount?: number;
+  totalProductionOrders?: number;
 }
 
 const Dashboard: React.FC = () => {
@@ -41,6 +44,9 @@ const Dashboard: React.FC = () => {
     recentActivity: [],
     monthlySales: [],
     topSellingProducts: [],
+    monthlyGrowth: 0,
+    totalProductsCount: 0,
+    totalProductionOrders: 0,
   });
 
   // Get today's Persian date
@@ -94,6 +100,9 @@ const Dashboard: React.FC = () => {
         count: count as number,
       }));
 
+      // Calculate total production orders count
+      const totalProductionOrders = productionOrdersByStatus.reduce((sum, s) => sum + s.count, 0);
+
       // Latest 5 invoices
       const latestInvoices = (invoices || []).slice(0, 5);
 
@@ -122,6 +131,12 @@ const Dashboard: React.FC = () => {
       // Top selling products
       const topSellingProducts = calculateTopSellingProducts(invoices || [], products || []);
 
+      // Calculate monthly growth
+      const monthlyGrowth = calculateMonthlyGrowth(monthlySales);
+
+      // Get actual product count
+      const totalProductsCount = products?.length || 0;
+
       setStats({
         totalSales,
         inProductionOrders,
@@ -131,6 +146,9 @@ const Dashboard: React.FC = () => {
         recentActivity,
         monthlySales,
         topSellingProducts,
+        monthlyGrowth,
+        totalProductsCount,
+        totalProductionOrders,
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -217,6 +235,18 @@ const Dashboard: React.FC = () => {
       });
 
     return sortedProducts;
+  };
+
+  const calculateMonthlyGrowth = (monthlySales: { month: string; amount: number; }[]): number => {
+    if (monthlySales.length < 2) return 0;
+    
+    const currentMonth = monthlySales[monthlySales.length - 1];
+    const previousMonth = monthlySales[monthlySales.length - 2];
+    
+    if (previousMonth.amount === 0) return 0;
+    
+    const growth = ((currentMonth.amount - previousMonth.amount) / previousMonth.amount) * 100;
+    return Math.round(growth * 10) / 10; // Round to 1 decimal
   };
 
   // Widget menu items
@@ -400,7 +430,7 @@ const Dashboard: React.FC = () => {
             />
             <div className="mt-2 text-green-600 text-sm flex items-center gap-1">
               <ArrowUpOutlined />
-              <span>{toPersianNumber('12.5')}% نسبت به ماه قبل</span>
+              <span>{toPersianNumber(stats.monthlyGrowth || 0)}% نسبت به ماه قبل</span>
             </div>
           </Card>
         </Col>
@@ -445,7 +475,7 @@ const Dashboard: React.FC = () => {
             </div>
             <Statistic
               title="تعداد محصولات"
-              value={stats.topSellingProducts.length}
+              value={stats.totalProductsCount || 0}
               formatter={(value) => toPersianNumber(value as number)}
               valueStyle={{ color: '#52c41a', fontSize: '1.5rem', fontWeight: 'bold' }}
             />
@@ -465,11 +495,11 @@ const Dashboard: React.FC = () => {
             </div>
             <Statistic
               title="رشد ماهانه"
-              value={12.5}
+              value={stats.monthlyGrowth || 0}
               formatter={(value) => toPersianNumber(value as number)}
               suffix="%"
-              prefix={<ArrowUpOutlined />}
-              valueStyle={{ color: '#52c41a', fontSize: '1.5rem', fontWeight: 'bold' }}
+              prefix={stats.monthlyGrowth && stats.monthlyGrowth > 0 ? <ArrowUpOutlined /> : undefined}
+              valueStyle={{ color: stats.monthlyGrowth && stats.monthlyGrowth > 0 ? '#52c41a' : '#ff4d4f', fontSize: '1.5rem', fontWeight: 'bold' }}
             />
           </Card>
         </Col>
@@ -504,7 +534,9 @@ const Dashboard: React.FC = () => {
                         <div
                           className="bg-leather-500 h-2 rounded-full"
                           style={{
-                            width: `${(item.count / stats.inProductionOrders) * 100}%`,
+                            width: stats.totalProductionOrders && stats.totalProductionOrders > 0 
+                              ? `${(item.count / stats.totalProductionOrders) * 100}%` 
+                              : '0%',
                           }}
                         />
                       </div>
