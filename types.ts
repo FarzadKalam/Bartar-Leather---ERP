@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-=======
-// @refinedev/core types are available but not always used directly
-// import { LogicalFilter } from "@refinedev/core"; // TODO: استفاده شود اگر filter logic پیچیده شود
-
->>>>>>> 0de9c9462de5035ffc3abdf4bc52404abbceee8f
 // --- ENUMS ---
 
 export enum ModuleNature {

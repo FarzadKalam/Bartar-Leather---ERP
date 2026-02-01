@@ -31,6 +31,17 @@ export const tasksModule: ModuleDefinition = {
     { key: 'related_customer', labels: { fa: 'مشتری مرتبط', en: 'Related Customer' }, type: FieldType.RELATION, location: FieldLocation.BLOCK, blockId: 'general', order: 3, relationConfig: { targetModule: 'customers', targetField: 'name' }, nature: FieldNature.STANDARD, logic: { visibleIf: { field: 'related_to_module', operator: LogicOperator.EQUALS, value: 'customers' } } },
     { key: 'related_supplier', labels: { fa: 'تامین‌کننده مرتبط', en: 'Related Supplier' }, type: FieldType.RELATION, location: FieldLocation.BLOCK, blockId: 'general', order: 4, relationConfig: { targetModule: 'suppliers', targetField: 'name' }, nature: FieldNature.STANDARD, logic: { visibleIf: { field: 'related_to_module', operator: LogicOperator.EQUALS, value: 'suppliers' } } },
     { key: 'related_production_order', labels: { fa: 'سفارش تولید مرتبط', en: 'Related Production Order' }, type: FieldType.RELATION, location: FieldLocation.BLOCK, blockId: 'general', order: 5, relationConfig: { targetModule: 'production_orders', targetField: 'order_number' }, nature: FieldNature.STANDARD, logic: { visibleIf: { field: 'related_to_module', operator: LogicOperator.EQUALS, value: 'production_orders' } } },
+    { 
+      key: 'sort_order', 
+      labels: { fa: 'ترتیب نمایش', en: 'Sort Order' }, 
+      type: FieldType.NUMBER, 
+      location: FieldLocation.BLOCK, 
+      blockId: 'general', // یا هر بلاک مرتبط
+      order: 10, 
+      nature: FieldNature.STANDARD,
+      logic: { visibleIf: { field: 'related_to_module', operator: LogicOperator.EQUALS, value: 'production_orders' } },
+      isTableColumn: false // اگر میخواهید در جدول تسک ها هم دیده شود
+    },
   ],
   
   blocks: [

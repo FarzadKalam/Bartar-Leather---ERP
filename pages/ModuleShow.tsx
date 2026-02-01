@@ -60,13 +60,23 @@ const ModuleShow: React.FC = () => {
     setLoading(true);
     
     try {
+        // 👇 تغییر مهم: اضافه کردن صریح فیلدهای سیستمی به select
         const { data: record, error } = await supabase
             .from(moduleId)
-            .select('*')
+            .select(`
+                *,
+                created_at,
+                updated_at,
+                created_by,
+                updated_by
+            `)
             .eq('id', id)
             .single();
 
         if (error) throw error;
+        
+        // لاگ برای اطمینان از اینکه دیتا واقعا از دیتابیس میاد
+        console.log('Record Data:', record); 
 
         const { data: tagsData } = await supabase
             .from('record_tags')

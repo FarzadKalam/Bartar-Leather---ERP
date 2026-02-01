@@ -42,8 +42,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
       {progressFields.map((field: any) => (
         <div key={field.key} className="bg-white dark:bg-[#1e1e1e] p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
             <h3 className="text-lg font-bold mb-4 text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                <span className="w-1 h-6 bg-blue-500 rounded-full inline-block"></span>
-                {field.labels.fa}
+              <span className="w-1 h-6 bg-leather-500 rounded-full inline-block"></span>                {field.labels.fa}
             </h3>
             <ProductionStagesField 
                 recordId={data.id} 

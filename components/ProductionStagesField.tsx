@@ -1,38 +1,72 @@
 import React, { useEffect, useState } from 'react';
-import { Popover, Button, Avatar, Tooltip, Modal, Form, Input, Select, DatePicker, message, Tag } from 'antd';
-import { PlusOutlined, CheckCircleOutlined, SyncOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { Popover, Button, Tooltip, Modal, Form, Input, message, Tag, Spin, Select, InputNumber, Space } from 'antd';
+import { DatePicker as JalaliDatePicker } from 'antd-jalali';
+import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { toPersianNumber } from '../utils/persianNumberFormatter';
+// ایمپورت توابع فرمت‌کننده شما
+import { toPersianNumber, safeJalaliFormat } from '../utils/persianNumberFormatter';
+import { jalaliDatePickerLocale } from '../utils/jalaliLocale';
 
 interface ProductionStagesFieldProps {
-  recordId?: string; // شناسه سفارش تولید
-  readOnly?: boolean; // برای حالت لیست یا نمایش فقط خواندنی
-  compact?: boolean; // برای حالت لیست (کوچک‌تر)
+  recordId?: string;
+  readOnly?: boolean;
+  compact?: boolean;
 }
 
 const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, readOnly = false, compact = false }) => {
   const [tasks, setTasks] = useState<any[]>([]);
+  const [assignees, setAssignees] = useState<{users: any[], roles: any[]}>({ users: [], roles: [] });
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [form] = Form.useForm();
 
-  // دریافت لیست وظایف مرتبط با این سفارش
+  // 1. دریافت کاربران و تیم‌ها
+  const fetchAssignees = async () => {
+      try {
+          const { data: users } = await supabase.from('profiles').select('id, full_name');
+          const { data: roles } = await supabase.from('org_roles').select('id, title'); 
+          setAssignees({ 
+              users: users || [], 
+              roles: roles || [] 
+          });
+      } catch (e) {
+          console.error("Error fetching assignees", e);
+      }
+  };
+
   const fetchTasks = async () => {
     if (!recordId) return;
     try {
       setLoading(true);
-      // فرض بر این است که در جدول tasks ستونی به نام related_record_id دارید
-      // و ستون related_module برابر 'production_orders' است
-      const { data, error } = await supabase
-        .from('tasks')
-        .select('*, assignee:profiles!tasks_assignee_id_fkey(full_name, avatar_url)')        .eq('related_production_order', recordId)
-        .order('created_at', { ascending: true }); // ترتیب بر اساس زمان ایجاد
+      
+      // تلاش برای دریافت با مرتب‌سازی
+      try {
+          const { data, error } = await supabase
+            .from('tasks')
+            .select(`
+      *, 
+      assignee:profiles!tasks_assignee_id_fkey(full_name, avatar_url),
+      assigned_role:org_roles(title)  
+  `)
+            .eq('related_production_order', recordId)
+            .order('sort_order', { ascending: true }); // اعداد کمتر سمت راست
 
-      if (error) throw error;
-      setTasks(data || []);
-    } catch (error) {
+          if (error) throw error;
+          setTasks(data || []);
+      } catch (sortError: any) {
+          // فال‌بک اگر هنوز کش رفرش نشده باشد
+          console.warn('Sort fallback used');
+          const { data } = await supabase
+            .from('tasks')
+            .select(`*, assignee:profiles!tasks_assignee_id_fkey(full_name, avatar_url)`) 
+            .eq('related_production_order', recordId)
+            .order('created_at', { ascending: true });
+          setTasks(data || []);
+      }
+      
+    } catch (error: any) {
       console.error('Error fetching tasks:', error);
     } finally {
       setLoading(false);
@@ -41,18 +75,42 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   useEffect(() => {
     fetchTasks();
-  }, [recordId]);
+    if (isModalOpen) fetchAssignees();
+  }, [recordId, isModalOpen]);
 
-  // افزودن مرحله جدید (تسک جدید)
   const handleAddTask = async (values: any) => {
     try {
-      const { error } = await supabase.from('tasks').insert({
-        name: values.title,
-        status: 'todo', // پیش‌فرض
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      let assigneeId = null;
+      let assigneeType = null;
+      
+      if (values.assignee_combo) {
+          if (values.assignee_combo.includes(':')) {
+             const [type, id] = values.assignee_combo.split(':');
+             assigneeType = type;
+             assigneeId = id;
+          } else {
+             assigneeType = 'user';
+             assigneeId = values.assignee_combo;
+          }
+      }
+
+      const payload: any = {
+        name: values.name,
+        status: 'todo',
         related_production_order: recordId,
         related_to_module: 'production_orders',
-        // سایر فیلدها...
-      });
+        assignee_id: assigneeType === 'user' ? assigneeId : null,
+        assignee_role_id: assigneeType === 'role' ? assigneeId : null,
+        assignee_type: assigneeType,
+        // ذخیره تاریخ به فرمت استاندارد میلادی
+        due_date: values.due_date ? values.due_date.format('YYYY-MM-DD HH:mm:ss') : null,
+        sort_order: values.sort_order || ((tasks.length + 1) * 10),
+        created_by: user?.id,
+      };
+
+      const { error } = await supabase.from('tasks').insert(payload);
 
       if (error) throw error;
       message.success('مرحله جدید اضافه شد');
@@ -60,105 +118,147 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       form.resetFields();
       fetchTasks();
     } catch (error: any) {
-      message.error(error.message);
+      message.error(`خطا: ${error.message}`);
     }
   };
 
-  // تعیین رنگ وضعیت
+  const handleStatusChange = async (taskId: string, newStatus: string) => {
+    try {
+        const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId);
+        if (error) throw error;
+        message.success('وضعیت بروز شد');
+        fetchTasks();
+    } catch (err: any) {
+        message.error('خطا');
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed': return '#10b981'; // سبز
-      case 'in_progress': return '#3b82f6'; // آبی
-      case 'pending': return '#e5e7eb'; // خاکستری
-      case 'blocked': return '#ef4444'; // قرمز
-      default: return '#e5e7eb';
+      case 'done': case 'completed': return '#10b981'; 
+      case 'review': return '#f97316'; 
+      case 'in_progress': return '#3b82f6'; 
+      case 'todo': case 'pending': return '#ef4444'; 
+      default: return '#9ca3af';
     }
   };
 
-  // تعیین آیکون وضعیت
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'completed': return <CheckCircleOutlined />;
-      case 'in_progress': return <SyncOutlined spin />;
-      default: return <ClockCircleOutlined />;
+  const getAssigneeLabel = (task: any) => {
+    // اگر به نقش اختصاص داده شده
+    if (task.assignee_role_id && task.assigned_role) {
+        return `تیم ${task.assigned_role.title}`;
     }
+    // اگر به کاربر اختصاص داده شده
+    if (task.assignee_id && task.assignee) {
+        return task.assignee.full_name;
+    }
+    return 'تعیین نشده';
+};
+
+  // 👇 اصلاح شده: تابع نمایش تاریخ
+  const renderDate = (dateVal: any) => {
+      if (!dateVal) return null;
+      // مقدار خام دیتابیس را مستقیم به تابع فرمت‌کننده می‌دهیم
+      // تابع safeJalaliFormat شما خودش چک می‌کند و فرمت صحیح را برمی‌گرداند
+      return toPersianNumber(safeJalaliFormat(dateVal, 'YYYY/MM/DD HH:mm'));
   };
 
-  // محتوای پاپ‌آپ برای هر مرحله
   const renderPopupContent = (task: any) => (
-    <div className="w-64 p-1">
-      <div className="flex justify-between items-start mb-2">
-        <h4 className="font-bold text-gray-800 m-0">{task.title}</h4>
-        <Tag color={getStatusColor(task.status)} className="mr-2">
-          {task.status === 'completed' ? 'تکمیل' : task.status === 'in_progress' ? 'در حال انجام' : 'منتظر'}
-        </Tag>
+    <div className="w-72 p-1 font-['Vazirmatn']">
+      <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-2">
+        <h4 className="font-bold text-gray-800 m-0 text-sm line-clamp-2">{task.title || task.name}</h4>
       </div>
       
-      <div className="text-sm text-gray-500 mb-3 space-y-1">
-        <div className="flex items-center gap-2">
-          <UserOutlined />
-          <span>مسئول: {task.assignee?.full_name || 'تعیین نشده'}</span>
+      <div className="space-y-3 mb-3">
+        <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500">وضعیت:</span>
+            <Select 
+                size="small"
+                value={task.status}
+                onChange={(val) => handleStatusChange(task.id, val)}
+                className="w-36"
+                getPopupContainer={(trigger) => document.body}
+                dropdownStyle={{ zIndex: 10050 }} 
+                options={[
+                    { value: 'todo', label: 'انجام نشده' },
+                    { value: 'in_progress', label: 'در حال انجام' },
+                    { value: 'review', label: 'بازبینی' },
+                    { value: 'done', label: 'تکمیل شده' },
+                ]}
+            />
         </div>
-        {task.due_date && (
-           <div className="flex items-center gap-2">
-             <ClockCircleOutlined />
-             <span>موعد: {toPersianNumber(dayjs(task.due_date).format('YYYY/MM/DD'))}</span>
-           </div>
-        )}
+
+        <div className="bg-gray-50 p-2 rounded-lg border border-gray-100 space-y-2 text-xs text-gray-600">
+            <div className="flex items-center gap-2">
+                <OrderedListOutlined className="text-amber-700" />
+                <span>ترتیب: {toPersianNumber(task.sort_order || '-')}</span>
+            </div>
+            <div className="flex items-center gap-2">
+                {task.assignee_type === 'role' ? <TeamOutlined className="text-amber-700"/> : <UserOutlined className="text-amber-700" />}
+                <span>مسئول: {getAssigneeLabel(task)}</span>
+            </div>
+            {task.due_date && (
+               <div className="flex items-center gap-2">
+                 <ClockCircleOutlined className="text-amber-700" />
+                 {/* استفاده از تابع اصلاح شده */}
+                 <span>موعد: {renderDate(task.due_date)}</span>
+               </div>
+            )}
+        </div>
       </div>
 
       <div className="flex justify-end pt-2 border-t border-gray-100">
-        <Link to={`/modules/tasks/${task.id}`}>
-            <Button size="small" type="link" icon={<ArrowRightOutlined />}>
-            مشاهده کامل وظیفه
+        <Link to={`/tasks/${task.id}`} target="_blank">
+            <Button size="small" type="link" icon={<ArrowRightOutlined />} className="text-xs text-amber-700 hover:text-amber-600">
+            جزئیات کامل
             </Button>
         </Link>
       </div>
     </div>
   );
 
-  if (!recordId) return <div className="text-gray-400 text-xs">برای مشاهده مراحل، ابتدا رکورد را ذخیره کنید.</div>;
+  if (!recordId && !readOnly) return <div className="text-gray-400 text-xs py-2 bg-gray-50 rounded px-2 text-center border border-dashed">برای تعریف مراحل، ابتدا سفارش را ثبت کنید.</div>;
+  
+  if (loading && tasks.length === 0) return <div className="flex justify-center p-2"><Spin size="small" /></div>;
 
   return (
-    <div className="w-full flex items-center gap-1 select-none">
-      {/* نوار مراحل */}
-      <div className={`flex-1 flex bg-gray-100 rounded-full overflow-hidden ${compact ? 'h-2' : 'h-8'}`}>
+    <div className="w-full flex items-center gap-2 select-none" dir="rtl">
+      <div className={`flex-1 flex bg-gray-100 rounded-lg overflow-hidden border border-gray-200 ${compact ? 'h-5' : 'h-9'}`}>
         {tasks.map((task, index) => (
           <Popover 
             key={task.id} 
             content={renderPopupContent(task)} 
-            trigger="click"
-            overlayStyle={{ zIndex: 10000 }} // بالاتر از همه
+            trigger={compact ? "hover" : "click"}
+            overlayStyle={{ zIndex: 10000 }}
+            title={null}
           >
             <div 
               className={`
-                relative flex items-center justify-center cursor-pointer transition-all hover:opacity-90 group
-                ${compact ? '' : 'border-l border-white/20'}
+                relative flex items-center justify-center cursor-pointer transition-all hover:brightness-110 group
+                ${index !== 0 ? 'border-r border-white/30' : ''} 
               `}
-              style={{ 
-                flex: 1, 
-                backgroundColor: getStatusColor(task.status),
-                color: task.status === 'انجام نشده' ? '#6b7280' : 'white'
-              }}
+              style={{ flex: 1, backgroundColor: getStatusColor(task.status) }}
             >
-              {!compact && (
-                <span className="text-xs font-medium truncate px-2">
-                  {task.title}
-                </span>
-              )}
+              <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
+                 <span className={`text-white font-medium truncate w-full text-center drop-shadow-md ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
+                    {task.title || task.name}
+                 </span>
+                 {!compact && task.sort_order && (
+                     <span className="text-[8px] text-white/90 absolute bottom-0.5 right-1 bg-black/10 px-1 rounded-sm">
+                        {toPersianNumber(task.sort_order)}
+                     </span>
+                 )}
+              </div>
             </div>
           </Popover>
         ))}
-        
-        {/* اگر تسکی نباشد */}
         {tasks.length === 0 && (
-            <div className="w-full flex items-center justify-center text-gray-400 text-xs">
-                هنوز مرحله‌ای تعریف نشده
+            <div className="w-full flex items-center justify-center text-gray-400 text-xs bg-gray-50 h-full">
+                {compact ? <span className="opacity-50">-</span> : 'بدون مرحله تولید'}
             </div>
         )}
       </div>
 
-      {/* دکمه افزودن (+) */}
       {!readOnly && (
         <Tooltip title="افزودن مرحله جدید">
           <Button 
@@ -167,27 +267,75 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             icon={<PlusOutlined />} 
             size={compact ? 'small' : 'middle'}
             onClick={() => setIsModalOpen(true)}
-            className="border-leather-300 text-leather-600 hover:!border-leather-500 hover:!text-leather-500"
+            className="flex-shrink-0 border-amber-300 text-amber-700 hover:!border-amber-600 hover:!text-amber-600 hover:!bg-amber-50"
           />
         </Tooltip>
       )}
 
-      {/* مودال ایجاد سریع مرحله */}
+      {/* مودال افزودن */}
       <Modal
-        title="افزودن مرحله تولید (وظیفه)"
+        title={<div className="flex items-center gap-2 text-amber-800"><div className="bg-amber-50 p-1 rounded text-amber-600"><PlusOutlined /></div> افزودن مرحله تولید</div>}
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         footer={null}
         zIndex={10001}
+        width={480}
+        centered
+        destroyOnClose 
       >
-        <Form form={form} onFinish={handleAddTask} layout="vertical">
-          <Form.Item name="title" label="عنوان مرحله" rules={[{ required: true }]}>
-            <Input placeholder="مثلا: برشکاری چرم" autoFocus />
-          </Form.Item>
-          {/* اینجا می‌توانید فیلدهای بیشتری مثل مسئول و تاریخ اضافه کنید */}
-          <div className="flex justify-end gap-2 mt-4">
-            <Button onClick={() => setIsModalOpen(false)}>انصراف</Button>
-            <Button type="primary" htmlType="submit">ایجاد</Button>
+        <Form form={form} onFinish={handleAddTask} layout="vertical" className="pt-2">
+          
+          <div className="grid grid-cols-12 gap-3">
+             <div className="col-span-9">
+                <Form.Item name="name" label="عنوان مرحله" rules={[{ required: true, message: 'الزامی' }]}>
+                    <Input placeholder="مثلا: برشکاری..." />
+                </Form.Item>
+             </div>
+             <div className="col-span-3">
+                <Form.Item name="sort_order" label="ترتیب" initialValue={(tasks.length + 1) * 10}>
+                    <InputNumber className="w-full" min={1} />
+                </Form.Item>
+             </div>
+
+             <div className="col-span-12">
+                <Form.Item name="assignee_combo" label="مسئول انجام">
+                    <Select placeholder="انتخاب کنید..." allowClear showSearch optionFilterProp="label">
+                        <Select.OptGroup label="کاربران">
+                            {assignees.users.map(u => (
+                                <Select.Option key={`user-${u.id}`} value={`user:${u.id}`} label={u.full_name}>
+                                    <Space><UserOutlined /> {u.full_name}</Space>
+                                </Select.Option>
+                            ))}
+                        </Select.OptGroup>
+                        <Select.OptGroup label="تیم‌ها">
+                            {assignees.roles.map(r => (
+                                <Select.Option key={`role-${r.id}`} value={`role:${r.id}`} label={r.title}>
+                                    <Space><TeamOutlined /> {r.title}</Space>
+                                </Select.Option>
+                            ))}
+                        </Select.OptGroup>
+                    </Select>
+                </Form.Item>
+             </div>
+
+             <div className="col-span-12">
+                <Form.Item name="due_date" label="موعد انجام">
+                    <JalaliDatePicker 
+                        className="w-full" 
+                        locale={jalaliDatePickerLocale} 
+                        placeholder="تاریخ و ساعت" 
+                        showTime={{ format: 'HH:mm' }} 
+                        format="YYYY-MM-DD HH:mm"
+                    />
+                </Form.Item>
+             </div>
+          </div>
+          
+          <div className="flex justify-end gap-2 mt-4 border-t pt-4">
+            <Button onClick={() => setIsModalOpen(false)} className="rounded-lg">انصراف</Button>
+            <Button type="primary" htmlType="submit" loading={loading} className="rounded-lg bg-amber-700 hover:!bg-amber-600 border-none shadow-md">
+                ثبت مرحله
+            </Button>
           </div>
         </Form>
       </Modal>

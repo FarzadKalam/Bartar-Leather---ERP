@@ -10,6 +10,7 @@ import {
   HistoryOutlined,
 } from '@ant-design/icons';
 import { FieldLocation, FieldType } from '../../types';
+// 👇 فقط از فایل‌های کمکی پروژه استفاده می‌کنیم
 import { toPersianNumber, safeJalaliFormat } from '../../utils/persianNumberFormatter';
 import TagInput from '../TagInput';
 
@@ -48,6 +49,14 @@ const HeroSection: React.FC<HeroSectionProps> = ({
 }) => {
   const imageField = moduleConfig?.fields?.find((f: any) => f.type === FieldType.IMAGE);
   const canShowImage = !!imageField && (canViewField ? canViewField(imageField.key) !== false : true);
+  
+  // 👇 تابع نمایش تاریخ با استفاده از فایل کمکی پروژه
+  const renderDate = (dateVal: any) => {
+      if (!dateVal) return '-';
+      // فرمت کردن به شمسی با فرمت صحیح
+      const formatted = safeJalaliFormat(dateVal, 'YYYY/MM/DD - HH:mm');
+      return formatted ? toPersianNumber(formatted) : '-';
+  };
 
   return (
     <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6 relative overflow-hidden animate-fadeIn">
@@ -164,6 +173,8 @@ const HeroSection: React.FC<HeroSectionProps> = ({
 
             {/* --- فیلدهای سیستمی (System Info) --- */}
             <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-500 dark:text-gray-400 border border-gray-100 dark:border-white/5">
+              
+              {/* ایجاد کننده */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <SafetyCertificateOutlined className="text-green-600" />
@@ -173,21 +184,21 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                   <span className="font-bold text-gray-700 dark:text-gray-300">{getUserName(data.created_by)}</span>
                 </div>
               </div>
+
+              {/* زمان ایجاد */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <ClockCircleOutlined className="text-blue-500" />
                 </div>
                 <div className="flex flex-col">
                   <span className="opacity-70">زمان ایجاد</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-300" dir="ltr">
-                    {(() => {
-                      if (!data.created_at) return '-';
-                      const formatted = safeJalaliFormat(data.created_at, 'YYYY/MM/DD - HH:mm');
-                      return formatted ? toPersianNumber(formatted) : '-';
-                    })()}
+                  <span className="font-bold text-gray-700 dark:text-gray-300 dir-ltr">
+                    {renderDate(data.created_at)}
                   </span>
                 </div>
               </div>
+
+              {/* آخرین ویرایشگر */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <EditOutlined className="text-orange-500" />
@@ -197,18 +208,16 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                   <span className="font-bold text-gray-700 dark:text-gray-300">{getUserName(data.updated_by)}</span>
                 </div>
               </div>
+
+              {/* زمان ویرایش */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <HistoryOutlined className="text-purple-500" />
                 </div>
                 <div className="flex flex-col">
                   <span className="opacity-70">زمان ویرایش</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-300" dir="ltr">
-                    {(() => {
-                      if (!data.updated_at) return '-';
-                      const formatted = safeJalaliFormat(data.updated_at, 'YYYY/MM/DD - HH:mm');
-                      return formatted ? toPersianNumber(formatted) : '-';
-                    })()}
+                  <span className="font-bold text-gray-700 dark:text-gray-300 dir-ltr">
+                    {renderDate(data.updated_at)}
                   </span>
                 </div>
               </div>
