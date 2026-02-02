@@ -168,11 +168,18 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             return <span className="font-mono font-bold text-gray-700">{value ? Number(value).toLocaleString() : '0'}</span>;
         }
         if (fieldType === FieldType.DATE) {
-            // رفع خطای TS برای safeJalaliFormat
-            return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any))}</span>;
+            // تبدیل به Dayjs ابتدا برای نمایش صحیح
+            const dayjsValue = parseDateValue(value);
+            if (!dayjsValue) return <span className="font-mono">-</span>;
+            const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
+            return <span className="font-mono">{toPersianNumber(formatted || '-')}</span>;
         }
         if (fieldType === FieldType.DATETIME) {
-            return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any, 'YYYY/MM/DD HH:mm'))}</span>;
+            // تبدیل به Dayjs ابتدا برای نمایش صحیح
+            const dayjsValue = parseDateValue(value);
+            if (!dayjsValue) return <span className="font-mono">-</span>;
+            const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
+            return <span className="font-mono">{toPersianNumber(formatted || '-')}</span>;
         }
         if (fieldType === FieldType.TIME) {
             return <span className="font-mono">{formatPersianTime(value)}</span>;

@@ -6,7 +6,7 @@ import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 // ایمپورت توابع فرمت‌کننده شما
-import { toPersianNumber, safeJalaliFormat } from '../utils/persianNumberFormatter';
+import { toPersianNumber, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
 import { jalaliDatePickerLocale } from '../utils/jalaliLocale';
 
 interface ProductionStagesFieldProps {
@@ -158,9 +158,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   // 👇 اصلاح شده: تابع نمایش تاریخ
   const renderDate = (dateVal: any) => {
       if (!dateVal) return null;
-      // مقدار خام دیتابیس را مستقیم به تابع فرمت‌کننده می‌دهیم
-      // تابع safeJalaliFormat شما خودش چک می‌کند و فرمت صحیح را برمی‌گرداند
-      return toPersianNumber(safeJalaliFormat(dateVal, 'YYYY/MM/DD HH:mm'));
+      // تبدیل به Dayjs ابتدا
+      const dayjsValue = parseDateValue(dateVal);
+      if (!dayjsValue) return null;
+      // فرمت کردن به شمسی
+      const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
+      return formatted ? toPersianNumber(formatted) : null;
   };
 
   const renderPopupContent = (task: any) => (

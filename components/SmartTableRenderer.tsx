@@ -3,7 +3,7 @@ import { Table, Tag, Avatar, Input, Button, Space, Popover } from 'antd';
 import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { ModuleDefinition, FieldType } from '../types';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
-import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat } from '../utils/persianNumberFormatter';
+import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
 import type { InputRef } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
@@ -223,7 +223,9 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
             return <Avatar src={value} icon={<AppstoreOutlined />} shape="square" size="default" className="bg-gray-100 border border-gray-200" />;
         }
         if (field.type === FieldType.DATE && value) {
-          const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+          const dayjsValue = parseDateValue(value);
+          if (!dayjsValue) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
           if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
           return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
         }
@@ -231,7 +233,9 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
           return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{formatPersianTime(value)}</span>;
         }
         if (field.type === FieldType.DATETIME && value) {
-          const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+          const dayjsValue = parseDateValue(value);
+          if (!dayjsValue) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
           if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
           return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
         }

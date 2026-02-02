@@ -2,7 +2,7 @@ import React from "react";
 import { Avatar, Checkbox, Popover, Tag } from "antd";
 import { AppstoreOutlined } from "@ant-design/icons";
 import { FieldType } from "../../types";
-import { formatPersianPrice, toPersianNumber, safeJalaliFormat } from "../../utils/persianNumberFormatter";
+import { formatPersianPrice, toPersianNumber, safeJalaliFormat, parseDateValue } from "../../utils/persianNumberFormatter";
 
 export interface RenderCardItemProps {
   item: any;
@@ -96,7 +96,9 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
 
   const renderDueDate = () => {
     if (!dueDate) return <span className="text-[10px] text-gray-400">-</span>;
-    const formatted = safeJalaliFormat(dueDate, 'YYYY/MM/DD HH:mm');
+    const dayjsValue = parseDateValue(dueDate);
+    if (!dayjsValue) return <span className="text-[10px] text-gray-400">-</span>;
+    const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
     if (!formatted) return <span className="text-[10px] text-gray-400">-</span>;
     return <span className="text-[10px] text-gray-600 dark:text-gray-300 dir-ltr">{toPersianNumber(formatted)}</span>;
   };

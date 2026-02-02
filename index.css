@@ -177,3 +177,43 @@
     font-size: 10px !important;
   }
 }
+
+/* ========================================
+   Jalali Calendar Customization
+   ======================================== */
+
+/* تنظیم شنبه به عنوان روز اول هفته */
+.ant-picker-calendar-date-panel .ant-picker-content thead th {
+  font-family: 'Vazirmatn', system-ui, sans-serif !important;
+  font-weight: 600;
+}
+
+/* هایلایت جمعه (آخرین ستون هفته) به رنگ قرمز */
+.ant-picker-cell:nth-child(7) .ant-picker-cell-inner,
+.ant-picker-calendar-date-panel .ant-picker-content tbody tr td:nth-child(7) {
+  color: #ef4444 !important; /* رنگ قرمز برای جمعه */
+}
+
+/* هایلایت جمعه در وضعیت انتخاب شده */
+.ant-picker-cell:nth-child(7).ant-picker-cell-selected .ant-picker-cell-inner {
+  background-color: #ef4444 !important;
+  color: white !important;
+}
+
+/* هایلایت جمعه در وضعیت hover */
+.ant-picker-cell:nth-child(7):hover .ant-picker-cell-inner {
+  background-color: #fee2e2 !important;
+  color: #ef4444 !important;
+}
+
+/* تنظیمات اضافی برای اطمینان از نمایش صحیح با فونت وزیر */
+.ant-picker-panel,
+.ant-picker-dropdown,
+.ant-picker-time-panel {
+  font-family: 'Vazirmatn', system-ui, sans-serif !important;
+}
+
+.ant-picker-cell-inner,
+.ant-picker-time-panel-cell-inner {
+  font-family: 'Vazirmatn', system-ui, sans-serif !important;
+}
