@@ -10,7 +10,7 @@ import SmartForm from '../components/SmartForm';
 import RelatedSidebar from '../components/Sidebar/RelatedSidebar';
 import DynamicSelectField from '../components/DynamicSelectField';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
-import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
+import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat, parseDateValue, toGregorianDateString } from '../utils/persianNumberFormatter';
 import { jalaliDatePickerLocale } from '../utils/jalaliLocale';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
@@ -596,14 +596,14 @@ const ModuleShow: React.FC = () => {
            inputNode = <InputNumber value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
       } else if (field.type === FieldType.DATE) {
            inputNode = (
-             <JalaliDatePicker
-               className="w-full"
-               value={parseDateValue(tempValue)}
-               onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: date ? date.format('YYYY-MM-DD') : null }))}
-               placeholder="انتخاب تاریخ"
-               format={(value: Dayjs | null) => {
-                 const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
-                 return formatted ? toPersianNumber(formatted) : '';
+              <JalaliDatePicker
+                className="w-full"
+                value={parseDateValue(tempValue)}
+                onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: toGregorianDateString(date, 'YYYY-MM-DD') }))}
+                placeholder="انتخاب تاریخ"
+                format={(value: Dayjs | null) => {
+                  const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
+                  return formatted ? toPersianNumber(formatted) : '';
                }}
                locale={jalaliDatePickerLocale}
                popupClassName="persian-number"
@@ -631,14 +631,14 @@ const ModuleShow: React.FC = () => {
            );
       } else if (field.type === FieldType.DATETIME) {
            inputNode = (
-             <JalaliDatePicker
-               className="w-full"
-               showTime={{ format: 'HH:mm', showSecond: false }}
-               value={parseDateValue(tempValue)}
-               onChange={(datetime: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: datetime ? datetime.format('YYYY-MM-DD HH:mm') : null }))}
-               placeholder="انتخاب تاریخ و زمان"
-               format={(value: Dayjs | null) => {
-                 const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
+              <JalaliDatePicker
+                className="w-full"
+                showTime={{ format: 'HH:mm', showSecond: false }}
+                value={parseDateValue(tempValue)}
+                onChange={(datetime: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: toGregorianDateString(datetime, 'YYYY-MM-DD HH:mm') }))}
+                placeholder="انتخاب تاریخ و زمان"
+                format={(value: Dayjs | null) => {
+                  const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
                  return formatted ? toPersianNumber(formatted) : '';
                }}
                locale={jalaliDatePickerLocale}
