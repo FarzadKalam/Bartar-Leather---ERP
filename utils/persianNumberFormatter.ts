@@ -4,9 +4,23 @@
 // ==========================================
 
 import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import jalaliday from 'jalaliday';
 
 dayjs.extend(jalaliday);
+
+const isJalaliYear = (valueStr: string): boolean => {
+  const yearMatch = valueStr.match(/^(\d{4})/);
+  if (!yearMatch) return false;
+  const year = parseInt(yearMatch[1], 10);
+  return year >= 1300 && year <= 1500;
+};
+
+export const toGregorianDateString = (value: Dayjs | null, format: string): string | null => {
+  if (!value) return null;
+  const gregorian = typeof (value as any).calendar === 'function' ? (value as any).calendar('gregory') : dayjs(value);
+  return gregorian.format(format);
+};
 
 /**
  * تبدیل اعداد انگلیسی به فارسی
@@ -136,53 +150,27 @@ export const formatPersianTime = (time: any): string => {
  * @param format - فرمت خروجی (مثل 'YYYY/MM/DD' یا 'YYYY/MM/DD HH:mm')
  * @returns string فرمت شده به جلالی یا خالی اگر نامعتبر باشد
  */
-export const safeJalaliFormat = (value: any, format: string): string => {
+export const safeJalaliFormat = (value: any, format = 'YYYY/MM/DD'): string => {
   if (!value) return '';
   
   try {
     let dayjsObj: any;
     
     // Check if it's already a Dayjs object
-    if (value && typeof value === 'object' && value.$d) {
+    if (dayjs.isDayjs(value)) {
+      dayjsObj = value;
+    } else if (value && typeof value === 'object' && value.$d) {
       // It's a Dayjs object, use the internal Date
       dayjsObj = dayjs(value.$d);
     } else {
       // Check if the value string contains a Jalali year (1300-1500 range)
       const valueStr = String(value);
-      const yearMatch = valueStr.match(/^(\d{4})/);
-      
-      if (yearMatch) {
-        const year = parseInt(yearMatch[1]);
-        
-        // If year is in Jalali range (1300-1500), it's already a Jalali string
-        // Just reformat it without parsing through dayjs
-        if (year >= 1300 && year <= 1500) {
-          // Parse Jalali date string: "1404-11-15 00:00" or "1404-11-15T00:00:00"
-          const dateTimeMatch = valueStr.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[\sT](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
-          if (dateTimeMatch) {
-            const [, y, m, d, h, min] = dateTimeMatch;
-            
-            // Format based on requested format
-            if (format.includes('HH:mm')) {
-              // DATETIME format
-              const hour = h || '00';
-              const minute = min || '00';
-              return `${y}/${m.padStart(2, '0')}/${d.padStart(2, '0')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
-            } else if (format === 'HH:mm') {
-              // TIME format
-              const hour = h || '00';
-              const minute = min || '00';
-              return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
-            } else {
-              // DATE format
-              return `${y}/${m.padStart(2, '0')}/${d.padStart(2, '0')}`;
-            }
-          }
-        }
+      if (isJalaliYear(valueStr)) {
+        dayjsObj = dayjs(valueStr, { jalali: true });
+      } else {
+        // Parse as Gregorian and convert to Jalali
+        dayjsObj = dayjs(value);
       }
-      
-      // Parse as Gregorian and convert to Jalali
-      dayjsObj = dayjs(value);
     }
     
     // Validate
@@ -190,7 +178,7 @@ export const safeJalaliFormat = (value: any, format: string): string => {
       return '';
     }
     
-    const gregorianYear = dayjsObj.year();
+    const gregorianYear = dayjsObj.calendar('gregory').year();
     if (gregorianYear < 1900 || gregorianYear > 2100) {
       return '';
     }
@@ -223,11 +211,16 @@ export const parseDateValue = (rawValue: any): any => {
   if (!rawValue) return null;
   
   try {
-    const dayjsObj = dayjs(rawValue);
+    if (dayjs.isDayjs(rawValue)) {
+      return rawValue;
+    }
+    
+    const rawStr = String(rawValue);
+    const dayjsObj = isJalaliYear(rawStr) ? dayjs(rawStr, { jalali: true }) : dayjs(rawValue);
     
     if (!dayjsObj.isValid()) return null;
     
-    const gregorianYear = dayjsObj.year();
+    const gregorianYear = dayjsObj.calendar('gregory').year();
     if (gregorianYear < 1900 || gregorianYear > 2100) return null;
     
     return dayjsObj;
@@ -260,4 +253,3 @@ export const fromPersianNumber = (persianNum: string): number => {
   
   return Number(englishStr);
 };
-

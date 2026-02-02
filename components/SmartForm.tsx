@@ -54,7 +54,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
     if (!optionsLoaded) {
       fetchAllRelationOptionsWrapper();
     }
-  }, []);
+  }, [optionsLoaded]);
 
   useEffect(() => {
     if (visible) {
@@ -85,10 +85,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
       
       // فراخوانی توابع کمکی
       fetchUserPermissions();
-      fetchRelationOptions();
-      loadDynamicOptions();
     }
-  }, [visible, recordId, module, initialValues]);
+  }, [visible, recordId, isBulkEdit, optionsLoaded]);
 
   const fetchUserPermissions = async () => { /* کد قبلی */ setModulePermissions({ view: true, edit: true, delete: true }); };
   

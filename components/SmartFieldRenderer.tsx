@@ -3,7 +3,7 @@ import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Ta
 import { DatePicker as JalaliDatePicker, TimePicker as JalaliTimePicker } from 'antd-jalali';
 import { UploadOutlined, LoadingOutlined, QrcodeOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
-import { toPersianNumber, formatPersianTime, safeJalaliFormat } from '../utils/persianNumberFormatter';
+import { toPersianNumber, formatPersianTime, safeJalaliFormat, parseDateValue, toGregorianDateString } from '../utils/persianNumberFormatter';
 import { jalaliDatePickerLocale } from '../utils/jalaliLocale';
 import { supabase } from '../supabaseClient';
 import DynamicSelectField from './DynamicSelectField';
@@ -50,25 +50,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
   // --- 1. تابع کمکی حیاتی برای تبدیل ورودی‌ها به Dayjs (حل مشکل تاریخ) ---
   const ensureDayjs = (val: any): Dayjs | null => {
-      if (!val) return null;
-      if (dayjs.isDayjs(val)) return val;
-      
-      // تلاش برای پارس کردن فرمت‌های مختلف
-      // 1. اگر فرمت ISO یا استاندارد میلادی باشد (مثل timestamptz)
-      const standardDate = dayjs(val);
-      if (standardDate.isValid() && val.includes && (val.includes('T') || val.includes('+'))) {
-          return standardDate;
-      }
-
-      // 2. اگر فرمت شمسی باشد (مثل 1404-11-05 یا 1404/11/05)
-      // نکته: antd-jalali نیاز دارد بداند که ورودی jalali است
-      const jalaliDate = dayjs(val, { jalali: true });
-      if (jalaliDate.isValid()) {
-          return jalaliDate;
-      }
-
-      // 3. تلاش نهایی استاندارد
-      return standardDate.isValid() ? standardDate : null;
+      return parseDateValue(val);
   };
 
   // --- Logic for 'dependsOn' ---
@@ -185,10 +167,16 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         if (fieldType === FieldType.PRICE) {
             return <span className="font-mono font-bold text-gray-700">{value ? Number(value).toLocaleString() : '0'}</span>;
         }
-        if (fieldType === FieldType.DATE) {
-            // رفع خطای TS برای safeJalaliFormat
-            return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any))}</span>;
-        }
+         if (fieldType === FieldType.DATE) {
+             // رفع خطای TS برای safeJalaliFormat
+             return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any))}</span>;
+         }
+         if (fieldType === FieldType.DATETIME) {
+             return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any, 'YYYY/MM/DD HH:mm'))}</span>;
+         }
+         if (fieldType === FieldType.TIME) {
+             return <span className="font-mono">{formatPersianTime(value)}</span>;
+         }
         if (fieldType === FieldType.SELECT || fieldType === FieldType.RELATION || fieldType === FieldType.STATUS) {
              const selectedOpt = fieldOptions.find((o: any) => o.value === value);
              if (fieldType === FieldType.STATUS && selectedOpt) {
@@ -258,8 +246,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       case FieldType.SELECT:
       case FieldType.STATUS:
         if (field.dynamicOptionsCategory) {
-            return (
-                <DynamicSelectField
+             return (
+                 <DynamicSelectField
                     value={value}
                     onChange={onChange}
                     options={fieldOptions}
@@ -267,6 +255,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     placeholder={compactMode ? '' : "انتخاب کنید"}
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
+                    getPopupContainer={() => document.body}
                 />
             );
         }
@@ -294,6 +283,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     mode="multiple"
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
+                    getPopupContainer={() => document.body}
                 />
             );
         }
@@ -361,11 +351,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             // استفاده از تابع ensureDayjs برای اطمینان از مقداردهی صحیح
             value={ensureDayjs(value)}
             // رفع خطای TS و تبدیل به فرمت رشته‌ای برای ذخیره
-            onChange={(_: any, dateString: string | string[]) => {
-                const finalStr = Array.isArray(dateString) ? dateString[0] : dateString;
-                // اگر دیتابیس text است و مقدار فارسی نگه میدارد، همین عالی است
-                // اگر timestamptz است، شاید لازم باشد به ISO تبدیل کنید (اما فعلا طبق دیتابیس شما رفتار میکنیم)
-                onChange(finalStr); 
+            onChange={(date: Dayjs | null) => {
+                const finalStr = toGregorianDateString(date, 'YYYY-MM-DD');
+                onChange(finalStr);
             }}
             placeholder={compactMode ? undefined : "انتخاب تاریخ"}
             allowClear
@@ -405,8 +393,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             className="w-full"
             showTime={{ format: 'HH:mm', showSecond: false }}
             value={ensureDayjs(value)}
-            onChange={(_: any, dateString: string | string[]) => {
-                const finalStr = Array.isArray(dateString) ? dateString[0] : dateString;
+            onChange={(datetime: Dayjs | null) => {
+                const finalStr = toGregorianDateString(datetime, 'YYYY-MM-DD HH:mm');
                 onChange(finalStr);
             }}
             placeholder={compactMode ? undefined : "انتخاب تاریخ و زمان"}
