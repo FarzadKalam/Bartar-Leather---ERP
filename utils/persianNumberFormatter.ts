@@ -18,7 +18,8 @@ const isJalaliYear = (valueStr: string): boolean => {
 
 export const toGregorianDateString = (value: Dayjs | null, format: string): string | null => {
   if (!value) return null;
-  const gregorian = typeof (value as any).calendar === 'function' ? (value as any).calendar('gregory') : dayjs(value);
+  const baseValue = dayjs.isDayjs(value) ? value : dayjs(value);
+  const gregorian = baseValue.calendar('gregory');
   return gregorian.format(format);
 };
 
@@ -150,7 +151,7 @@ export const formatPersianTime = (time: any): string => {
  * @param format - فرمت خروجی (مثل 'YYYY/MM/DD' یا 'YYYY/MM/DD HH:mm')
  * @returns string فرمت شده به جلالی یا خالی اگر نامعتبر باشد
  */
-export const safeJalaliFormat = (value: any, format = 'YYYY/MM/DD'): string => {
+export const safeJalaliFormat = (value: Dayjs | string | number | null | undefined, format = 'YYYY/MM/DD'): string => {
   if (!value) return '';
   
   try {
@@ -207,7 +208,7 @@ export const safeJalaliFormat = (value: any, format = 'YYYY/MM/DD'): string => {
  * @param rawValue - تاریخ ورودی
  * @returns Dayjs object یا null اگر نامعتبر باشد
  */
-export const parseDateValue = (rawValue: any): any => {
+export const parseDateValue = (rawValue: Dayjs | string | number | null | undefined): Dayjs | null => {
   if (!rawValue) return null;
   
   try {

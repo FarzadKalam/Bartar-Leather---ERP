@@ -86,7 +86,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       // فراخوانی توابع کمکی
       fetchUserPermissions();
     }
-  }, [visible, recordId, isBulkEdit, optionsLoaded]);
+  }, [visible, recordId, isBulkEdit]);
 
   const fetchUserPermissions = async () => { /* کد قبلی */ setModulePermissions({ view: true, edit: true, delete: true }); };
   

@@ -34,7 +34,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   disabled = false,
   mode = undefined,
   onOptionsUpdate,
-  getPopupContainer = (trigger) => trigger.parentNode as HTMLElement
+  getPopupContainer = (trigger) => (trigger.parentNode as HTMLElement) || document.body
 }) => {
   const { message: msg } = App.useApp();
   const [newOptionValue, setNewOptionValue] = useState('');
