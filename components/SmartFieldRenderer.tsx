@@ -167,16 +167,16 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         if (fieldType === FieldType.PRICE) {
             return <span className="font-mono font-bold text-gray-700">{value ? Number(value).toLocaleString() : '0'}</span>;
         }
-         if (fieldType === FieldType.DATE) {
-             // رفع خطای TS برای safeJalaliFormat
-             return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any))}</span>;
-         }
-         if (fieldType === FieldType.DATETIME) {
-             return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any, 'YYYY/MM/DD HH:mm'))}</span>;
-         }
-         if (fieldType === FieldType.TIME) {
-             return <span className="font-mono">{formatPersianTime(value)}</span>;
-         }
+        if (fieldType === FieldType.DATE) {
+            // رفع خطای TS برای safeJalaliFormat
+            return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any))}</span>;
+        }
+        if (fieldType === FieldType.DATETIME) {
+            return <span className="font-mono">{toPersianNumber(safeJalaliFormat(value as any, 'YYYY/MM/DD HH:mm'))}</span>;
+        }
+        if (fieldType === FieldType.TIME) {
+            return <span className="font-mono">{formatPersianTime(value)}</span>;
+        }
         if (fieldType === FieldType.SELECT || fieldType === FieldType.RELATION || fieldType === FieldType.STATUS) {
              const selectedOpt = fieldOptions.find((o: any) => o.value === value);
              if (fieldType === FieldType.STATUS && selectedOpt) {

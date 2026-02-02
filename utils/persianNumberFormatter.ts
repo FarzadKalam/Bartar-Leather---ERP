@@ -151,10 +151,11 @@ export const formatPersianTime = (time: any): string => {
  * @param format - فرمت خروجی (مثل 'YYYY/MM/DD' یا 'YYYY/MM/DD HH:mm')
  * @returns string فرمت شده به جلالی یا خالی اگر نامعتبر باشد
  */
-export const safeJalaliFormat = (value: Dayjs | string | number | null | undefined, format = 'YYYY/MM/DD'): string => {
+export const safeJalaliFormat = (value: Dayjs | string | number | null | undefined, format?: string): string => {
   if (!value) return '';
   
   try {
+    const resolvedFormat = format ?? 'YYYY/MM/DD';
     let dayjsObj: any;
     
     // Check if it's already a Dayjs object
@@ -193,7 +194,7 @@ export const safeJalaliFormat = (value: Dayjs | string | number | null | undefin
       return '';
     }
     
-    return jalaliDate.format(format);
+    return jalaliDate.format(resolvedFormat);
     
   } catch (e) {
     console.error('Failed to format Jalali:', value, e);

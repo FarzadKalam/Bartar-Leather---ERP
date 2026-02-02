@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Button, message, Spin, Divider } from 'antd';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -21,8 +21,9 @@ interface SmartFormProps {
 
 const SmartForm: React.FC<SmartFormProps> = ({ 
   module, visible, onCancel, onSave, recordId, title, isBulkEdit = false,
-  initialValues = {} 
+  initialValues: initialValuesProp
 }) => {
+  const initialValues = useMemo(() => initialValuesProp ?? {}, [initialValuesProp]);
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
@@ -86,7 +87,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       // فراخوانی توابع کمکی
       fetchUserPermissions();
     }
-  }, [visible, recordId, isBulkEdit]);
+  }, [visible, recordId, isBulkEdit, module, initialValues]);
 
   const fetchUserPermissions = async () => { /* کد قبلی */ setModulePermissions({ view: true, edit: true, delete: true }); };
   
