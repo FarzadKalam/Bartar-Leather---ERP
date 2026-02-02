@@ -1,59 +1,49 @@
-import faIR from 'antd/locale/fa_IR';
-import type { PickerLocale } from 'antd/es/date-picker/generatePicker';
-import type { TimePickerLocale } from 'antd/es/time-picker';
+import fa_IR from 'antd/lib/locale/fa_IR';
 
-export const JALALI_MONTHS_FA = [
-  'فروردین',
-  'اردیبهشت',
-  'خرداد',
-  'تیر',
-  'مرداد',
-  'شهریور',
-  'مهر',
-  'آبان',
-  'آذر',
-  'دی',
-  'بهمن',
-  'اسفند'
+const jalaliMonths = [
+  'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'
 ];
 
-// نام روزهای هفته به فارسی (شنبه اول هفته)
-const JALALI_WEEKDAYS_FA = [
-  'شنبه',   // Saturday (0)
-  'یکشنبه',  // Sunday (1)
-  'دوشنبه',  // Monday (2)
-  'سه‌شنبه', // Tuesday (3)
-  'چهارشنبه', // Wednesday (4)
-  'پنج‌شنبه', // Thursday (5)
-  'جمعه'    // Friday (6)
-];
-
-const JALALI_WEEKDAYS_SHORT_FA = [
-  'ش',   // Saturday
-  'ی',   // Sunday
-  'د',   // Monday
-  'س',   // Tuesday
-  'چ',   // Wednesday
-  'پ',   // Thursday
-  'ج'    // Friday
-];
-
-export const jalaliDatePickerLocale: PickerLocale = {
-  ...(faIR.DatePicker as PickerLocale),
+const datePickerLocale: any = {
+  ...fa_IR.DatePicker,
   lang: {
-    ...(faIR.DatePicker?.lang || ({} as any)),
+    ...fa_IR.DatePicker?.lang,
     locale: 'fa_IR',
-    // روزهای هفته به فارسی با شنبه اول
-    dayFormat: 'dd',
-    weekdaysShort: JALALI_WEEKDAYS_SHORT_FA,
-    weekdays: JALALI_WEEKDAYS_FA,
-    // ماه‌های جلالی
-    months: JALALI_MONTHS_FA,
-    monthsShort: JALALI_MONTHS_FA,
-    shortWeekDays: JALALI_WEEKDAYS_SHORT_FA,
-    shortMonths: JALALI_MONTHS_FA,
+    months: jalaliMonths,
+    shortMonths: jalaliMonths,
+    dayFormat: 'D', // حل مشکل نمایش تاریخ طولانی
+    dateFormat: 'YYYY/MM/DD',
+    dateTimeFormat: 'YYYY/MM/DD HH:mm:ss',
+    monthFormat: 'MMMM',
+    monthBeforeYear: true,
+    today: 'امروز',
+    now: 'اکنون',
+    backToToday: 'بازگشت به امروز',
+    ok: 'تایید',
+    clear: 'پاک کردن',
+    month: 'ماه',
+    year: 'سال',
+    timeSelect: 'انتخاب زمان',
+    dateSelect: 'انتخاب تاریخ',
+    monthSelect: 'انتخاب ماه',
+    yearSelect: 'انتخاب سال',
+    previousMonth: 'ماه قبل',
+    nextMonth: 'ماه بعد',
+    previousYear: 'سال قبل',
+    nextYear: 'سال بعد',
   },
-  timePickerLocale: faIR.TimePicker as TimePickerLocale,
+  timePickerLocale: {
+    ...fa_IR.DatePicker?.timePickerLocale,
+  },
 };
 
-export const jalaliTimePickerLocale: TimePickerLocale = faIR.TimePicker as TimePickerLocale;
+export const jalaliDatePickerLocale = datePickerLocale;
+export const jalaliTimePickerLocale = fa_IR.TimePicker;
+
+const jalaliLocale = {
+  ...fa_IR,
+  DatePicker: datePickerLocale,
+};
+
+export default jalaliLocale;
