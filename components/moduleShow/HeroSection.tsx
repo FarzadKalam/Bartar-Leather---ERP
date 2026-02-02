@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import { FieldLocation, FieldType } from '../../types';
 // 👇 فقط از فایل‌های کمکی پروژه استفاده می‌کنیم
-import { toPersianNumber, safeJalaliFormat } from '../../utils/persianNumberFormatter';
+import { toPersianNumber, safeJalaliFormat, parseDateValue } from '../../utils/persianNumberFormatter';
 import TagInput from '../TagInput';
 
 interface HeroSectionProps {
@@ -53,8 +53,11 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   // 👇 تابع نمایش تاریخ با استفاده از فایل کمکی پروژه
   const renderDate = (dateVal: any) => {
       if (!dateVal) return '-';
+      // تبدیل به Dayjs ابتدا
+      const dayjsValue = parseDateValue(dateVal);
+      if (!dayjsValue) return '-';
       // فرمت کردن به شمسی با فرمت صحیح
-      const formatted = safeJalaliFormat(dateVal, 'YYYY/MM/DD - HH:mm');
+      const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD - HH:mm');
       return formatted ? toPersianNumber(formatted) : '-';
   };
 

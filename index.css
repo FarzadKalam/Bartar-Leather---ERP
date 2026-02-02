@@ -177,3 +177,72 @@
     font-size: 10px !important;
   }
 }
+
+/* ========================================
+   Jalali Calendar Customization
+   ======================================== */
+
+/* CSS Custom Properties for Calendar Colors */
+:root {
+  --friday-color: #ef4444; /* رنگ قرمز برای جمعه */
+  --friday-light: #fee2e2; /* رنگ کم‌رنگ برای hover */
+  --friday-disabled: #fca5a5; /* رنگ برای روزهای غیرفعال */
+}
+
+/* تنظیم فونت برای تقویم */
+.ant-picker-calendar-date-panel .ant-picker-content thead th {
+  font-family: 'Vazirmatn', system-ui, sans-serif !important;
+  font-weight: 600;
+}
+
+/* تنظیمات اضافی برای اطمینان از نمایش صحیح با فونت وزیر */
+.ant-picker-panel,
+.ant-picker-dropdown,
+.ant-picker-time-panel,
+.ant-picker-header,
+.ant-picker-body,
+.ant-picker-content {
+  font-family: 'Vazirmatn', system-ui, sans-serif !important;
+}
+
+.ant-picker-cell-inner,
+.ant-picker-time-panel-cell-inner,
+.ant-picker-header-view button {
+  font-family: 'Vazirmatn', system-ui, sans-serif !important;
+}
+
+/* هایلایت جمعه (آخرین ستون هفته) به رنگ قرمز */
+/* در تقویم جلالی، جمعه آخرین روز هفته است (ستون هفتم) */
+.ant-picker-cell:last-child .ant-picker-cell-inner,
+.ant-picker-calendar-date-panel .ant-picker-content tbody tr td:last-child {
+  color: var(--friday-color) !important;
+}
+
+/* هایلایت جمعه در وضعیت انتخاب شده */
+.ant-picker-cell:last-child.ant-picker-cell-selected .ant-picker-cell-inner {
+  background-color: var(--friday-color) !important;
+  color: white !important;
+}
+
+/* هایلایت جمعه در وضعیت hover */
+.ant-picker-cell:last-child:hover:not(.ant-picker-cell-selected):not(.ant-picker-cell-disabled) .ant-picker-cell-inner {
+  background-color: var(--friday-light) !important;
+  color: var(--friday-color) !important;
+}
+
+/* جمعه در ماه‌های دیگر (خاکستری) */
+.ant-picker-cell:last-child.ant-picker-cell-disabled .ant-picker-cell-inner {
+  color: var(--friday-disabled) !important;
+}
+
+/* اطمینان از اینکه نام روزهای هفته هم با فونت صحیح نمایش داده شوند */
+.ant-picker-content thead th {
+  font-family: 'Vazirmatn', system-ui, sans-serif !important;
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.ant-picker-content thead th:last-child {
+  color: var(--friday-color) !important; /* رنگ قرمز برای نام جمعه */
+  font-weight: 700;
+}

@@ -11,6 +11,7 @@ import { supabase } from '../supabaseClient';
 import dayjs from 'dayjs';
 import { profilesModule } from '../modules/profilesConfig'; // کانفیگ جدید را ایمپورت کنید
 import { FieldType, FieldDef } from '../types';
+import { toPersianNumber, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
 
 const ProfilePage: React.FC = () => {
   const { id } = useParams();
@@ -77,7 +78,10 @@ const ProfilePage: React.FC = () => {
                 <Tag color="red" icon={<CloseCircleOutlined />}>غیرفعال</Tag>;
         
         case FieldType.DATE:
-            return <span dir="ltr">{dayjs(value).format('YYYY/MM/DD')}</span>;
+            const dayjsValue = parseDateValue(value);
+            if (!dayjsValue) return <span dir="ltr">-</span>;
+            const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
+            return <span dir="ltr">{toPersianNumber(formatted || '-')}</span>;
 
         case FieldType.RELATION:
             // خواندن نام از جدول جوین شده (مثلاً organizations.name)

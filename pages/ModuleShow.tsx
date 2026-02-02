@@ -661,22 +661,32 @@ const ModuleShow: React.FC = () => {
         displayContent = <span className="persian-number font-bold text-lg">{persianPrice} <span className="text-[10px] text-gray-500 font-sans font-normal">تومان</span></span>;
     }
     else if (field.type === FieldType.DATE) {
-      const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
-      if (!formatted) {
+      const dayjsValue = parseDateValue(value);
+      if (!dayjsValue) {
         displayContent = <span className="text-gray-300 text-xs italic">---</span>;
       } else {
-        displayContent = <span className="persian-number font-bold text-lg">{toPersianNumber(formatted)}</span>;
+        const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
+        if (!formatted) {
+          displayContent = <span className="text-gray-300 text-xs italic">---</span>;
+        } else {
+          displayContent = <span className="persian-number font-bold text-lg">{toPersianNumber(formatted)}</span>;
+        }
       }
     }
     else if (field.type === FieldType.TIME) {
       displayContent = <span className="persian-number font-bold text-lg">{formatPersianTime(value)}</span>;
     }
     else if (field.type === FieldType.DATETIME) {
-      const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
-      if (!formatted) {
+      const dayjsValue = parseDateValue(value);
+      if (!dayjsValue) {
         displayContent = <span className="text-gray-300 text-xs italic">---</span>;
       } else {
-        displayContent = <span className="persian-number font-bold text-lg">{toPersianNumber(formatted)}</span>;
+        const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
+        if (!formatted) {
+          displayContent = <span className="text-gray-300 text-xs italic">---</span>;
+        } else {
+          displayContent = <span className="persian-number font-bold text-lg">{toPersianNumber(formatted)}</span>;
+        }
       }
     }
     else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
