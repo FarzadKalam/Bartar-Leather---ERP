@@ -13,7 +13,7 @@ const isJalaliYear = (valueStr: string): boolean => {
   const yearMatch = valueStr.match(/^(\d{4})/);
   if (!yearMatch) return false;
   const year = parseInt(yearMatch[1], 10);
-  return year >= 1300 && year <= 1500;
+  return year >= 1300 && year <= 1550;
 };
 
 export const toGregorianDateString = (value: Dayjs | null, format: string): string | null => {
