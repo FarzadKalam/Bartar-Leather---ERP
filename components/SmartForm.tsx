@@ -16,14 +16,17 @@ interface SmartFormProps {
   recordId?: string;
   title?: string;
   isBulkEdit?: boolean;
+  initialValues?: Record<string, any>;
 }
 
 const SmartForm: React.FC<SmartFormProps> = ({ 
-  module, visible, onCancel, onSave, recordId, title, isBulkEdit = false 
+  module, visible, onCancel, onSave, recordId, title, isBulkEdit = false,
+  initialValues = {} 
 }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
+  const watchedValues = Form.useWatch([], form);
   
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
@@ -55,10 +58,38 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
   useEffect(() => {
     if (visible) {
-      if (recordId && !isBulkEdit) { fetchRecord(); } else { form.resetFields(); setFormData({}); }
-      fetchUserPermissions(); fetchRelationOptions(); loadDynamicOptions();
+      if (recordId && !isBulkEdit) {
+        // --- حالت ویرایش ---
+        fetchRecord();
+      } else {
+        // --- حالت ایجاد رکورد جدید ---
+        form.resetFields();
+        setFormData({}); // اول خالی کن
+
+        // 1. استخراج مقادیر پیش‌فرض از کانفیگ
+        const defaults: Record<string, any> = {};
+        module.fields.forEach(field => {
+          if (field.defaultValue !== undefined) {
+            defaults[field.key] = field.defaultValue;
+          }
+        });
+
+        // 2. ترکیب با مقادیر اولیه ورودی (اولویت با ورودی‌هاست)
+        const initialProps = initialValues || {};
+        const finalValues = { ...defaults, ...initialProps };
+
+        // 3. اعمال مقادیر اولیه بدون تاخیر (برای جلوگیری از flicker)
+        setFormData(finalValues);
+        form.setFieldsValue(finalValues);
+      }
+      
+      // فراخوانی توابع کمکی
+      fetchUserPermissions();
+      fetchRelationOptions();
+      loadDynamicOptions();
     }
-  }, [visible, recordId, module]);
+  }, [visible, recordId, module, initialValues]);
+
   const fetchUserPermissions = async () => { /* کد قبلی */ setModulePermissions({ view: true, edit: true, delete: true }); };
   
   // --- 2. دریافت آپشن‌های ارتباطی (Relation) ---
@@ -214,18 +245,39 @@ const SmartForm: React.FC<SmartFormProps> = ({
   };
 
   const handleValuesChange = (_: any, allValues: any) => { setFormData(allValues); };
-  const checkVisibility = (logic: any) => {
-    if (!logic) return true;
-    const { field, operator, value } = logic;
-    const fieldValue = formData[field];
-    // لاجیک ساده ویزیبیلیتی
-    if (operator === LogicOperator.EQUALS) return fieldValue === value;
-    if (operator === LogicOperator.NOT_EQUALS) return fieldValue !== value;
-    return true; 
-  };
+  const checkVisibility = (logicOrRule: any, values?: any) => {
+    if (!logicOrRule) return true;
+    
+    // پشتیبانی هم از آبجکت logic (که visibleIf دارد) و هم از خود قانون شرط
+    const rule = logicOrRule.visibleIf || logicOrRule;
+    
+    // اگر قانون معتبری نبود، نمایش بده
+    if (!rule || !rule.field) return true;
 
-  if (!visible) return null;
-  if (!module || !module.fields) return null;
+    const { field, operator, value } = rule;
+    const resolvedValues = values || watchedValues || formData;
+    const fieldValue = resolvedValues?.[field];
+
+    // اگر فیلد مرجع هنوز مقدار نگرفته، برای شرط‌های "مخالف" آن را مخفی کن
+    if (fieldValue === undefined || fieldValue === null) {
+         if (operator === LogicOperator.NOT_EQUALS) return false;
+    }
+
+    switch (operator) {
+      case LogicOperator.EQUALS:
+        return fieldValue === value;
+      case LogicOperator.NOT_EQUALS:
+        return fieldValue !== value;
+      case LogicOperator.CONTAINS:
+        return Array.isArray(fieldValue) ? fieldValue.includes(value) : false;
+      case LogicOperator.GREATER_THAN:
+        return Number(fieldValue) > Number(value);
+      case LogicOperator.LESS_THAN:
+        return Number(fieldValue) < Number(value);
+      default:
+        return true;
+    }
+  };
 
   const canEditModule = modulePermissions.edit !== false;
   const sortedBlocks = [...(module.blocks || [])].sort((a, b) => a.order - b.order);
@@ -234,7 +286,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
       .filter(f => f.nature !== 'system') // 👈 این خط را اینجا هم اضافه کنید
       .sort((a, b) => (a.order || 0) - (b.order || 0));
   // محاسبه دیتا برای نمایش در لحظه (رندر)
-  const currentSummaryData = getSummaryData(formData);
+  const currentValues = watchedValues || formData;
+  const currentSummaryData = getSummaryData(currentValues);
   const summaryConfigObj = module.blocks?.find(b => b.summaryConfig)?.summaryConfig;  return (
     <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
       <div className="bg-white dark:bg-[#1e1e1e] w-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
@@ -258,6 +311,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
               {headerFields.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 bg-gray-50 dark:bg-white/5 p-4 rounded-2xl border border-gray-100 dark:border-gray-800">
                   {headerFields.map(field => {
+                     if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
                      let options = field.options; 
                      if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
                      if (field.type === FieldType.RELATION) options = relationOptions[field.key];
@@ -278,7 +332,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
               {/* Blocks */}
               {sortedBlocks.map(block => {
-                if (block.visibleIf && !checkVisibility(block.visibleIf)) return null;
+                if (block.visibleIf && !checkVisibility(block.visibleIf, currentValues)) return null;
 
                 if (block.type === BlockType.FIELD_GROUP || block.type === BlockType.DEFAULT) {
                   const blockFields = module.fields
@@ -294,6 +348,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                       </Divider>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                         {blockFields.map(field => {
+                          if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
                            let fieldValue = formData[field.key];
                            let isReadOnly = false;
                            // فیلدهای خلاصه اگر محاسبه شده باشند

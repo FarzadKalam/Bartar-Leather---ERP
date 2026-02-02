@@ -12,7 +12,7 @@ const fieldsArray: any[] = [
   //{ key: 'assignee_id', labels: { fa: 'مسئول', en: 'Assignee' }, type: FieldType.USER, location: FieldLocation.HEADER, order: 6, nature: FieldNature.STANDARD, isTableColumn: true },
   
   // --- اطلاعات پایه ---
-  { key: 'product_type', labels: { fa: 'نوع محصول', en: 'Product Type' }, type: FieldType.STATUS, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1, options: [{ label: 'مواد اولیه', value: 'raw', color: 'red' }, { label: 'بسته نیمه آماده', value: 'semi', color: 'blue' }, { label: 'محصول نهایی', value: 'final', color: 'green' }], validation: { required: true }, nature: FieldNature.PREDEFINED, isTableColumn: true },
+  { key: 'product_type', labels: { fa: 'نوع محصول', en: 'Product Type' }, type: FieldType.STATUS, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1, defaultValue: 'raw', options: [{ label: 'مواد اولیه', value: 'raw', color: 'red' }, { label: 'بسته نیمه آماده', value: 'semi', color: 'blue' }, { label: 'محصول نهایی', value: 'final', color: 'green' }], validation: { required: true }, nature: FieldNature.PREDEFINED, isTableColumn: true },
   
   { 
     key: 'category', 
@@ -60,9 +60,10 @@ const fieldsArray: any[] = [
 
   // --- سایر فیلدها ---
   { key: 'stock', labels: { fa: 'موجودی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5, nature: FieldNature.PREDEFINED },
-  { key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 6, nature: FieldNature.PREDEFINED, isTableColumn: true },
-  { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7, nature: FieldNature.PREDEFINED, isTableColumn: true },
-  { key: 'production_cost', labels: { fa: 'بهای تمام شده تولید', en: 'Production Cost' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 8, nature: FieldNature.SYSTEM, readonly: true, description: 'محاسبه خودکار از شناسنامه تولید' },
+  { key: 'waste_rate', labels: { fa: 'نرخ پرت', en: 'waste_rate' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7, nature: FieldNature.PREDEFINED },
+  { key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 8, nature: FieldNature.PREDEFINED, isTableColumn: true },
+  { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 9, nature: FieldNature.PREDEFINED, isTableColumn: true },
+  { key: 'production_cost', labels: { fa: 'بهای تمام شده تولید', en: 'Production Cost' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 10, nature: FieldNature.SYSTEM, readonly: true, description: 'محاسبه خودکار از شناسنامه تولید' },
 
   // فیلدهای اختصاصی چرم
   {
