@@ -219,14 +219,17 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
           : undefined,
 
       render: (value: any, record: any) => {
+        // Shared fallback for empty/invalid dates
+        const emptyDateCell = <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+        
         if (field.type === FieldType.IMAGE) {
             return <Avatar src={value} icon={<AppstoreOutlined />} shape="square" size="default" className="bg-gray-100 border border-gray-200" />;
         }
         if (field.type === FieldType.DATE && value) {
           const dayjsValue = parseDateValue(value);
-          if (!dayjsValue) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          if (!dayjsValue) return emptyDateCell;
           const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
-          if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          if (!formatted) return emptyDateCell;
           return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
         }
         if (field.type === FieldType.TIME && value) {
@@ -234,9 +237,9 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
         }
         if (field.type === FieldType.DATETIME && value) {
           const dayjsValue = parseDateValue(value);
-          if (!dayjsValue) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          if (!dayjsValue) return emptyDateCell;
           const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
-          if (!formatted) return <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
+          if (!formatted) return emptyDateCell;
           return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
         }
         if (field.type === FieldType.STATUS) {

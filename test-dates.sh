@@ -7,6 +7,12 @@ echo "Date/Time Display Fix - Test Plan"
 echo "=================================="
 echo ""
 
+# Check if npm is available
+if ! command -v npm &> /dev/null; then
+    echo "❌ Error: npm is not installed or not in PATH"
+    exit 1
+fi
+
 # Run build test
 echo "Step 1: Running production build..."
 npm run build
