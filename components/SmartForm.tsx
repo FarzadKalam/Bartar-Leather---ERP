@@ -54,7 +54,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
     if (!optionsLoaded) {
       fetchAllRelationOptionsWrapper();
     }
-  }, [optionsLoaded]);
+  }, []);
 
   useEffect(() => {
     if (visible) {
