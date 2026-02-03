@@ -616,6 +616,7 @@ const ModuleShow: React.FC = () => {
            inputNode = (
              <JalaliTimePicker
                className="w-full"
+               // parseDateValue handles HH:mm / HH:mm:ss and returns Dayjs
                value={parseDateValue(tempValue)}
                onChange={(time: Dayjs | Dayjs[] | null) => {
                  const picked = Array.isArray(time) ? time[0] : time;

@@ -80,7 +80,9 @@ export const toGregorianDateString = (dateVal: any, format: string = 'YYYY-MM-DD
   if (!dateVal) return null;
   try {
     const base = dayjs.isDayjs(dateVal) ? dateVal : dayjs(dateVal);
-    const greg = (base as any)?.calendar ? (base as any).calendar('gregory') : base;
+    const hasCalendar = (d: any): d is { calendar: (cal: string) => dayjs.Dayjs } =>
+      !!d && typeof d.calendar === 'function';
+    const greg = hasCalendar(base) ? base.calendar('gregory') : base;
     if (!greg.isValid()) return null;
     return greg.format(format);
   } catch (e) { return null; }
