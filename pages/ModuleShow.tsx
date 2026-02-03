@@ -598,7 +598,7 @@ const ModuleShow: React.FC = () => {
             inputNode = (
               <JalaliDatePicker
                 className="w-full"
-                value={parseDateValue(tempValue)}
+               value={parseDateValue(tempValue)}
                 onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: toGregorianDateString(date, 'YYYY-MM-DD') }))}
                 placeholder="انتخاب تاریخ"
                 format={(value: Dayjs | null) => {
@@ -616,8 +616,7 @@ const ModuleShow: React.FC = () => {
             inputNode = (
               <JalaliTimePicker
                 className="w-full"
-               // parseDateValue handles HH:mm / HH:mm:ss and returns Dayjs
-               value={parseDateValue(tempValue)}
+               value={tempValue ? dayjs(tempValue, ['HH:mm', 'HH:mm:ss']) : null}
                onChange={(time: Dayjs | Dayjs[] | null) => {
                  const picked = Array.isArray(time) ? time[0] : time;
                  setTempValues(prev => ({ ...prev, [field.key]: picked ? picked.format('HH:mm') : null }));

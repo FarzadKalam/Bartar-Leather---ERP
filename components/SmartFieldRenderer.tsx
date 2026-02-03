@@ -359,9 +359,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             value={ensureDayjs(value)}
             // رفع خطای TS و تبدیل به فرمت رشته‌ای برای ذخیره
             onChange={(date: Dayjs | null) => {
-                // date در حالت جلالی می‌آید؛ برای ذخیره به میلادی تبدیل و استرینگ می‌کنیم
+                if (!date) { onChange(null); return; }
                 const finalStr = toGregorianDateString(date, 'YYYY-MM-DD');
-                onChange(finalStr);
+                onChange(finalStr || null);
             }}
             placeholder={compactMode ? undefined : "انتخاب تاریخ"}
             allowClear
@@ -378,7 +378,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
           <JalaliTimePicker 
             className="w-full"
-            value={ensureDayjs(value)}
+            value={value ? dayjs(value, ['HH:mm', 'HH:mm:ss']) : null}
             onChange={(time: any) => {
                const formatted = time ? time.format('HH:mm') : null;
                onChange(formatted);

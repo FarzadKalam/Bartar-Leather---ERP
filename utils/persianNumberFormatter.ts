@@ -32,21 +32,10 @@ export const formatPersianPrice = (num: any, withComma = true): string => {
 export const safeJalaliFormat = (value: any, format: string = 'YYYY/MM/DD'): string => {
   if (!value) return '';
   try {
-    const date = dayjs(value).toDate();
-    if (isNaN(date.getTime())) return '';
-    
-    const options: Intl.DateTimeFormatOptions = {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    };
-    if (format.includes('HH') || format.includes('mm')) {
-        options.hour = '2-digit';
-        options.minute = '2-digit';
-        options.hour12 = false;
-    }
-    const formatter = new Intl.DateTimeFormat('fa-IR', options);
-    return formatter.format(date);
+    const d = dayjs(value);
+    if (!d.isValid()) return '';
+    const withJalali = (d as any)?.calendar ? (d as any).calendar('jalali') : d;
+    return withJalali.format(format);
   } catch (e) { return ''; }
 };
 
@@ -99,8 +88,5 @@ export const parseDateValue = (val: any) => {
     }
   }
   const d = dayjs(val);
-  if (!d.isValid()) return null;
-  const hasCalendar = (o: any): o is { calendar: (cal: string) => dayjs.Dayjs } =>
-    !!o && typeof o.calendar === 'function';
-  return hasCalendar(d) ? d.calendar('jalali') : d;
+  return d.isValid() ? d : null;
 };
