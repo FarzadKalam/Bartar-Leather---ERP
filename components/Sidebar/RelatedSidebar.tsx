@@ -31,6 +31,7 @@ interface RelatedSidebarProps {
 
 const RelatedSidebar: React.FC<RelatedSidebarProps> = ({ moduleConfig, recordId }) => {
   const [activeKey, setActiveKey] = useState<string | null>(null);
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const fixedTabs = [
       { key: 'notes', icon: <FileTextOutlined />, label: 'یادداشت‌ها', color: 'text-blue-500' },
@@ -53,7 +54,7 @@ const RelatedSidebar: React.FC<RelatedSidebarProps> = ({ moduleConfig, recordId 
 
   return (
     <>
-        <div className="fixed top-24 left-0 bottom-6 w-16 bg-white dark:bg-[#1a1a1a] border-r border-gray-200 dark:border-gray-800 flex flex-col items-center py-6 gap-6 z-40 shadow-[4px_0_24px_rgba(0,0,0,0.02)] rounded-r-3xl transition-all">
+        <div className="hidden md:flex fixed top-24 left-0 bottom-6 w-14 bg-white dark:bg-[#1a1a1a] border-r border-gray-200 dark:border-gray-800 flex-col items-center py-5 gap-5 z-40 shadow-[4px_0_24px_rgba(0,0,0,0.02)] rounded-r-3xl transition-all">
             {allTabs.map(tab => {
                 const isActive = activeKey === tab.key;
                 return (
@@ -76,16 +77,57 @@ const RelatedSidebar: React.FC<RelatedSidebarProps> = ({ moduleConfig, recordId 
             })}
         </div>
 
+                {/* دکمه موبایل برای باز کردن سایدبار */}
+                <button
+                    type="button"
+                    className="md:hidden fixed left-2 top-1/2 -translate-y-1/2 z-40 w-10 h-10 rounded-r-full bg-leather-500 text-white shadow-lg shadow-leather-500/40 flex items-center justify-center"
+                    onClick={() => setIsMobileMenuOpen(true)}
+                >
+                    <RightOutlined className="text-sm" />
+                </button>
+
+                {/* منوی کشویی موبایل برای انتخاب تب‌ها */}
+                <Drawer
+                    title="سایدبار"
+                    placement="left"
+                    width={170}
+                    open={isMobileMenuOpen}
+                    onClose={() => setIsMobileMenuOpen(false)}
+                    maskClosable
+                    bodyStyle={{ padding: '12px' }}
+                    style={{ left: -16 }}
+                    rootStyle={{ zIndex: 2100 }}
+                >
+                    <div className="flex flex-col gap-2">
+                        {allTabs.map(tab => {
+                            const isActive = activeKey === tab.key;
+                            return (
+                                <button
+                                    key={tab.key}
+                                    onClick={() => {
+                                        toggleTab(tab.key);
+                                        setIsMobileMenuOpen(false);
+                                    }}
+                                    className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${isActive ? 'border-leather-500 bg-leather-50 text-leather-700' : 'border-gray-100 hover:border-leather-300 hover:bg-leather-50/60'}`}
+                                >
+                                    <span className="text-lg flex items-center justify-center w-8 h-8 rounded-lg bg-white shadow-sm">{tab.icon}</span>
+                                    <span className="text-sm leading-tight">{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </Drawer>
+
         <Drawer
             title={allTabs.find(t => t.key === activeKey)?.label}
             placement="left"
-            width={380}
+            width={360}
             onClose={() => setActiveKey(null)}
             open={!!activeKey}
             mask={false}
-            style={{ marginLeft: 64 }}
             styles={{ body: { padding: 0 }, header: { padding: '16px 24px' } }}
-            className="shadow-2xl"
+            className="shadow-2xl md:ml-14"
+            rootStyle={{ zIndex: 2000 }}
         >
             <div className="h-full p-4 bg-gray-50 dark:bg-[#121212]">
                 {(activeKey === 'notes' || activeKey === 'tasks' || activeKey === 'changelogs') && (

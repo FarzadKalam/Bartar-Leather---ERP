@@ -62,13 +62,13 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6 relative overflow-hidden animate-fadeIn">
+    <div className="hero-section-container bg-white dark:bg-[#1a1a1a] p-6 md:p-6 sm:p-4 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6 relative overflow-hidden animate-fadeIn">
       <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-leather-500 to-leather-800 opacity-80"></div>
 
-      <div className="flex flex-col lg:flex-row gap-8 items-stretch">
+      <div className="flex flex-col lg:flex-row gap-8 md:gap-6 sm:gap-4 items-stretch">
         {/* تصویر */}
         {canShowImage && (
-          <div className="w-full lg:w-56 h-48 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
+          <div className="hero-section-image w-full lg:w-56 h-48 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
             {data.image_url ? (
               <Image
                 src={data.image_url}
@@ -93,46 +93,47 @@ const HeroSection: React.FC<HeroSectionProps> = ({
         )}
 
         {/* محتوا */}
-        <div className="flex-1 w-full flex flex-col justify-between">
+        <div className="flex-1 w-full flex flex-col justify-between min-w-0">
           <div>
-            <div className="flex flex-wrap items-start justify-between gap-4 mb-4 mt-2">
-              <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-2xl md:text-3xl font-black m-0 text-gray-800 dark:text-white">{data.name}</h1>
+            {/* هدر نام و شماره */}
+            <div className="mb-3 md:mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-3">
+                <h1 className="hero-section-title text-xl md:text-2xl lg:text-3xl font-black m-0 text-gray-800 dark:text-white truncate">{data.name}</h1>
                 {(data.system_code || data.custom_code) && (
-                  <Tag className="font-mono dir-ltr bg-gray-100 dark:bg-white/10 border-none text-gray-500 px-2 py-1">
+                  <Tag className="hero-section-status font-mono dir-ltr bg-gray-100 dark:bg-white/10 border-none text-gray-500 px-2 py-0.5 text-xs md:text-sm whitespace-nowrap">
                     {data.system_code || data.custom_code}
                   </Tag>
                 )}
               </div>
-
-              {/* بخش انتخاب مسئول */}
-              {(canViewField ? canViewField('assignee_id') !== false : true) && (
-                <div className="flex items-center bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-full pl-1 pr-3 py-1 gap-2">
-                  <span className="text-xs text-gray-400">مسئول:</span>
-                  <Select
-                    bordered={false}
-                    value={data.assignee_id ? `${data.assignee_type}_${data.assignee_id}` : null}
-                    onChange={handleAssigneeChange}
-                    placeholder="انتخاب کنید"
-                    className="min-w-[140px] font-bold text-gray-700 dark:text-gray-300"
-                    dropdownStyle={{ minWidth: 200 }}
-                    options={getAssigneeOptions()}
-                    optionRender={(option) => (
-                      <Space>
-                        <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
-                        {option.data.label}
-                      </Space>
-                    )}
-                    disabled={!canEditModule}
-                  />
-                  <div className="w-6 h-6 flex items-center justify-center">{assigneeIcon}</div>
-                </div>
-              )}
             </div>
+
+            {/* بخش انتخاب مسئول */}
+            {(canViewField ? canViewField('assignee_id') !== false : true) && (
+              <div className="flex items-center justify-between sm:justify-start bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-lg sm:rounded-full pl-2 sm:pl-1 pr-3 py-1.5 sm:py-1 gap-1 sm:gap-2 mb-4">
+                <span className="text-xs text-gray-400 shrink-0">مسئول:</span>
+                <Select
+                  bordered={false}
+                  value={data.assignee_id ? `${data.assignee_type}_${data.assignee_id}` : null}
+                  onChange={handleAssigneeChange}
+                  placeholder="انتخاب کنید"
+                  className="flex-1 sm:min-w-[140px] font-bold text-gray-700 dark:text-gray-300 text-xs sm:text-sm"
+                  dropdownStyle={{ minWidth: 200 }}
+                  options={getAssigneeOptions()}
+                  optionRender={(option) => (
+                    <Space>
+                      <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
+                      {option.data.label}
+                    </Space>
+                  )}
+                  disabled={!canEditModule}
+                />
+                <div className="w-6 h-6 flex items-center justify-center">{assigneeIcon}</div>
+              </div>
+            )}
 
             {/* --- کامپوننت مدیریت تگ --- */}
             {(canViewField ? canViewField('tags') !== false : true) && (
-              <div className="mb-6">
+              <div className="hero-section-tags mb-6">
                 <TagInput
                   recordId={data.id}
                   moduleId={moduleId}
@@ -158,68 +159,67 @@ const HeroSection: React.FC<HeroSectionProps> = ({
 
           <div className="mt-6 flex flex-col gap-4">
             {/* تگ‌های پایین */}
-            <div className="flex gap-2 overflow-x-auto pb-2 border-t border-gray-100 dark:border-gray-800 pt-4">
+            <div className="flex flex-wrap gap-2 overflow-x-auto pb-2 border-t border-gray-100 dark:border-gray-800 pt-4">
               {data.category && (
                 <Tag
                   icon={<AppstoreOutlined />}
-                  className="rounded-full px-3 py-1 bg-gray-50 dark:bg-white/5 border-none text-gray-600 dark:text-gray-300"
+                  className="rounded-full px-2 sm:px-3 py-1 bg-gray-50 dark:bg-white/5 border-none text-gray-600 dark:text-gray-300 text-xs sm:text-sm whitespace-nowrap"
                 >
                   {getOptionLabel(moduleConfig.fields.find((f: any) => f.key === 'category'), data.category)}
                 </Tag>
               )}
               {data.product_type && (
-                <Tag className="rounded-full px-3 py-1 bg-leather-50 text-leather-600 border-none">
+                <Tag className="rounded-full px-2 sm:px-3 py-1 bg-leather-50 text-leather-600 border-none text-xs sm:text-sm whitespace-nowrap">
                   {getOptionLabel(moduleConfig.fields.find((f: any) => f.key === 'product_type'), data.product_type)}
                 </Tag>
               )}
             </div>
 
             {/* --- فیلدهای سیستمی (System Info) --- */}
-            <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-500 dark:text-gray-400 border border-gray-100 dark:border-white/5">
-              
+            <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-3 grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 text-xs text-gray-500 dark:text-gray-400 border border-gray-100 dark:border-white/5">
               {/* ایجاد کننده */}
-              <div className="flex items-center gap-2">
-                <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
-                  <SafetyCertificateOutlined className="text-green-600" />
+              <div className="flex items-center gap-1 sm:gap-2">
+                <div className="bg-white dark:bg-white/10 p-1 sm:p-1.5 rounded-full shrink-0">
+                  <SafetyCertificateOutlined className="text-green-600 text-xs sm:text-sm" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="opacity-70">ایجاد کننده</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-300">{getUserName(data.created_by)}</span>
+                <div className="flex flex-col min-w-0">
+                  <span className="opacity-70 text-xs">ایجاد</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-300 text-xs truncate">{getUserName(data.created_by)}</span>
                 </div>
               </div>
 
               {/* زمان ایجاد */}
-              <div className="flex items-center gap-2">
-                <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
-                  <ClockCircleOutlined className="text-blue-500" />
+              <div className="flex items-center gap-1 sm:gap-2">
+                <div className="bg-white dark:bg-white/10 p-1 sm:p-1.5 rounded-full shrink-0">
+                  <ClockCircleOutlined className="text-blue-500 text-xs sm:text-sm" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="opacity-70">زمان ایجاد</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-300 dir-ltr">
+                <div className="flex flex-col min-w-0">
+                  <span className="opacity-70 text-xs">زمان</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-300 dir-ltr text-xs truncate">
                     {renderDate(data.created_at)}
                   </span>
                 </div>
               </div>
 
               {/* آخرین ویرایشگر */}
-              <div className="flex items-center gap-2">
-                <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
-                  <EditOutlined className="text-orange-500" />
+              <div className="flex items-center gap-1 sm:gap-2">
+                <div className="bg-white dark:bg-white/10 p-1 sm:p-1.5 rounded-full shrink-0">
+                  <EditOutlined className="text-orange-500 text-xs sm:text-sm" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="opacity-70">آخرین ویرایشگر</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-300">{getUserName(data.updated_by)}</span>
+                <div className="flex flex-col min-w-0">
+                  <span className="opacity-70 text-xs">ویرایش</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-300 text-xs truncate">{getUserName(data.updated_by)}</span>
                 </div>
               </div>
 
               {/* زمان ویرایش */}
-              <div className="flex items-center gap-2">
-                <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
-                  <HistoryOutlined className="text-purple-500" />
+              <div className="flex items-center gap-1 sm:gap-2">
+                <div className="bg-white dark:bg-white/10 p-1 sm:p-1.5 rounded-full shrink-0">
+                  <HistoryOutlined className="text-purple-500 text-xs sm:text-sm" />
                 </div>
-                <div className="flex flex-col">
-                  <span className="opacity-70">زمان ویرایش</span>
-                  <span className="font-bold text-gray-700 dark:text-gray-300 dir-ltr">
+                <div className="flex flex-col min-w-0">
+                  <span className="opacity-70 text-xs">سابقه</span>
+                  <span className="font-bold text-gray-700 dark:text-gray-300 dir-ltr text-xs truncate">
                     {renderDate(data.updated_at)}
                   </span>
                 </div>

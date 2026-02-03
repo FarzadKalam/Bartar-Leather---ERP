@@ -30,8 +30,8 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
   canDelete = true,
 }) => {
   return (
-    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-      <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
+    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-2 md:gap-4">
+      <div className="flex items-center gap-2 md:gap-4 w-full md:w-auto overflow-hidden">
         <Button
           icon={<ArrowRightOutlined />}
           onClick={onBack}
@@ -40,7 +40,7 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
           className="border-none shadow-sm shrink-0"
         />
         <Breadcrumb
-          className="whitespace-nowrap overflow-x-auto no-scrollbar"
+          className="whitespace-nowrap overflow-x-auto no-scrollbar text-xs md:text-sm"
           items={[
             { title: <HomeOutlined />, onClick: onHome },
             { title: moduleTitle, onClick: onModule },
@@ -48,25 +48,37 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
           ]}
         />
       </div>
-      <div className="flex gap-2 w-full md:w-auto justify-end flex-wrap">
+      <div className="flex gap-2 md:gap-3 w-full md:w-auto justify-end flex-wrap">
         <Tooltip title="چاپ">
           <Button
             icon={<PrinterOutlined />}
             onClick={onPrint}
-            className="hover:text-leather-600 hover:border-leather-600"
+            size="middle"
+            className="hover:text-leather-600 hover:border-leather-600 min-w-[40px]"
           />
         </Tooltip>
         <Tooltip title="اشتراک گذاری">
-          <Button icon={<ShareAltOutlined />} className="hover:text-leather-600 hover:border-leather-600" />
+          <Button 
+            icon={<ShareAltOutlined />} 
+            size="middle"
+            className="hover:text-leather-600 hover:border-leather-600 min-w-[40px]" 
+          />
         </Tooltip>
         <Popover content={<QRCode value={shareUrl} bordered={false} />} trigger="click">
-          <Button icon={<QrcodeOutlined />} className="hover:text-leather-600 hover:border-leather-600">QR</Button>
+          <Button 
+            icon={<QrcodeOutlined />} 
+            size="middle"
+            className="hover:text-leather-600 hover:border-leather-600 px-3"
+          >
+            QR
+          </Button>
         </Popover>
         {canEdit && (
           <Button
             icon={<EditOutlined />}
             onClick={onEdit}
-            className="hover:text-leather-600 hover:border-leather-600"
+            size="middle"
+            className="hover:text-leather-600 hover:border-leather-600 inline-flex"
           >
             ویرایش
           </Button>
@@ -76,7 +88,8 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
             icon={<DeleteOutlined />}
             danger
             onClick={onDelete}
-            className="hover:text-leather-600 hover:border-leather-600"
+            size="middle"
+            className="hover:text-leather-600 hover:border-leather-600 inline-flex"
           >
             حذف
           </Button>

@@ -37,17 +37,17 @@ const TablesSection: React.FC<TablesSectionProps> = ({
   const progressFields = module.fields?.filter((f: any) => f.type === FieldType.PROGRESS_STAGES) || [];
 
   return (
-    <div className="space-y-8">
+    <div className="tables-section space-y-6 md:space-y-8">
 
       {progressFields.map((field: any) => (
-        <div key={field.key} className="bg-white dark:bg-[#1e1e1e] p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
-            <h3 className="text-lg font-bold mb-4 text-gray-700 dark:text-gray-200 flex items-center gap-2">
+        <div key={field.key} className="bg-white dark:bg-[#1e1e1e] p-4 md:p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
+            <h3 className="text-sm md:text-lg font-bold mb-4 text-gray-700 dark:text-gray-200 flex items-center gap-2">
               <span className="w-1 h-6 bg-leather-500 rounded-full inline-block"></span>                {field.labels.fa}
             </h3>
             <ProductionStagesField 
                 recordId={data.id} 
-                readOnly={false} // در حالت نمایش فقط خواندنی (یا false اگر میخواهید دکمه + باشد)
-                compact={false}
+                readOnly={false}
+                compact={true}
             />
         </div>
       ))}
@@ -62,6 +62,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               recordId={data.id}
               relationOptions={relationOptions}
               dynamicOptions={dynamicOptions}
+              isMobile={typeof window !== 'undefined' && window.innerWidth < 768}
            />
         </div>
       ))}
@@ -70,6 +71,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
           <SummaryCard 
             type={summaryConfig.calculationType || SummaryCalculationType.SUM_ALL_ROWS} 
             data={summaryData} 
+            isMobile={typeof window !== 'undefined' && window.innerWidth < 768}
           />
       )}
     </div>
