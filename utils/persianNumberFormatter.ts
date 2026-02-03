@@ -99,5 +99,8 @@ export const parseDateValue = (val: any) => {
     }
   }
   const d = dayjs(val);
-  return d.isValid() ? d : null;
+  if (!d.isValid()) return null;
+  const hasCalendar = (o: any): o is { calendar: (cal: string) => dayjs.Dayjs } =>
+    !!o && typeof o.calendar === 'function';
+  return hasCalendar(d) ? d.calendar('jalali') : d;
 };

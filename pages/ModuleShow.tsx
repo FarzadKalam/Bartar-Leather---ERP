@@ -594,8 +594,8 @@ const ModuleShow: React.FC = () => {
            inputNode = <InputNumber formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={value => value!.replace(/\$\s?|(,*)/g, '')} value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
       } else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
            inputNode = <InputNumber value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
-      } else if (field.type === FieldType.DATE) {
-           inputNode = (
+       } else if (field.type === FieldType.DATE) {
+            inputNode = (
               <JalaliDatePicker
                 className="w-full"
                 value={parseDateValue(tempValue)}
@@ -613,9 +613,9 @@ const ModuleShow: React.FC = () => {
              />
            );
        } else if (field.type === FieldType.TIME) {
-           inputNode = (
-             <JalaliTimePicker
-               className="w-full"
+            inputNode = (
+              <JalaliTimePicker
+                className="w-full"
                // parseDateValue handles HH:mm / HH:mm:ss and returns Dayjs
                value={parseDateValue(tempValue)}
                onChange={(time: Dayjs | Dayjs[] | null) => {
@@ -631,7 +631,7 @@ const ModuleShow: React.FC = () => {
              />
            );
        } else if (field.type === FieldType.DATETIME) {
-           inputNode = (
+            inputNode = (
               <JalaliDatePicker
                 className="w-full"
                 showTime={{ format: 'HH:mm', showSecond: false }}

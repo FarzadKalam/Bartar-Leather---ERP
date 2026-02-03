@@ -359,6 +359,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             value={ensureDayjs(value)}
             // رفع خطای TS و تبدیل به فرمت رشته‌ای برای ذخیره
             onChange={(date: Dayjs | null) => {
+                // date در حالت جلالی می‌آید؛ برای ذخیره به میلادی تبدیل و استرینگ می‌کنیم
                 const finalStr = toGregorianDateString(date, 'YYYY-MM-DD');
                 onChange(finalStr);
             }}
