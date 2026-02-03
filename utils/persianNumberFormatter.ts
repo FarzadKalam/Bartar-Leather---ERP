@@ -32,9 +32,9 @@ export const formatPersianPrice = (num: any, withComma = true): string => {
 export const safeJalaliFormat = (value: any, format: string = 'YYYY/MM/DD'): string => {
   if (!value) return '';
   try {
-    const d = dayjs(value);
-    if (!d.isValid()) return '';
-    const withJalali = (d as any)?.calendar ? (d as any).calendar('jalali') : d;
+    const base = dayjs.isDayjs(value) ? value : dayjs(value);
+    if (!base.isValid()) return '';
+    const withJalali = (base as any)?.calendar ? (base as any).calendar('jalali') : base;
     return withJalali.format(format);
   } catch (e) { return ''; }
 };
@@ -68,17 +68,15 @@ export const toEnglishTimeForDB = (val: any): string | null => {
 export const toGregorianDateString = (dateVal: any, format: string = 'YYYY-MM-DD'): string | null => {
   if (!dateVal) return null;
   try {
-    const base = dayjs.isDayjs(dateVal) ? dateVal : dayjs(dateVal);
-    const hasCalendar = (d: any): d is { calendar: (cal: string) => dayjs.Dayjs } =>
-      !!d && typeof d.calendar === 'function';
-    const greg = hasCalendar(base) ? base.calendar('gregory') : base;
-    if (!greg.isValid()) return null;
-    return greg.format(format);
+    const d = dayjs.isDayjs(dateVal) ? dateVal : dayjs(dateVal);
+    if (!d.isValid()) return null;
+    return d.format(format);
   } catch (e) { return null; }
 };
 
 export const parseDateValue = (val: any) => {
   if (!val) return null;
+  if (dayjs.isDayjs(val)) return val;
   if (typeof val === 'string') {
     const timeMatch = val.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
     if (timeMatch) {

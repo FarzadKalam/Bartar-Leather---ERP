@@ -360,8 +360,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             // رفع خطای TS و تبدیل به فرمت رشته‌ای برای ذخیره
             onChange={(date: Dayjs | null) => {
                 if (!date) { onChange(null); return; }
-                const finalStr = toGregorianDateString(date, 'YYYY-MM-DD');
-                onChange(finalStr || null);
+                onChange(date.format('YYYY-MM-DD'));
             }}
             placeholder={compactMode ? undefined : "انتخاب تاریخ"}
             allowClear
@@ -402,8 +401,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             showTime={{ format: 'HH:mm', showSecond: false }}
             value={ensureDayjs(value)}
             onChange={(datetime: Dayjs | null) => {
-                const finalStr = toGregorianDateString(datetime, 'YYYY-MM-DD HH:mm');
-                onChange(finalStr);
+                if (!datetime) { onChange(null); return; }
+                onChange(datetime.format('YYYY-MM-DD HH:mm'));
             }}
             placeholder={compactMode ? undefined : "انتخاب تاریخ و زمان"}
             locale={jalaliDatePickerLocale}
@@ -508,7 +507,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       formItemProps.getValueProps = (val: any) => ({ value: ensureDayjs(val) });
   }
   if (fieldType === FieldType.TIME) {
-      formItemProps.getValueProps = (val: any) => ({ value: ensureDayjs(val) });
+      formItemProps.getValueProps = (val: any) => ({ value: val ? dayjs(val, ['HH:mm', 'HH:mm:ss']) : null });
   }
 
   const allowQuickCreate = (field.relationConfig as any)?.allowQuickCreate;

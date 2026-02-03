@@ -599,7 +599,7 @@ const ModuleShow: React.FC = () => {
               <JalaliDatePicker
                 className="w-full"
                value={parseDateValue(tempValue)}
-                onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: toGregorianDateString(date, 'YYYY-MM-DD') }))}
+                onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: date ? date.format('YYYY-MM-DD') : null }))}
                 placeholder="انتخاب تاریخ"
                 format={(value: Dayjs | null) => {
                   const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
@@ -635,7 +635,7 @@ const ModuleShow: React.FC = () => {
                 className="w-full"
                 showTime={{ format: 'HH:mm', showSecond: false }}
                 value={parseDateValue(tempValue)}
-                onChange={(datetime: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: toGregorianDateString(datetime, 'YYYY-MM-DD HH:mm') }))}
+                onChange={(datetime: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: datetime ? datetime.format('YYYY-MM-DD HH:mm') : null }))}
                 placeholder="انتخاب تاریخ و زمان"
                 format={(value: Dayjs | null) => {
                   const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');
