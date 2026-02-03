@@ -67,7 +67,7 @@ export const toEnglishTimeForDB = (val: any): string | null => {
   if (!val) return null;
   try {
     if (dayjs.isDayjs(val)) {
-        return val.format('HH:mm:ss');
+      return val.format('HH:mm:ss');
     }
     const str = String(val);
     const englishStr = str.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString());
@@ -79,9 +79,10 @@ export const toEnglishTimeForDB = (val: any): string | null => {
 export const toGregorianDateString = (dateVal: any, format: string = 'YYYY-MM-DD'): string | null => {
   if (!dateVal) return null;
   try {
-    const d = dayjs(dateVal);
-    if (!d.isValid()) return null;
-    return d.format('YYYY-MM-DD');
+    const base = dayjs.isDayjs(dateVal) ? dateVal : dayjs(dateVal);
+    const greg = (base as any)?.calendar ? (base as any).calendar('gregory') : base;
+    if (!greg.isValid()) return null;
+    return greg.format(format);
   } catch (e) { return null; }
 };
 

@@ -612,11 +612,11 @@ const ModuleShow: React.FC = () => {
                popupStyle={{ zIndex: 1600 }}
              />
            );
-      } else if (field.type === FieldType.TIME) {
+       } else if (field.type === FieldType.TIME) {
            inputNode = (
              <JalaliTimePicker
                className="w-full"
-              value={tempValue ? dayjs(tempValue, ['HH:mm', 'HH:mm:ss']) : null}
+               value={parseDateValue(tempValue)}
                onChange={(time: Dayjs | Dayjs[] | null) => {
                  const picked = Array.isArray(time) ? time[0] : time;
                  setTempValues(prev => ({ ...prev, [field.key]: picked ? picked.format('HH:mm') : null }));
@@ -629,7 +629,7 @@ const ModuleShow: React.FC = () => {
                popupStyle={{ zIndex: 1600 }}
              />
            );
-      } else if (field.type === FieldType.DATETIME) {
+       } else if (field.type === FieldType.DATETIME) {
            inputNode = (
               <JalaliDatePicker
                 className="w-full"
