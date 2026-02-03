@@ -377,7 +377,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
           <JalaliTimePicker 
             className="w-full"
-            value={value ? dayjs(value, 'HH:mm') : null}
+            value={ensureDayjs(value)}
             onChange={(time: any) => {
                const formatted = time ? time.format('HH:mm') : null;
                onChange(formatted);
@@ -507,7 +507,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       formItemProps.getValueProps = (val: any) => ({ value: ensureDayjs(val) });
   }
   if (fieldType === FieldType.TIME) {
-      formItemProps.getValueProps = (val: any) => ({ value: val ? dayjs(val, 'HH:mm') : null });
+      formItemProps.getValueProps = (val: any) => ({ value: ensureDayjs(val) });
   }
 
   const allowQuickCreate = (field.relationConfig as any)?.allowQuickCreate;

@@ -87,6 +87,14 @@ export const toGregorianDateString = (dateVal: any, format: string = 'YYYY-MM-DD
 
 export const parseDateValue = (val: any) => {
   if (!val) return null;
+  if (typeof val === 'string') {
+    const timeMatch = val.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (timeMatch) {
+      const normalized = timeMatch[3] ? val : `${val}:00`;
+      const t = dayjs(`1970-01-01T${normalized}`);
+      return t.isValid() ? t : null;
+    }
+  }
   const d = dayjs(val);
   return d.isValid() ? d : null;
 };
