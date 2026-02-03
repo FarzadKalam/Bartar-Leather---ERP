@@ -50,7 +50,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
   // --- 1. تابع کمکی حیاتی برای تبدیل ورودی‌ها به Dayjs (حل مشکل تاریخ) ---
   const ensureDayjs = (val: any): Dayjs | null => {
-      return parseDateValue(val);
+      if (!val) return null;
+      if (dayjs.isDayjs(val)) return val;
+      const d = dayjs(val);
+      return d.isValid() ? d : null;
   };
 
   // --- Logic for 'dependsOn' ---
