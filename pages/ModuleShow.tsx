@@ -698,7 +698,13 @@ const ModuleShow: React.FC = () => {
   return (
     <div className="p-4 md:p-6 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16">
       <div className="mb-4 md:mb-0">
-        <RelatedSidebar moduleConfig={moduleConfig} recordId={id!} />
+        <RelatedSidebar
+          moduleConfig={moduleConfig}
+          recordId={id!}
+          recordName={data?.name || data?.system_code || id}
+          mentionUsers={allUsers}
+          mentionRoles={allRoles}
+        />
       </div>
 
       <HeaderActions

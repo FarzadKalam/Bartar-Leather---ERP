@@ -27,9 +27,12 @@ const iconMap: Record<string, React.ReactNode> = {
 interface RelatedSidebarProps {
   moduleConfig: ModuleDefinition;
   recordId: string;
+  recordName?: string; // ✅ اضافه شده
+    mentionUsers?: any[];
+    mentionRoles?: any[];
 }
 
-const RelatedSidebar: React.FC<RelatedSidebarProps> = ({ moduleConfig, recordId }) => {
+const RelatedSidebar: React.FC<RelatedSidebarProps> = ({ moduleConfig, recordId, recordName = '', mentionUsers = [], mentionRoles = [] }) => {
   const [activeKey, setActiveKey] = useState<string | null>(null);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -131,7 +134,14 @@ const RelatedSidebar: React.FC<RelatedSidebarProps> = ({ moduleConfig, recordId 
         >
             <div className="h-full p-4 bg-gray-50 dark:bg-[#121212]">
                 {(activeKey === 'notes' || activeKey === 'tasks' || activeKey === 'changelogs') && (
-                    <ActivityPanel moduleId={moduleConfig.id} recordId={recordId} view={activeKey as any} />
+                    <ActivityPanel
+                        moduleId={moduleConfig.id}
+                        recordId={recordId}
+                        view={activeKey as any}
+                        recordName={recordName}
+                        mentionUsers={mentionUsers}
+                        mentionRoles={mentionRoles}
+                    />
                 )}
                 {relatedTabs.map(tab => (
                     activeKey === `related_${tab.targetModule}` && (
