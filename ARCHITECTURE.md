@@ -159,7 +159,7 @@ Renders any field type based on `FieldType` enum:
 - NUMBER → `<InputNumber />`
 - SELECT → `<Select options={...} />`
 - RELATION → `<Select>` (populated from related module)
-- DATE → `<DatePicker calendar="jalali" />`
+- DATE/TIME/DATETIME → `<PersianDatePicker />` (Jalali UI, Gregorian DB strings)
 - IMAGE → `<Upload />`
 - TAGS → `<TagInput />`
 
@@ -401,7 +401,9 @@ switch (field.type) {
     return <Select options={options} />;
   
   case FieldType.DATE:
-    return <DatePicker calendar="jalali" />;
+  case FieldType.TIME:
+  case FieldType.DATETIME:
+    return <PersianDatePicker type={field.type} />;
   
   // ... 26 field types supported
 }

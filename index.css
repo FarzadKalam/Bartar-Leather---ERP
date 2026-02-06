@@ -134,10 +134,17 @@
 }
 .ant-picker-time-panel-cell-inner {
   font-family: 'Vazirmatn', sans-serif !important;
-  font-feature-settings: "ss01"; /* اعداد فارسی */
+  font-feature-settings: "ss01" !important; /* اعداد فارسی */
+  font-variant-numeric: normal !important;
   direction: ltr; /* جهت LTR برای اینکه ساعت برعکس نشود (12:30) */
   text-align: center;
   font-size: 14px !important; /* سایز نرمال */
+}
+.ant-picker-time-panel-column > li,
+.ant-picker-time-panel-column > li * {
+  font-family: 'Vazirmatn', sans-serif !important;
+  font-feature-settings: "ss01" !important;
+  font-variant-numeric: normal !important;
 }
 
 /* 5. استایل هدر (سال 1404) */

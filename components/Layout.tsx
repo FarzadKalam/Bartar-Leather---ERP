@@ -97,7 +97,15 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
   const menuItems = [
     { key: '/', icon: <DashboardOutlined />, label: 'داشبورد' },
     { key: '/products', icon: <SkinOutlined />, label: 'محصولات' },
-    { key: '/warehouses', icon: <GoldOutlined />, label: 'انبارها' },
+    { 
+      key: 'warehouses', 
+      icon: <GoldOutlined />, 
+      label: 'انبار',
+      children: [
+        { key: '/warehouses', label: 'انبارها' },
+        { key: '/shelves', label: 'قفسه‌ها' }
+      ]
+    },
     { 
         key: 'production', 
         icon: <ExperimentOutlined />, 

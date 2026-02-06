@@ -21,11 +21,13 @@ export const tasksModule: ModuleDefinition = {
     { key: 'description', labels: { fa: 'توضیحات', en: 'Description' }, type: FieldType.LONG_TEXT, location: FieldLocation.BLOCK, blockId: 'general', order: 1, nature: FieldNature.STANDARD },
     
     // --- زمان‌بندی ---
-    { key: 'start_date', labels: { fa: 'تاریخ شروع', en: 'Start Date' }, type: FieldType.DATETIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 4, nature: FieldNature.STANDARD },
-    { key: 'due_date', labels: { fa: 'مهلت انجام', en: 'Due Date' }, type: FieldType.DATETIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 2, nature: FieldNature.STANDARD },
+    { key: 'start_date', labels: { fa: 'تاریخ شروع', en: 'Start Date' }, type: FieldType.DATE, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 4, nature: FieldNature.STANDARD, isTableColumn: true },
+    { key: 'due_date', labels: { fa: 'مهلت انجام', en: 'Due Date' }, type: FieldType.DATETIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 2, nature: FieldNature.STANDARD, isTableColumn: true },
     { key: 'estimated_hours', labels: { fa: 'ساعات تخمینی', en: 'Estimated Hours' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 3, nature: FieldNature.STANDARD },
     { key: 'spent_hours', labels: { fa: 'ساعات صرف شده', en: 'Spent Hours' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 4, readonly: true, nature: FieldNature.SYSTEM },
+    { key: 'start_time', labels: { fa: 'زمان آغاز', en: 'Start Time' }, type: FieldType.TIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 5, nature: FieldNature.STANDARD, isTableColumn: true },
     
+
     // --- ارتباطات ---
     { key: 'related_product', labels: { fa: 'محصول مرتبط', en: 'Related Product' }, type: FieldType.RELATION, location: FieldLocation.BLOCK, blockId: 'general', order: 2, relationConfig: { targetModule: 'products', targetField: 'name' }, nature: FieldNature.STANDARD, logic: { visibleIf: { field: 'related_to_module', operator: LogicOperator.EQUALS, value: 'products' } } },
     { key: 'related_customer', labels: { fa: 'مشتری مرتبط', en: 'Related Customer' }, type: FieldType.RELATION, location: FieldLocation.BLOCK, blockId: 'general', order: 3, relationConfig: { targetModule: 'customers', targetField: 'name' }, nature: FieldNature.STANDARD, logic: { visibleIf: { field: 'related_to_module', operator: LogicOperator.EQUALS, value: 'customers' } } },

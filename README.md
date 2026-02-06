@@ -20,7 +20,7 @@
 - **State/Logic:** React Router v6, React Hooks, Refine Framework
 - **Backend/DB:** Supabase (PostgreSQL)
 - **Icons:** Ant Design Icons
-- **تاریخ:** Day.js + JalaliDay
+- **تاریخ:** react-multi-date-picker + react-date-object (تقویم فارسی)
 
 ## 🚀 شروع به کار
 
@@ -283,5 +283,5 @@ Private / Proprietary
 
 ---
 
-**آخرین به‌روزرسانی:** 7 ژانویه 2026  
+**آخرین به‌روزرسانی:** 5 فوریه 2026  
 **نسخه:** 4.0

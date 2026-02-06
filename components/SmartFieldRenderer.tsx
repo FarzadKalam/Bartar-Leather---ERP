@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button } from 'antd';
-import { DatePicker as JalaliDatePicker, TimePicker as JalaliTimePicker } from 'antd-jalali';
 import { UploadOutlined, LoadingOutlined, QrcodeOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
-import { toPersianNumber, formatPersianTime, safeJalaliFormat, parseDateValue, toGregorianDateString } from '../utils/persianNumberFormatter';
-import { jalaliDatePickerLocale } from '../utils/jalaliLocale';
+import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { supabase } from '../supabaseClient';
 import DynamicSelectField from './DynamicSelectField';
 import TagInput from './TagInput';
-import dayjs from 'dayjs';
-import type { Dayjs } from 'dayjs';
 import ProductionStagesField from './ProductionStagesField';
+import PersianDatePicker from './PersianDatePicker';
+import DateObject from 'react-date-object';
+import persian from 'react-date-object/calendars/persian';
+import persian_fa from 'react-date-object/locales/persian_fa';
+import gregorian from 'react-date-object/calendars/gregorian';
+import gregorian_en from 'react-date-object/locales/gregorian_en';
 
 interface SmartFieldRendererProps {
   field: ModuleField;
@@ -37,7 +39,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [quickCreateValue, setQuickCreateValue] = useState('');
-  const [quickCreateLoading, setQuickCreateLoading] = useState(false);
+  const [, setQuickCreateLoading] = useState(false);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState('');
 
@@ -45,13 +47,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const fieldType = field?.type || type || FieldType.TEXT;
   const fieldKey = field?.key || 'unknown';
   const isRequired = field?.validation?.required || false;
-  const isReadonly = field?.readonly || false;
   const fieldOptions = field?.options || options || [];
-
-  // --- 1. تابع کمکی حیاتی برای تبدیل ورودی‌ها به Dayjs (حل مشکل تاریخ) ---
-  const ensureDayjs = (val: any): Dayjs | null => {
-      return parseDateValue(val);
-  };
+  const isReadonly = field?.readonly === true || field?.nature === FieldNature.SYSTEM;
 
   // --- Logic for 'dependsOn' ---
   const fieldAny = field as any;
@@ -69,11 +66,40 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       return <Input type="hidden" value={value} />;
   }
 
-  const renderPersianDateCell = (current: Dayjs) => {
-    const formatted = safeJalaliFormat(current, 'D');
-    const fallback = current && (current as any).isValid?.() ? current.format('D') : '';
-    const display = formatted || fallback;
-    return <div className="ant-picker-cell-inner">{display ? toPersianNumber(display) : ''}</div>;
+  const formatPersian = (val: any, kind: 'DATE' | 'TIME' | 'DATETIME') => {
+    if (!val) return '-';
+    try {
+      let dateObj: DateObject;
+
+      if (kind === 'TIME') {
+        dateObj = new DateObject({
+          date: `1970-01-01 ${val}`,
+          format: 'YYYY-MM-DD HH:mm',
+          calendar: gregorian,
+          locale: gregorian_en,
+        });
+      } else if (kind === 'DATE') {
+        dateObj = new DateObject({
+          date: val,
+          format: 'YYYY-MM-DD',
+          calendar: gregorian,
+          locale: gregorian_en,
+        });
+      } else {
+        const jsDate = new Date(val);
+        if (Number.isNaN(jsDate.getTime())) return '-';
+        dateObj = new DateObject({
+          date: jsDate,
+          calendar: gregorian,
+          locale: gregorian_en,
+        });
+      }
+
+      const format = kind === 'DATE' ? 'YYYY/MM/DD' : kind === 'TIME' ? 'HH:mm' : 'YYYY/MM/DD HH:mm';
+      return dateObj.convert(persian, persian_fa).format(format);
+    } catch {
+      return '-';
+    }
   };
 
   const handleImageUpload = async (file: File) => {
@@ -168,21 +194,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             return <span className="font-mono font-bold text-gray-700">{value ? Number(value).toLocaleString() : '0'}</span>;
         }
         if (fieldType === FieldType.DATE) {
-            // تبدیل به Dayjs ابتدا برای نمایش صحیح
-            const dayjsValue = parseDateValue(value);
-            if (!dayjsValue) return <span className="font-mono">-</span>;
-            const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
-            return <span className="font-mono">{toPersianNumber(formatted || '-')}</span>;
+          return <span className="font-mono persian-number">{formatPersian(value, 'DATE')}</span>;
         }
         if (fieldType === FieldType.DATETIME) {
-            // تبدیل به Dayjs ابتدا برای نمایش صحیح
-            const dayjsValue = parseDateValue(value);
-            if (!dayjsValue) return <span className="font-mono">-</span>;
-            const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
-            return <span className="font-mono">{toPersianNumber(formatted || '-')}</span>;
+          return <span className="font-mono persian-number">{formatPersian(value, 'DATETIME')}</span>;
         }
         if (fieldType === FieldType.TIME) {
-            return <span className="font-mono">{formatPersianTime(value)}</span>;
+          return <span className="font-mono persian-number">{formatPersian(value, 'TIME')}</span>;
         }
         if (fieldType === FieldType.SELECT || fieldType === FieldType.RELATION || fieldType === FieldType.STATUS) {
              const selectedOpt = fieldOptions.find((o: any) => o.value === value);
@@ -205,7 +223,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     const commonProps = {
         value,
         onChange: (val: any) => onChange(val),
-        disabled: !forceEditMode,
+      disabled: !forceEditMode || isReadonly,
         placeholder: compactMode ? undefined : fieldLabel,
         style: { width: '100%' }
     };
@@ -219,13 +237,11 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       
       case FieldType.PROGRESS_STAGES:
         return (
-            <ProductionStagesField 
-                recordId={recordId} 
-                // اگر در حال ویرایش هستیم یا کامپکت نیستیم، قابلیت ویرایش داشته باشد
-                // اما در حالت Create (وقتی recordId نیست)، کامپوننت خودش پیام میدهد
-                readOnly={!forceEditMode && !compactMode} 
-                compact={compactMode} 
-            />
+          <ProductionStagesField 
+            recordId={recordId}
+            readOnly={!(moduleId === 'production_orders' && !compactMode)}
+            compact={compactMode} 
+          />
         );
 
       case FieldType.NUMBER:
@@ -242,14 +258,6 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 parser={fieldType === FieldType.PRICE ? val => val!.replace(/\$\s?|(,*)/g, '') : undefined}
             />
         );
-      case FieldType.PROGRESS_STAGES:
-    return (
-      <ProductionStagesField 
-        recordId={recordId} // شناسه رکورد فعلی (سفارش تولید)
-        readOnly={!forceEditMode && !compactMode} // در حالت نمایش فقط خواندنی باشد
-        compact={compactMode} // در حالت لیست (جدول) فشرده باشد
-      />
-    );
       case FieldType.SELECT:
       case FieldType.STATUS:
         if (field.dynamicOptionsCategory) {
@@ -353,64 +361,37 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
       case FieldType.DATE:
         return (
-          <JalaliDatePicker 
+          <PersianDatePicker
+            type="DATE"
+            value={value}
+            onChange={onChange}
             className="w-full"
-            // استفاده از تابع ensureDayjs برای اطمینان از مقداردهی صحیح
-            value={ensureDayjs(value)}
-            // رفع خطای TS و تبدیل به فرمت رشته‌ای برای ذخیره
-            onChange={(date: Dayjs | null) => {
-                const finalStr = toGregorianDateString(date, 'YYYY-MM-DD');
-                onChange(finalStr);
-            }}
-            placeholder={compactMode ? undefined : "انتخاب تاریخ"}
-            allowClear
-            locale={jalaliDatePickerLocale}
-            popupClassName="persian-number"
-            dateRender={renderPersianDateCell}
-            getPopupContainer={() => document.body}
-            popupStyle={{ zIndex: 9999 }}
             disabled={!forceEditMode}
+            placeholder={compactMode ? undefined : "انتخاب تاریخ"}
           />
         );
 
       case FieldType.TIME:
         return (
-          <JalaliTimePicker 
+          <PersianDatePicker
+            type="TIME"
+            value={value}
+            onChange={onChange}
             className="w-full"
-            value={value ? dayjs(value, 'HH:mm') : null}
-            onChange={(time: any) => {
-               const formatted = time ? time.format('HH:mm') : null;
-               onChange(formatted);
-            }}
-            placeholder={compactMode ? undefined : "انتخاب زمان"}
-            format={(val: Dayjs | null) => (val ? toPersianNumber(val.format('HH:mm')) : '')}
-            showSecond={false}
-            use12Hours={false}
-            locale={jalaliDatePickerLocale}
-            popupClassName="persian-number"
-            getPopupContainer={() => document.body}
-            popupStyle={{ zIndex: 9999 }}
             disabled={!forceEditMode}
+            placeholder={compactMode ? undefined : "انتخاب زمان"}
           />
         );
 
       case FieldType.DATETIME:
         return (
-          <JalaliDatePicker 
+          <PersianDatePicker
+            type="DATETIME"
+            value={value}
+            onChange={onChange}
             className="w-full"
-            showTime={{ format: 'HH:mm', showSecond: false }}
-            value={ensureDayjs(value)}
-            onChange={(datetime: Dayjs | null) => {
-                const finalStr = toGregorianDateString(datetime, 'YYYY-MM-DD HH:mm');
-                onChange(finalStr);
-            }}
-            placeholder={compactMode ? undefined : "انتخاب تاریخ و زمان"}
-            locale={jalaliDatePickerLocale}
-            popupClassName="persian-number"
-            dateRender={renderPersianDateCell}
-            getPopupContainer={() => document.body}
-            popupStyle={{ zIndex: 9999 }}
             disabled={!forceEditMode}
+            placeholder={compactMode ? undefined : "انتخاب تاریخ و زمان"}
           />
         );
 
@@ -434,7 +415,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 listType="picture-card" 
                 showUploadList={false} 
                 beforeUpload={(file) => { handleImageUpload(file); return false; }}
-                disabled={uploading || !forceEditMode}
+            disabled={uploading || !forceEditMode || isReadonly}
                 fileList={[]}
             >
                 {uploading ? (
@@ -448,7 +429,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         );
 
       case FieldType.CHECKBOX:
-        return <Switch checked={!!value} onChange={onChange} disabled={!forceEditMode} />;
+        return <Switch checked={!!value} onChange={onChange} disabled={!forceEditMode || isReadonly} />;
 
       default:
         return <Input {...commonProps} onChange={e => onChange(e.target.value)} />;
@@ -501,14 +482,6 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       rules: [{ required: isRequired, message: 'الزامی است' }],
       valuePropName: fieldType === FieldType.CHECKBOX ? 'checked' : 'value',
   };
-
-  // تنظیمات تبدیل مقدار برای Form.Item
-  if (fieldType === FieldType.DATE || fieldType === FieldType.DATETIME) {
-      formItemProps.getValueProps = (val: any) => ({ value: ensureDayjs(val) });
-  }
-  if (fieldType === FieldType.TIME) {
-      formItemProps.getValueProps = (val: any) => ({ value: val ? dayjs(val, 'HH:mm') : null });
-  }
 
   const allowQuickCreate = (field.relationConfig as any)?.allowQuickCreate;
 

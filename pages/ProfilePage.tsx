@@ -8,10 +8,14 @@ import {
   CloseCircleOutlined, IdcardOutlined, SafetyCertificateOutlined, EditOutlined 
 } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
-import dayjs from 'dayjs';
+import DateObject from 'react-date-object';
+import persian from 'react-date-object/calendars/persian';
+import persian_fa from 'react-date-object/locales/persian_fa';
+import gregorian from 'react-date-object/calendars/gregorian';
+import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { profilesModule } from '../modules/profilesConfig'; // کانفیگ جدید را ایمپورت کنید
 import { FieldType, FieldDef } from '../types';
-import { toPersianNumber, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
+import { toPersianNumber } from '../utils/persianNumberFormatter';
 
 const ProfilePage: React.FC = () => {
   const { id } = useParams();
@@ -71,6 +75,24 @@ const ProfilePage: React.FC = () => {
   const renderFieldValue = (field: FieldDef, value: any, allData: any) => {
     if (value === null || value === undefined || value === '') return <span className="text-gray-400">---</span>;
 
+        const formatPersianDate = (val: any, format: string) => {
+            if (!val) return <span dir="ltr">-</span>;
+            try {
+                const jsDate = new Date(val);
+                if (Number.isNaN(jsDate.getTime())) return <span dir="ltr">-</span>;
+                const formatted = new DateObject({
+                    date: jsDate,
+                    calendar: gregorian,
+                    locale: gregorian_en,
+                })
+                    .convert(persian, persian_fa)
+                    .format(format);
+                return <span dir="ltr">{toPersianNumber(formatted)}</span>;
+            } catch {
+                return <span dir="ltr">-</span>;
+            }
+        };
+
     switch (field.type) {
         case FieldType.BOOLEAN:
             return value ? 
@@ -78,10 +100,7 @@ const ProfilePage: React.FC = () => {
                 <Tag color="red" icon={<CloseCircleOutlined />}>غیرفعال</Tag>;
         
         case FieldType.DATE:
-            const dayjsValue = parseDateValue(value);
-            if (!dayjsValue) return <span dir="ltr">-</span>;
-            const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
-            return <span dir="ltr">{toPersianNumber(formatted || '-')}</span>;
+            return formatPersianDate(value, 'YYYY/MM/DD');
 
         case FieldType.RELATION:
             // خواندن نام از جدول جوین شده (مثلاً organizations.name)
@@ -123,7 +142,7 @@ const ProfilePage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* --- ستون سمت چپ: خلاصه پروفایل --- */}
         <div className="lg:col-span-1">
-            <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] text-center shadow-sm border border-gray-200 dark:border-gray-800 relative overflow-hidden sticky top-24 pb-8">
+            <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] text-center shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden sticky top-24 pb-8">
                 <div className="h-32 bg-gradient-to-br from-leather-600 to-leather-800 relative"></div>
 
                 <div className="px-6 relative -mt-16">
@@ -158,7 +177,17 @@ const ProfilePage: React.FC = () => {
         {/* --- ستون سمت راست: جزئیات کامل (رندر داینامیک) --- */}
         <div className="lg:col-span-2 space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <StatisticCard title="سابقه فعالیت" value={dayjs().diff(dayjs(record.created_at), 'day')} suffix=" روز" />
+                                <StatisticCard title="سابقه فعالیت" value={(() => {
+                                    try {
+                                        const created = new Date(record.created_at);
+                                        if (Number.isNaN(created.getTime())) return '-';
+                                        const diffMs = Date.now() - created.getTime();
+                                        const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                                        return toPersianNumber(days);
+                                    } catch {
+                                        return '-';
+                                    }
+                                })()} suffix=" روز" />
                 <StatisticCard title="نقش سیستم" value={renderFieldValue(profilesModule.fields.find(f => f.key === 'role')!, record.role, record)} />
             </div>
 

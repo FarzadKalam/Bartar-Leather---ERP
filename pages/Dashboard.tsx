@@ -11,12 +11,14 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import { toPersianNumber, formatPersianPrice, safeJalaliFormat } from '../utils/persianNumberFormatter';
-import dayjs from 'dayjs';
-import jalaliday from 'jalaliday';
+import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
+import DateObject from 'react-date-object';
+import persian from 'react-date-object/calendars/persian';
+import persian_fa from 'react-date-object/locales/persian_fa';
+import gregorian from 'react-date-object/calendars/gregorian';
+import gregorian_en from 'react-date-object/locales/gregorian_en';
 import type { MenuProps } from 'antd';
 
-dayjs.extend(jalaliday);
 
 interface DashboardStats {
   totalSales: number;
@@ -52,12 +54,41 @@ const Dashboard: React.FC = () => {
   // Get today's Persian date
   const getTodayPersianDate = () => {
     try {
-      const today = dayjs();
-      // Format using the already configured jalali calendar
-      return today.format('dddd، DD MMMM YYYY');
+      const dateObj = new DateObject({
+        date: new Date(),
+        calendar: gregorian,
+        locale: gregorian_en,
+      }).convert(persian, persian_fa);
+      return dateObj.format('dddd، DD MMMM YYYY');
     } catch (error) {
       console.error('Error formatting Persian date:', error);
       return 'تاریخ امروز';
+    }
+  };
+
+  const formatPersianDate = (val: any, format: string) => {
+    if (!val) return '-';
+    try {
+      let dateObj: DateObject;
+      if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+        dateObj = new DateObject({
+          date: val,
+          format: 'YYYY-MM-DD',
+          calendar: gregorian,
+          locale: gregorian_en,
+        });
+      } else {
+        const jsDate = new Date(val);
+        if (Number.isNaN(jsDate.getTime())) return '-';
+        dateObj = new DateObject({
+          date: jsDate,
+          calendar: gregorian,
+          locale: gregorian_en,
+        });
+      }
+      return dateObj.convert(persian, persian_fa).format(format);
+    } catch {
+      return '-';
     }
   };
 
@@ -166,14 +197,14 @@ const Dashboard: React.FC = () => {
     const labels: Record<string, string> = {
       draft: 'پیش‌نویس',
       pending: 'در انتظار',
-      in_production: 'در حال تولید',
+      in_progress: 'در حال تولید',
       completed: 'تکمیل شده',
       cancelled: 'لغو شده',
       on_hold: 'معلق',
     };
     return labels[status] || status;
   };
-
+  
   const getStatusColor = (status: string): string => {
     const colors: Record<string, string> = {
       draft: 'default',
@@ -189,11 +220,15 @@ const Dashboard: React.FC = () => {
   const calculateMonthlySales = (invoices: any[]): { month: string; amount: number; }[] => {
     try {
       const last6Months = Array.from({ length: 6 }, (_, i) => {
-        const date = dayjs().subtract(i, 'month');
-        return {
-          monthKey: date.format('YYYY-MM'),
-          monthLabel: date.format('MMMM'), // Use format directly instead of calendar
-        };
+        const date = new Date();
+        date.setMonth(date.getMonth() - i);
+        const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        const monthLabel = new DateObject({
+          date,
+          calendar: gregorian,
+          locale: gregorian_en,
+        }).convert(persian, persian_fa).format('MMMM');
+        return { monthKey, monthLabel };
       }).reverse();
 
       return last6Months.map(({ monthKey, monthLabel }) => {
@@ -283,7 +318,7 @@ const Dashboard: React.FC = () => {
       title: 'تاریخ',
       dataIndex: 'invoice_date',
       key: 'invoice_date',
-      render: (date: string) => date ? safeJalaliFormat(date, 'YYYY/MM/DD') : '-',
+      render: (date: string) => formatPersianDate(date, 'YYYY/MM/DD'),
     },
     {
       title: 'مبلغ',
@@ -313,7 +348,7 @@ const Dashboard: React.FC = () => {
       title: 'تاریخ شروع',
       dataIndex: 'start_date',
       key: 'start_date',
-      render: (date: string) => date ? safeJalaliFormat(date, 'YYYY/MM/DD') : '-',
+      render: (date: string) => formatPersianDate(date, 'YYYY/MM/DD'),
     },
     {
       title: 'وضعیت',
@@ -699,7 +734,7 @@ const Dashboard: React.FC = () => {
                     <div>
                       <div className="font-medium">{activity.description}</div>
                       <div className="text-xs text-gray-500 mt-1">
-                        {activity.time ? safeJalaliFormat(activity.time, 'YYYY/MM/DD HH:mm') : '-'}
+                        {formatPersianDate(activity.time, 'YYYY/MM/DD HH:mm')}
                       </div>
                     </div>
                   ),

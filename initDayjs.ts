@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import jalaliday from "jalaliday";
+import jalaliday from "jalaliday/dayjs";
 import updateLocale from "dayjs/plugin/updateLocale";
 import "dayjs/locale/fa";
 

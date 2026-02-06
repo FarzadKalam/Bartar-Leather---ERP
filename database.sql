@@ -211,6 +211,9 @@ CREATE TABLE public.tasks (
   created_at timestamptz DEFAULT now()
 );
 
+-- اتصال وظیفه به خط تولید
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS production_line_id uuid REFERENCES public.production_lines(id) ON DELETE SET NULL;
+
 -- ۱۵. حواله‌های کالا
 CREATE TABLE public.stock_transfers (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -452,3 +455,59 @@ CREATE POLICY "Public Access Tags" ON public.tags FOR ALL USING (true);
 
 ALTER TABLE public.record_tags ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Access Record Tags" ON public.record_tags FOR ALL USING (true);
+
+-- ۱۶. جدول موجودی محصول به تفکیک قفسه
+CREATE TABLE IF NOT EXISTS public.product_inventory (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  product_id uuid REFERENCES public.products(id) ON DELETE CASCADE,
+  shelf_id uuid REFERENCES public.shelves(id) ON DELETE CASCADE,
+  warehouse_id uuid REFERENCES public.warehouses(id) ON DELETE SET NULL,
+  stock numeric DEFAULT 0,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (product_id, shelf_id)
+);
+
+ALTER TABLE public.product_inventory ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Product Inventory" ON public.product_inventory FOR ALL USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_product_inventory_product ON public.product_inventory (product_id);
+CREATE INDEX IF NOT EXISTS idx_product_inventory_shelf ON public.product_inventory (shelf_id);
+CREATE INDEX IF NOT EXISTS idx_product_inventory_warehouse ON public.product_inventory (warehouse_id);
+
+-- ۱۶. جدول لاگ تغییرات (Changelogs)
+CREATE TABLE IF NOT EXISTS public.changelogs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  module_id text NOT NULL,
+  record_id uuid NOT NULL,
+  action text NOT NULL, -- create/update/delete
+  field_name text,
+  field_label text,
+  old_value jsonb,
+  new_value jsonb,
+  user_id uuid REFERENCES auth.users(id),
+  user_name text,
+  record_title text,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.changelogs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Changelogs" ON public.changelogs FOR SELECT USING (true);
+CREATE POLICY "Public Insert Changelogs" ON public.changelogs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Changelogs" ON public.changelogs FOR UPDATE USING (true) WITH CHECK (true);
+
+-- ۱۷. خطوط تولید برای سفارشات
+CREATE TABLE IF NOT EXISTS public.production_lines (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  production_order_id uuid REFERENCES public.production_orders(id) ON DELETE CASCADE,
+  line_no int4 NOT NULL,
+  quantity numeric DEFAULT 0,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE (production_order_id, line_no)
+);
+
+ALTER TABLE public.production_lines ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Production Lines" ON public.production_lines FOR SELECT USING (true);
+CREATE POLICY "Public Insert Production Lines" ON public.production_lines FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Production Lines" ON public.production_lines FOR UPDATE USING (true) WITH CHECK (true);

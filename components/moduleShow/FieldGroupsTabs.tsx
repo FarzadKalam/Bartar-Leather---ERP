@@ -1,15 +1,32 @@
 import React from 'react';
 import { Tabs } from 'antd';
+import EditableTable from '../EditableTable';
 
 interface FieldGroupsTabsProps {
   fieldGroups: any[];
   moduleConfig: any;
+  data: any;
+  moduleId: string;
+  recordId: string;
+  relationOptions: Record<string, any[]>;
+  dynamicOptions: Record<string, any[]>;
   renderSmartField: (field: any) => React.ReactNode;
   checkVisibility: (logic: any) => boolean;
   canViewField?: (fieldKey: string) => boolean;
 }
 
-const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({ fieldGroups, moduleConfig, renderSmartField, checkVisibility, canViewField }) => {
+const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
+  fieldGroups,
+  moduleConfig,
+  data,
+  moduleId,
+  recordId,
+  relationOptions,
+  dynamicOptions,
+  renderSmartField,
+  checkVisibility,
+  canViewField,
+}) => {
   if (!fieldGroups || fieldGroups.length === 0) return null;
 
   return (
@@ -32,6 +49,19 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({ fieldGroups, moduleCo
                     </div>
                   ))}
               </div>
+              {block.tableColumns && (
+                <div className="mt-6">
+                  <EditableTable
+                    block={block}
+                    initialData={data?.[block.id] || []}
+                    mode="db"
+                    moduleId={moduleId}
+                    recordId={recordId}
+                    relationOptions={relationOptions}
+                    dynamicOptions={dynamicOptions}
+                  />
+                </div>
+              )}
             </div>
           ),
         }))}

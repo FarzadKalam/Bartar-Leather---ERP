@@ -26,7 +26,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
       if (summaryBlock) {
           return calculateSummary(data, module.blocks || [], summaryBlock.summaryConfig);
       }
-      if (module.blocks?.some((b: any) => b.type === 'table')) {
+          if (module.blocks?.some((b: any) => b.type === 'table')) {
           return calculateSummary(data, module.blocks || [], {});
       }
       return null;

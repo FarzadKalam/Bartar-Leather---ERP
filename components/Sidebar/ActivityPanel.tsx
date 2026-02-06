@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { List, Input, Button, Checkbox, Timeline, message, Empty, Spin } from 'antd';
 import { SendOutlined, PlusOutlined } from '@ant-design/icons'; // <--- فیکس ارور ایمپورت
 import { supabase } from '../../supabaseClient';
-import dayjs from 'dayjs';
+import DateObject from 'react-date-object';
+import persian from 'react-date-object/calendars/persian';
+import persian_fa from 'react-date-object/locales/persian_fa';
+import gregorian from 'react-date-object/calendars/gregorian';
+import gregorian_en from 'react-date-object/locales/gregorian_en';
 
 interface ActivityPanelProps {
   moduleId: string;
@@ -14,6 +18,43 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view 
   const [items, setItems] = useState<any[]>([]);
   const [newItem, setNewItem] = useState('');
   const [loading, setLoading] = useState(false);
+
+    const formatPersianDate = (val: any, format: string) => {
+        if (!val) return '-';
+        try {
+            const jsDate = new Date(val);
+            if (Number.isNaN(jsDate.getTime())) return '-';
+            return new DateObject({
+                date: jsDate,
+                calendar: gregorian,
+                locale: gregorian_en,
+            })
+                .convert(persian, persian_fa)
+                .format(format);
+        } catch {
+            return '-';
+        }
+    };
+
+    const getActionLabel = (action: string) => {
+        if (action === 'create') return 'ایجاد رکورد';
+        if (action === 'update') return 'ویرایش';
+        if (action === 'delete') return 'حذف';
+        return 'تغییر';
+    };
+
+    const getActionColor = (action: string) => {
+        if (action === 'create') return 'green';
+        if (action === 'update') return 'blue';
+        if (action === 'delete') return 'red';
+        return 'gray';
+    };
+
+    const formatValue = (value: any) => {
+        if (value === null || value === undefined || value === '') return 'خالی';
+        if (typeof value === 'object') return JSON.stringify(value);
+        return String(value);
+    };
 
   useEffect(() => {
     fetchData();
@@ -88,7 +129,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view 
                   <div className="bg-white dark:bg-white/5 p-4 rounded-xl mb-3 border border-gray-100 dark:border-gray-700 shadow-sm">
                       <div className="flex justify-between text-[10px] text-gray-400 mb-2">
                           <span>کاربر سیستم</span>
-                          <span>{dayjs(item.created_at).format('YYYY/MM/DD HH:mm')}</span>
+                          <span>{formatPersianDate(item.created_at, 'YYYY/MM/DD HH:mm')}</span>
                       </div>
                       <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">{item.content}</div>
                   </div>
@@ -104,27 +145,56 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view 
               )} />
           )}
 
-          {view === 'changelogs' && (
-              <Timeline items={items.map((log: any) => ({
-                  color: 'gray',
-                  children: (
-                      <div className="text-xs pb-4">
-                          <div className="flex items-center gap-2 mb-1">
-                              <span className="font-bold text-gray-700">{log.action === 'create' ? 'ایجاد رکورد' : log.action === 'update' ? 'ویرایش' : 'حذف'}</span>
-                              <span className="text-[10px] text-gray-400">{dayjs(log.created_at).format('HH:mm - YY/MM/DD')}</span>
-                          </div>
-                          {log.field_name && (
-                              <div className="bg-gray-50 p-2 rounded text-gray-600">
-                                  تغییر <b>{log.field_name}</b>: <br/>
-                                  <span className="text-red-400 line-through mr-1">{log.old_value || 'خالی'}</span> 
-                                  <span className="text-gray-400 mx-1">➜</span>
-                                  <span className="text-green-600 font-bold">{log.new_value}</span>
-                              </div>
-                          )}
-                      </div>
-                  )
-              }))} />
-          )}
+                    {view === 'changelogs' && (
+                            <Timeline
+                                reverse
+                                items={items.map((log: any) => {
+                                    const actor = log.user_name || log.user_full_name || log.actor_name || 'کاربر سیستم';
+                                    const recordTitle = log.record_title || log.record_name || log.record_label;
+                                    const fieldLabel = log.field_label || log.field_name;
+                                    const actionLabel = getActionLabel(log.action);
+                                    const actionColor = getActionColor(log.action);
+
+                                    return {
+                                        color: actionColor,
+                                        children: (
+                                            <div className="text-xs pb-4">
+                                                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                                    <span className="font-bold" style={{ color: actionColor }}>{actionLabel}</span>
+                                                    <span className="text-[10px] text-gray-400">{formatPersianDate(log.created_at, 'HH:mm - YY/MM/DD')}</span>
+                                                </div>
+                                                <div className="text-[11px] text-gray-600 mb-2 flex flex-wrap gap-1">
+                                                    <span>توسط</span>
+                                                    <span className="font-semibold text-blue-600">{actor}</span>
+                                                    {recordTitle && (
+                                                        <>
+                                                            <span>در</span>
+                                                            <span className="font-semibold text-purple-600">{recordTitle}</span>
+                                                        </>
+                                                    )}
+                                                    {fieldLabel && (
+                                                        <>
+                                                            <span>فیلد</span>
+                                                            <span className="font-semibold text-orange-600">{fieldLabel}</span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                                {fieldLabel && (
+                                                    <div className="bg-gray-50 p-2 rounded text-gray-600">
+                                                        <div className="mb-1">تغییر مقدار:</div>
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className="text-red-400 line-through">{formatValue(log.old_value)}</span>
+                                                            <span className="text-gray-400">➜</span>
+                                                            <span className="text-green-600 font-bold">{formatValue(log.new_value)}</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ),
+                                    };
+                                })}
+                            />
+                    )}
       </div>
     </div>
   );

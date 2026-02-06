@@ -1,7 +1,7 @@
 import { RowCalculationType, SummaryCalculationType, BlockType } from '../types';
 
 export const calculateRow = (row: any, type: RowCalculationType = RowCalculationType.SIMPLE_MULTIPLY) => {
-    const qty = parseFloat(row.quantity) || parseFloat(row.usage) || parseFloat(row.qty) || 0;
+    const qty = parseFloat(row.quantity) || parseFloat(row.usage) || parseFloat(row.qty) || parseFloat(row.stock) || 0;
     const price = parseFloat(row.unit_price) || parseFloat(row.buy_price) || parseFloat(row.price) || 0;
     
     let baseTotal = qty * price;

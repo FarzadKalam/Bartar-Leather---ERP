@@ -181,6 +181,7 @@ export interface BlockDefinition {
   order: number;
   icon?: string;
   visibleIf?: any;
+  readonly?: boolean;
   tableColumns?: {
     key: string;
     title: string;

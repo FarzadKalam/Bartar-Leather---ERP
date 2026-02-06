@@ -3,7 +3,12 @@ import { Table, Tag, Avatar, Input, Button, Space, Popover } from 'antd';
 import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { ModuleDefinition, FieldType } from '../types';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
-import { toPersianNumber, formatPersianPrice, formatPersianTime, safeJalaliFormat, parseDateValue } from '../utils/persianNumberFormatter';
+import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
+import DateObject from 'react-date-object';
+import persian from 'react-date-object/calendars/persian';
+import persian_fa from 'react-date-object/locales/persian_fa';
+import gregorian from 'react-date-object/calendars/gregorian';
+import gregorian_en from 'react-date-object/locales/gregorian_en';
 import type { InputRef } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
@@ -183,6 +188,40 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     const isSearchable = field.type === FieldType.TEXT || field.key.includes('name') || field.key.includes('code') || field.key.includes('title');
     const isTagField = field.type === FieldType.TAGS;
 
+    const formatPersianDate = (val: any, kind: 'DATE' | 'TIME' | 'DATETIME') => {
+      if (!val) return null;
+      try {
+        let dateObj: DateObject;
+        if (kind === 'TIME') {
+          dateObj = new DateObject({
+            date: `1970-01-01 ${val}`,
+            format: 'YYYY-MM-DD HH:mm',
+            calendar: gregorian,
+            locale: gregorian_en,
+          });
+        } else if (kind === 'DATE') {
+          dateObj = new DateObject({
+            date: val,
+            format: 'YYYY-MM-DD',
+            calendar: gregorian,
+            locale: gregorian_en,
+          });
+        } else {
+          const jsDate = new Date(val);
+          if (Number.isNaN(jsDate.getTime())) return null;
+          dateObj = new DateObject({
+            date: jsDate,
+            calendar: gregorian,
+            locale: gregorian_en,
+          });
+        }
+        const format = kind === 'DATE' ? 'YYYY/MM/DD' : kind === 'TIME' ? 'HH:mm' : 'YYYY/MM/DD HH:mm';
+        return dateObj.convert(persian, persian_fa).format(format);
+      } catch {
+        return null;
+      }
+    };
+
     return {
       title: <span className="text-[11px] text-gray-500">{field.labels.fa}</span>,
       dataIndex: field.key,
@@ -226,21 +265,19 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
             return <Avatar src={value} icon={<AppstoreOutlined />} shape="square" size="default" className="bg-gray-100 border border-gray-200" />;
         }
         if (field.type === FieldType.DATE && value) {
-          const dayjsValue = parseDateValue(value);
-          if (!dayjsValue) return emptyDateCell;
-          const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD');
+          const formatted = formatPersianDate(value, 'DATE');
           if (!formatted) return emptyDateCell;
-          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
+          return <span className="dir-ltr text-gray-500 font-medium text-[11px]">{formatted}</span>;
         }
         if (field.type === FieldType.TIME && value) {
-          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{formatPersianTime(value)}</span>;
+          const formatted = formatPersianDate(value, 'TIME');
+          if (!formatted) return emptyDateCell;
+          return <span className="dir-ltr text-gray-500 font-medium text-[11px]">{formatted}</span>;
         }
         if (field.type === FieldType.DATETIME && value) {
-          const dayjsValue = parseDateValue(value);
-          if (!dayjsValue) return emptyDateCell;
-          const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD HH:mm');
+          const formatted = formatPersianDate(value, 'DATETIME');
           if (!formatted) return emptyDateCell;
-          return <span className="dir-ltr text-gray-500 font-mono text-[11px]">{toPersianNumber(formatted)}</span>;
+          return <span className="dir-ltr text-gray-500 font-medium text-[11px]">{formatted}</span>;
         }
         if (field.type === FieldType.STATUS) {
             const opt = field.options?.find(o => o.value === value);

@@ -80,7 +80,7 @@ This file imports all individual configs and exports a single `MODULES` object. 
 
 ### Smart Components
 
-* **`SmartForm.tsx`:** A dynamic form builder that handles validation, file uploads, date picking (Jalali), and Select options based on the `FieldType`.
+* **`SmartForm.tsx`:** A dynamic form builder that handles validation, file uploads, date picking (via `PersianDatePicker` with Persian calendar UI), and Select options based on the `FieldType`.
 * **`SmartTableRenderer.tsx`:** A dynamic table that handles searching inside columns, custom rendering (Tags, Avatars, Prices), and row selection.
 
 ### Tagging System
@@ -96,6 +96,17 @@ For entities like **Production BOM**, the system renders a hierarchical tree or 
 
 * **Config:** Defined using `BlockType.TABLE` in the module config.
 * **Renderer:** `BomStructureRenderer` handles the recursive tree visualization.
+
+### Date/Time Handling
+
+All date/time inputs and displays are standardized through **`PersianDatePicker`** and **`react-date-object`**:
+
+- **DB storage:** Gregorian strings
+  - DATE: `YYYY-MM-DD`
+  - TIME: `HH:mm`
+  - DATETIME: ISO string
+- **UI display:** Jalali calendar with Persian numerals
+- **Component:** `components/PersianDatePicker.tsx` (used by `SmartFieldRenderer` and related UI)
 
 ---
 

@@ -11,7 +11,11 @@ import {
 } from '@ant-design/icons';
 import { FieldLocation, FieldType } from '../../types';
 // 👇 فقط از فایل‌های کمکی پروژه استفاده می‌کنیم
-import { toPersianNumber, safeJalaliFormat, parseDateValue } from '../../utils/persianNumberFormatter';
+import DateObject from 'react-date-object';
+import persian from 'react-date-object/calendars/persian';
+import persian_fa from 'react-date-object/locales/persian_fa';
+import gregorian from 'react-date-object/calendars/gregorian';
+import gregorian_en from 'react-date-object/locales/gregorian_en';
 import TagInput from '../TagInput';
 
 interface HeroSectionProps {
@@ -50,15 +54,20 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   const imageField = moduleConfig?.fields?.find((f: any) => f.type === FieldType.IMAGE);
   const canShowImage = !!imageField && (canViewField ? canViewField(imageField.key) !== false : true);
   
-  // 👇 تابع نمایش تاریخ با استفاده از فایل کمکی پروژه
   const renderDate = (dateVal: any) => {
-      if (!dateVal) return '-';
-      // تبدیل به Dayjs ابتدا
-      const dayjsValue = parseDateValue(dateVal);
-      if (!dayjsValue) return '-';
-      // فرمت کردن به شمسی با فرمت صحیح
-      const formatted = safeJalaliFormat(dayjsValue, 'YYYY/MM/DD - HH:mm');
-      return formatted ? toPersianNumber(formatted) : '-';
+    if (!dateVal) return '-';
+    try {
+      const jsDate = new Date(dateVal);
+      if (Number.isNaN(jsDate.getTime())) return '-';
+      const dateObj = new DateObject({
+        date: jsDate,
+        calendar: gregorian,
+        locale: gregorian_en,
+      }).convert(persian, persian_fa);
+      return dateObj.format('YYYY/MM/DD - HH:mm');
+    } catch {
+      return '-';
+    }
   };
 
   return (

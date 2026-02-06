@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Form, Button, message, Spin, Divider } from 'antd';
+import { Form, Button, message, Spin, Divider, Select, Space } from 'antd';
+import { UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
-import EditableTable from './EditableTable';
+import EditableTable from './EditableTable.tsx';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType } from '../types';
@@ -27,27 +28,19 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
+  const [initialRecord, setInitialRecord] = useState<any>(null);
   const watchedValues = Form.useWatch([], form);
   
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
-  const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
   const [optionsLoaded, setOptionsLoaded] = useState(false);
-  const [allUsers, setAllUsers] = useState<any[]>([]);
-  const [allRoles, setAllRoles] = useState<any[]>([]);
+  const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
   
   const fetchAllRelationOptionsWrapper = async () => {
     await fetchRelationOptions();
-    await fetchBaseInfo();
+    await loadDynamicOptions();
     setOptionsLoaded(true);
-  };
-
-  const fetchBaseInfo = async () => {
-    const { data: users } = await supabase.from('profiles').select('id, full_name, avatar_url');
-    const { data: roles } = await supabase.from('org_roles').select('id, title');
-    if (users) setAllUsers(users);
-    if (roles) setAllRoles(roles);
   };
 
   useEffect(() => {
@@ -86,8 +79,24 @@ const SmartForm: React.FC<SmartFormProps> = ({
       
       // فراخوانی توابع کمکی
       fetchUserPermissions();
+      fetchAssignees();
     }
   }, [visible, recordId, isBulkEdit, module, initialValues]);
+
+  const fetchAssignees = async () => {
+    try {
+      const { data: users } = await supabase.from('profiles').select('id, full_name');
+      const { data: roles } = await supabase.from('org_roles').select('id, title');
+      setAssignees({ users: users || [], roles: roles || [] });
+    } catch (e) {
+      console.warn('Could not fetch assignees', e);
+    }
+  };
+
+  const assigneeOptions = [
+    { label: 'پرسنل', title: 'users', options: assignees.users.map(u => ({ label: u.full_name, value: `user_${u.id}`, emoji: <UserOutlined /> })) },
+    { label: 'تیم‌ها', title: 'roles', options: assignees.roles.map(r => ({ label: r.title, value: `role_${r.id}`, emoji: <TeamOutlined /> })) }
+  ];
 
   const fetchUserPermissions = async () => { /* کد قبلی */ setModulePermissions({ view: true, edit: true, delete: true }); };
   
@@ -141,18 +150,18 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
     // پیمایش ستون‌های جداول
     if (module.blocks) {
-        for (const block of module.blocks) {
-            if (block.type === BlockType.TABLE && block.tableColumns) {
-                for (const col of block.tableColumns) {
-                    if (col.type === FieldType.RELATION && col.relationConfig) {
-                        const key = `${block.id}_${col.key}`;
-                        await fetchOptionsForField(col.relationConfig.targetModule, col.relationConfig.targetField, key);
-                        // کپی برای دسترسی راحت‌تر
-                        if (!options[col.key]) options[col.key] = options[key];
-                    }
-                }
+      for (const block of module.blocks) {
+        if (block.tableColumns) {
+          for (const col of block.tableColumns) {
+            if (col.type === FieldType.RELATION && col.relationConfig) {
+              const key = `${block.id}_${col.key}`;
+              await fetchOptionsForField(col.relationConfig.targetModule, col.relationConfig.targetField, key);
+              // کپی برای دسترسی راحت‌تر
+              if (!options[col.key]) options[col.key] = options[key];
             }
+          }
         }
+      }
     }
     setRelationOptions(options);
   };
@@ -165,7 +174,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
     // جمع‌آوری دسته‌ها از فیلدها و ستون‌های جدول
     module.fields.forEach(f => { if (f.dynamicOptionsCategory) categoriesToFetch.add(f.dynamicOptionsCategory); });
     module.blocks?.forEach(b => {
-        b.tableColumns?.forEach((c: any) => { if (c.dynamicOptionsCategory) categoriesToFetch.add(c.dynamicOptionsCategory); });
+      b.tableColumns?.forEach((c: any) => { if (c.dynamicOptionsCategory) categoriesToFetch.add(c.dynamicOptionsCategory); });
     });
 
     for (const category of Array.from(categoriesToFetch)) {
@@ -195,6 +204,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       if (data) {
         form.setFieldsValue(data);
         setFormData(data);
+        setInitialRecord(data);
       }
     } catch (err: any) {
       message.error('خطا: ' + err.message);
@@ -220,6 +230,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const handleFinish = async (values: any) => {
     setLoading(true);
     try {
+      if (module.id === 'products') {
+        delete values.product_inventory;
+      }
+      if (module.id === 'shelves') {
+        delete values.shelf_inventory;
+      }
       const summaryData = getSummaryData(formData);
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
 
@@ -233,10 +249,70 @@ const SmartForm: React.FC<SmartFormProps> = ({
           values['production_cost'] = summaryData.total;
       }
 
-      if (onSave) await onSave(values);
-      else {
-        if (recordId) await supabase.from(module.table).update(values).eq('id', recordId);
-        else await supabase.from(module.table).insert(values);
+      if (onSave) {
+        await onSave(values);
+      } else {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || null;
+
+        if (recordId) {
+          await supabase.from(module.table).update(values).eq('id', recordId);
+
+          const changes: any[] = [];
+          const compareKeys = new Set<string>([...Object.keys(values || {}), ...Object.keys(initialRecord || {})]);
+          compareKeys.forEach((key) => {
+            const before = initialRecord?.[key];
+            const after = values?.[key];
+            const beforeStr = JSON.stringify(before ?? null);
+            const afterStr = JSON.stringify(after ?? null);
+            if (beforeStr !== afterStr) {
+              const fieldLabel = module.fields.find(f => f.key === key)?.labels?.fa || key;
+              changes.push({
+                module_id: module.id,
+                record_id: recordId,
+                action: 'update',
+                field_name: key,
+                field_label: fieldLabel,
+                old_value: before ?? null,
+                new_value: after ?? null,
+                user_id: userId,
+                record_title: values?.name || values?.title || values?.system_code || null,
+              });
+            }
+          });
+
+          if (changes.length > 0) {
+            try {
+              await supabase.from('changelogs').insert(changes);
+            } catch (err) {
+              console.warn('Changelog insert failed:', err);
+            }
+          }
+        } else {
+          const { data: inserted, error } = await supabase
+            .from(module.table)
+            .insert(values)
+            .select('id')
+            .single();
+          if (error) throw error;
+
+          if (inserted?.id) {
+            try {
+              await supabase.from('changelogs').insert([
+                {
+                  module_id: module.id,
+                  record_id: inserted.id,
+                  action: 'create',
+                  user_id: userId,
+                  record_title: values?.name || values?.title || values?.system_code || null,
+                },
+              ]);
+            } catch (err) {
+              console.warn('Changelog insert failed:', err);
+            }
+          }
+        }
+
         message.success('ثبت شد');
         onCancel();
       }
@@ -314,12 +390,41 @@ const SmartForm: React.FC<SmartFormProps> = ({
                      let options = field.options; 
                      if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
                      if (field.type === FieldType.RELATION) options = relationOptions[field.key];
+                     if (field.key === 'assignee_id') {
+                       return (
+                         <div key={field.key}>
+                           <Form.Item label={field.labels?.fa || 'مسئول'} name={field.key}>
+                             <Select
+                               value={formData.assignee_id ? `${formData.assignee_type}_${formData.assignee_id}` : null}
+                               onChange={(val) => {
+                                 const [type, id] = String(val).split('_');
+                                 form.setFieldValue('assignee_id', id || null);
+                                 form.setFieldValue('assignee_type', type || 'user');
+                                 setFormData({ ...form.getFieldsValue(), assignee_id: id || null, assignee_type: type || 'user' });
+                               }}
+                               placeholder="انتخاب مسئول"
+                               options={assigneeOptions}
+                               optionRender={(option) => (
+                                 <Space>
+                                   <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
+                                   {option.data.label}
+                                 </Space>
+                               )}
+                               disabled={!canEditModule}
+                             />
+                           </Form.Item>
+                         </div>
+                       );
+                     }
                      return (
                         <div key={field.key} className={field.type === FieldType.IMAGE ? 'row-span-2' : ''}>
                           <SmartFieldRenderer 
                             field={field} 
                             value={formData[field.key]} 
-                            onChange={(val) => form.setFieldValue(field.key, val)}
+                            onChange={(val) => {
+                              form.setFieldValue(field.key, val);
+                              setFormData({ ...form.getFieldsValue(), [field.key]: val });
+                            }}
                             forceEditMode={true}
                             options={options}
                           />
@@ -356,6 +461,32 @@ const SmartForm: React.FC<SmartFormProps> = ({
                            let options = field.options;
                            if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
                            if (field.type === FieldType.RELATION) options = relationOptions[field.key];
+                           if (field.key === 'assignee_id') {
+                             return (
+                               <div key={field.key}>
+                                 <Form.Item label={field.labels?.fa || 'مسئول'} name={field.key}>
+                                   <Select
+                                     value={formData.assignee_id ? `${formData.assignee_type}_${formData.assignee_id}` : null}
+                                     onChange={(val) => {
+                                       const [type, id] = String(val).split('_');
+                                       form.setFieldValue('assignee_id', id || null);
+                                       form.setFieldValue('assignee_type', type || 'user');
+                                       setFormData({ ...form.getFieldsValue(), assignee_id: id || null, assignee_type: type || 'user' });
+                                     }}
+                                     placeholder="انتخاب مسئول"
+                                     options={assigneeOptions}
+                                     optionRender={(option) => (
+                                       <Space>
+                                         <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
+                                         {option.data.label}
+                                       </Space>
+                                     )}
+                                     disabled={!canEditModule}
+                                   />
+                                 </Form.Item>
+                               </div>
+                             );
+                           }
                            return (
                              <SmartFieldRenderer 
                                key={field.key}
@@ -370,6 +501,25 @@ const SmartForm: React.FC<SmartFormProps> = ({
                            );
                         })}
                       </div>
+                      {block.tableColumns && (
+                        <div className="mt-6">
+                          <Form.Item name={block.id} noStyle>
+                            <EditableTable
+                              block={block}
+                              initialData={formData[block.id] || []}
+                              mode="local"
+                              moduleId={module.id}
+                              relationOptions={relationOptions}
+                              dynamicOptions={dynamicOptions}
+                              onChange={(newData: any[]) => {
+                                const newFormData = { ...formData, [block.id]: newData };
+                                setFormData(newFormData);
+                                form.setFieldValue(block.id, newData);
+                              }}
+                            />
+                          </Form.Item>
+                        </div>
+                      )}
                     </div>
                   );
                 }
@@ -385,7 +535,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                     moduleId={module.id}
                                     relationOptions={relationOptions}
                                     dynamicOptions={dynamicOptions}
-                                    onChange={(newData) => {
+                                    onChange={(newData: any[]) => {
                                         const newFormData = { ...formData, [block.id]: newData };
                                         setFormData(newFormData);
                                         form.setFieldValue(block.id, newData);

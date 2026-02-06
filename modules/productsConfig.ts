@@ -1,4 +1,5 @@
-import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, LogicOperator, FieldNature, RowCalculationType, SummaryCalculationType } from '../types';
+import { keys } from '@refinedev/core';
+import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, LogicOperator, FieldNature, RowCalculationType } from '../types';
 
 // ====== 1. تعریف تمام فیلدها ======
 const fieldsArray: any[] = [
@@ -12,7 +13,7 @@ const fieldsArray: any[] = [
   //{ key: 'assignee_id', labels: { fa: 'مسئول', en: 'Assignee' }, type: FieldType.USER, location: FieldLocation.HEADER, order: 6, nature: FieldNature.STANDARD, isTableColumn: true },
   
   // --- اطلاعات پایه ---
-  { key: 'product_type', labels: { fa: 'نوع محصول', en: 'Product Type' }, type: FieldType.STATUS, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1, defaultValue: 'raw', options: [{ label: 'مواد اولیه', value: 'raw', color: 'red' }, { label: 'بسته نیمه آماده', value: 'semi', color: 'blue' }, { label: 'محصول نهایی', value: 'final', color: 'green' }], validation: { required: true }, nature: FieldNature.PREDEFINED, isTableColumn: true },
+  { key: 'product_type', labels: { fa: 'نوع محصول', en: 'Product Type' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 6, defaultValue: 'raw', options: [{ label: 'مواد اولیه', value: 'raw', color: 'red' }, { label: 'بسته نیمه آماده', value: 'semi', color: 'blue' }, { label: 'محصول نهایی', value: 'final', color: 'green' }], validation: { required: true }, nature: FieldNature.PREDEFINED, isTableColumn: true },
   
   { 
     key: 'category', 
@@ -30,6 +31,11 @@ const fieldsArray: any[] = [
     nature: FieldNature.PREDEFINED, 
     validation: { required: false },
     logic: { visibleIf: { field: 'product_type', operator: LogicOperator.EQUALS, value: 'raw' } } 
+  },
+  {
+    key: 'main_unit', labels: { fa: 'واحد اصلی', en: 'Main Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/5 , dynamicOptionsCategory: 'main_unit',
+    nature: FieldNature.PREDEFINED,
+    isKey: false
   },
 
   { 
@@ -59,7 +65,7 @@ const fieldsArray: any[] = [
   },
 
   // --- سایر فیلدها ---
-  { key: 'stock', labels: { fa: 'موجودی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5, nature: FieldNature.PREDEFINED },
+  { key: 'stock', labels: { fa: 'موجودی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5, nature: FieldNature.PREDEFINED, readonly: true, description: 'محاسبه خودکار از موجودی قفسه‌ها' },
   { key: 'waste_rate', labels: { fa: 'نرخ پرت', en: 'waste_rate' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7, nature: FieldNature.PREDEFINED },
   { key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 8, nature: FieldNature.PREDEFINED, isTableColumn: true },
   { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 9, nature: FieldNature.PREDEFINED, isTableColumn: true },
@@ -73,19 +79,23 @@ const fieldsArray: any[] = [
   },
   { key: 'leather_colors', labels: { fa: 'رنگ چرم', en: 'Leather Colors' }, type: FieldType.MULTI_SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 2.5, dynamicOptionsCategory: 'leather_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   { key: 'leather_finish_1', labels: { fa: 'صفحه چرم', en: 'Finish 1' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 4, dynamicOptionsCategory: 'leather_finish', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
+  { key: 'leather_effect', labels: { fa: 'افکت چرم', en: 'leather_effect' }, type: FieldType.MULTI_SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 5, dynamicOptionsCategory: 'leather_effect', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   { key: 'leather_sort', labels: { fa: 'سورت چرم', en: 'Sort' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 6, dynamicOptionsCategory: 'leather_sort', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
-  
+  { key: 'leather_unit', labels: { fa: 'واحد چرم', en: 'leather_unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpecs', order:7, dynamicOptionCategory: 'leather_unit', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   // فیلدهای اختصاصی آستر
   { key: 'lining_material', labels: { fa: 'جنس آستر', en: 'Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 1, dynamicOptionsCategory: 'lining_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
   { key: 'lining_color', labels: { fa: 'رنگ آستر', en: 'Color' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 2, dynamicOptionsCategory: 'general_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
-  
+  { key: 'lining_width', labels: { fa: 'عرض آستر', en: 'width' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 3, dynamicOptionsCategory: 'lining_width', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
+
   // فیلدهای اختصاصی خرجکار
   { key: 'acc_material', labels: { fa: 'جنس خرجکار', en: 'Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'kharjkarSpec', order: 1, dynamicOptionsCategory: 'acc_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'accessory' } } },
   
   // فیلدهای اختصاصی یراق
   { key: 'fitting_type', labels: { fa: 'جنس/نوع یراق', en: 'Type' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 1, dynamicOptionsCategory: 'fitting_type', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } } },
+  { key: 'fitting_colors', labels: { fa: 'رنگ یراق', en: 'Fitting Colors' }, type: FieldType.MULTI_SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 2.5, dynamicOptionsCategory: 'fitting_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } } },
+
   {
-    key: 'fitting_size', labels: { fa: 'سایز یراق', en: 'Size' }, type: FieldType.TEXT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 2, logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } },
+    key: 'fitting_size', labels: { fa: 'سایز یراق', en: 'Size' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 2, dynamicOptionsCategory: 'fitting_size', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } },
     nature: FieldNature.PREDEFINED,
     isKey: false
   },
@@ -104,7 +114,7 @@ export const createBomTableColumns = (
   relationConfig: any,
   specBlockId: string,
   usageTitle: string = 'مقدار مصرف',
-  unitDefault: string = 'فوت'
+  unitDefault: 'main_unit'
 ) => {
   const specFields = getFieldsForBlock(specBlockId);
   
@@ -124,15 +134,47 @@ export const createBomTableColumns = (
       readonly: false
     })),
     { key: 'usage', title: usageTitle, type: FieldType.NUMBER },
-    { key: 'unit', title: 'واحد', type: FieldType.TEXT, defaultValue: unitDefault },
+    { key: 'main_unit', title: 'واحد', type: FieldType.SELECT, defaultValue: unitDefault },
     { key: 'buy_price', title: 'قیمت خرید', type: FieldType.PRICE },
     { key: 'total_price', title: 'جمع', type: FieldType.PRICE, readonly: true }
+  ];
+};
+
+export const createShelfInventoryTableColumns = () => {
+  return [
+    {
+      key: 'shelf_id',
+      title: 'نام قفسه',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'shelves', targetField: 'shelf_number' }
+    },
+    {
+      key: 'warehouse_id',
+      title: 'نام انبار',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'warehouses', targetField: 'name' },
+      readonly: true
+    },
+    { key: 'stock', title: 'موجودی در قفسه', type: FieldType.NUMBER, showTotal: true }
+  ];
+};
+
+export const createShelfItemsTableColumns = () => {
+  return [
+    {
+      key: 'product_id',
+      title: 'محصول',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'products', targetField: 'name' }
+    },
+    { key: 'stock', title: 'موجودی در قفسه', type: FieldType.NUMBER, showTotal: true }
   ];
 };
 
 // ====== 3. تعریف بلوک‌های پایه ======
 const BLOCKS = {
   baseInfo: { id: 'baseInfo', titles: { fa: 'اطلاعات پایه', en: 'Basic Info' }, icon: 'InfoCircleOutlined', order: 1, type: BlockType.FIELD_GROUP },
+  inventoryInfo: { id: 'product_inventory', titles: { fa: 'موجودی', en: 'Inventory' }, icon: 'DropboxOutlined', order: 9, type: BlockType.FIELD_GROUP },
   
   leatherSpec: { 
     id: 'leatherSpec', titles: { fa: 'ویژگی های چرم', en: 'Leather Specs' }, icon: 'SkinOutlined', order: 5, type: BlockType.FIELD_GROUP,
@@ -154,37 +196,6 @@ const BLOCKS = {
     visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' }
   },
 
-  bundleItems: {
-    id: 'bundleItems',
-    titles: { fa: 'اقلام بسته نیمه‌آماده', en: 'Semi Bundle Items' },
-    icon: 'BgColorsOutlined',
-    order: 9,
-    type: BlockType.TABLE,
-    tableColumns: [
-      {
-        key: 'product_id',
-        title: 'محصول (مواد اولیه)',
-        type: FieldType.RELATION,
-        relationConfig: {
-          targetModule: 'products',
-          targetField: 'name',
-          filter: { product_type: 'raw' }
-        }
-      },
-      {
-        key: 'quantity',
-        title: 'مقدار',
-        type: FieldType.NUMBER
-      },
-      {
-        key: 'unit',
-        title: 'واحد',
-        type: FieldType.TEXT,
-        defaultValue: 'عدد'
-      }
-    ]
-  },
-
   // بلوک‌های جدول (BOM-like) - با ستون‌های دینامیک
   items_leather: { 
     id: 'items_leather', 
@@ -197,7 +208,7 @@ const BLOCKS = {
       { targetModule: 'products', targetField: 'name', filter: { category: 'leather' } },
       'leatherSpec',
       'مقدار مصرف',
-      'فوت'
+      'main_unit'
     )
   },
 
@@ -212,7 +223,7 @@ const BLOCKS = {
       { targetModule: 'products', targetField: 'name', filter: { category: 'lining' } },
       'liningSpec',
       'مقدار مصرف',
-      'متر'
+      'main_unit'
     )
   },
 
@@ -227,7 +238,7 @@ const BLOCKS = {
       { targetModule: 'products', targetField: 'name', filter: { category: 'fitting' } },
       'yaraghSpec',
       'تعداد',
-      ''
+      'main_unit'
     )
   },
 
@@ -242,9 +253,25 @@ const BLOCKS = {
       { targetModule: 'products', targetField: 'name', filter: { category: 'accessory' } },
       'kharjkarSpec',
       'تعداد',
-      ''
+      'main_unit'
     )
   },
+  product_inventory: {
+    id: 'product_inventory',
+    titles: { fa: 'موجودی', en: 'Inventory' },
+    icon: 'DropboxOutlined',
+    order: 14,
+    type: BlockType.FIELD_GROUP,
+    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
+    tableColumns: createShelfInventoryTableColumns()
+  },
+};
+
+export const BOM_TABLE_BLOCKS = {
+  items_leather: BLOCKS.items_leather,
+  items_lining: BLOCKS.items_lining,
+  items_fitting: BLOCKS.items_fitting,
+  items_accessory: BLOCKS.items_accessory,
 };
 
 // ====== 4. تعریف ماژول ======
@@ -274,12 +301,7 @@ export const productsConfig: ModuleDefinition = {
         ...BLOCKS.yaraghSpec, 
         visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } 
       },
-
-      {
-        ...BLOCKS.bundleItems,
-        visibleIf: { field: 'product_type', operator: LogicOperator.EQUALS, value: 'semi' }
-      },
-      
+          
       { 
         ...BLOCKS.items_leather,
         visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
@@ -295,7 +317,8 @@ export const productsConfig: ModuleDefinition = {
       { 
         ...BLOCKS.items_accessory,
         visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
-      }
+      },
+      BLOCKS.product_inventory
     ], 
     relatedTabs: []
 };
