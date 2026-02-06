@@ -18,6 +18,8 @@ import HeroSection from '../components/moduleShow/HeroSection';
 import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
 import TablesSection from '../components/moduleShow/TablesSection';
 import PrintSection from '../components/moduleShow/PrintSection';
+import { printStyles } from '../utils/printTemplates';
+import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -32,9 +34,6 @@ const ModuleShow: React.FC = () => {
   const [currentTags, setCurrentTags] = useState<any[]>([]); // استیت تگ‌ها
 
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
-  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  const [printMode, setPrintMode] = useState(false);
   const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
   const [tempValues, setTempValues] = useState<Record<string, any>>({});
   const [, setSavingField] = useState<string | null>(null);
@@ -153,16 +152,7 @@ const ModuleShow: React.FC = () => {
   const canEditModule = modulePermissions.edit !== false;
   const canDeleteModule = modulePermissions.delete !== false;
 
-  useEffect(() => {
-    if (!printMode) return;
-    const handleAfterPrint = () => setPrintMode(false);
-    window.addEventListener('afterprint', handleAfterPrint);
-    document.body.classList.add('print-mode');
-    return () => {
-      window.removeEventListener('afterprint', handleAfterPrint);
-      document.body.classList.remove('print-mode');
-    };
-  }, [printMode]);
+
 
   const fetchLinkedBom = useCallback(async (bomId: string) => {
       const { data: bom } = await supabase.from('production_boms').select('*').eq('id', bomId).single();
@@ -459,31 +449,6 @@ const ModuleShow: React.FC = () => {
       return value;
   };
 
-  const printTemplates = useMemo(() => {
-    const templates = [];
-    if (moduleId === 'products') {
-      templates.push({ id: 'product_specs', title: 'قالب مشخصات کالا', description: 'برچسب A6 برای محصول' });
-    }
-    if (moduleId === 'invoices') {
-      templates.push({ id: 'invoice_proforma', title: 'قالب پیش فاکتور', description: 'نسخه پیش فاکتور' });
-      templates.push({ id: 'invoice_final', title: 'قالب فاکتور', description: 'نسخه نهایی فاکتور' });
-    }
-    if (moduleId === 'production_boms' || moduleId === 'production_orders') {
-      templates.push({ id: 'production_passport', title: 'قالب شناسنامه تولید', description: 'برگه شناسنامه تولید' });
-    }
-    if (templates.length === 0) {
-      templates.push({ id: 'default_specs', title: 'قالب مشخصات', description: 'چاپ اطلاعات اصلی' });
-    }
-    return templates;
-  }, [moduleId]);
-
-  useEffect(() => {
-    if (printTemplates.length === 0) return;
-    if (!selectedTemplateId || !printTemplates.some(t => t.id === selectedTemplateId)) {
-      setSelectedTemplateId(printTemplates[0].id);
-    }
-  }, [printTemplates, selectedTemplateId]);
-
   const formatPersian = (val: any, kind: 'DATE' | 'TIME' | 'DATETIME') => {
     if (!val) return '';
     try {
@@ -519,7 +484,7 @@ const ModuleShow: React.FC = () => {
       return '';
     }
   };
-
+  
   const formatPrintValue = (field: any, value: any) => {
     if (value === null || value === undefined) return '';
     if (Array.isArray(value)) return value.join('، ');
@@ -558,45 +523,14 @@ const ModuleShow: React.FC = () => {
       .filter(f => hasValue(f.value));
   }, [moduleConfig, data, dynamicOptions, relationOptions]);
 
-  const activeTemplate = printTemplates.find(t => t.id === selectedTemplateId) || printTemplates[0];
-  const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
-  const printQrValue = pageUrl;
-
-  const handlePrint = () => {
-    if (!activeTemplate) return;
-    setIsPrintModalOpen(false);
-    setPrintMode(true);
-    setTimeout(() => window.print(), 150);
-  };
-
-  const renderPrintCard = () => {
-    if (!activeTemplate) return null;
-    return (
-      <div className="print-card">
-        <div className="print-header">
-          <div className="print-head-text">
-            <div className="print-title">{activeTemplate.title}</div>
-            <div className="print-subtitle">{moduleConfig.titles.fa}</div>
-          </div>
-          <div className="print-qr">
-            <QRCode value={printQrValue} bordered={false} size={92} />
-          </div>
-        </div>
-        <div className="print-table-wrap">
-          <table className="print-table">
-            <tbody>
-              {printableFields.map(field => (
-                <tr key={field.key}>
-                  <td className="print-label">{field.labels.fa}</td>
-                  <td className="print-value">{formatPrintValue(field, field.value)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
+  // ✅ استفاده از custom hook برای مدیریت print
+  const printManager = usePrintManager({
+    moduleId,
+    data,
+    moduleConfig,
+    printableFields,
+    formatPrintValue,
+  });
 
   const getUserName = (uid: string) => {
       const user = allUsers.find(u => u.id === uid);
@@ -713,17 +647,25 @@ const ModuleShow: React.FC = () => {
       }
   }
   return (
-    <div className="p-4 md:p-6 max-w-[1600px] mx-auto pb-20 ml-16 transition-all">
-      <RelatedSidebar moduleConfig={moduleConfig} recordId={id!} />
+    <div className="p-4 md:p-6 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16">
+      <div className="mb-4 md:mb-0">
+        <RelatedSidebar
+          moduleConfig={moduleConfig}
+          recordId={id!}
+          recordName={data?.name || data?.system_code || id}
+          mentionUsers={allUsers}
+          mentionRoles={allRoles}
+        />
+      </div>
 
       <HeaderActions
         moduleTitle={moduleConfig.titles.fa}
         recordName={data.name}
-        shareUrl={pageUrl}
+        shareUrl={printManager.printQrValue}
         onBack={() => navigate(`/${moduleId}`)}
         onHome={() => navigate('/')}
         onModule={() => navigate(`/${moduleId}`)}
-        onPrint={() => setIsPrintModalOpen(true)}
+        onPrint={() => printManager.setIsPrintModalOpen(true)}
         onEdit={() => setIsEditDrawerOpen(true)}
         onDelete={handleDelete}
         canEdit={canEditModule}
@@ -780,14 +722,17 @@ const ModuleShow: React.FC = () => {
       )}
 
       <PrintSection
-        isPrintModalOpen={isPrintModalOpen}
-        onClose={() => setIsPrintModalOpen(false)}
-        onPrint={handlePrint}
-        printTemplates={printTemplates}
-        selectedTemplateId={selectedTemplateId}
-        onSelectTemplate={setSelectedTemplateId}
-        renderPrintCard={renderPrintCard}
-        printMode={printMode}
+        isPrintModalOpen={printManager.isPrintModalOpen}
+        onClose={() => printManager.setIsPrintModalOpen(false)}
+        onPrint={printManager.handlePrint}
+        printTemplates={printManager.printTemplates}
+        selectedTemplateId={printManager.selectedTemplateId}
+        onSelectTemplate={printManager.setSelectedTemplateId}
+        renderPrintCard={printManager.renderPrintCard}
+        printMode={printManager.printMode}
+        printableFields={printableFields}
+        selectedPrintFields={printManager.selectedPrintFields}
+        onTogglePrintField={printManager.handleTogglePrintField}
       />
 
       <style>{`
@@ -799,34 +744,8 @@ const ModuleShow: React.FC = () => {
         .dark .ant-tabs-tab-active .ant-tabs-tab-btn { color: white !important; }
         .dark .ant-table-cell { background: #1a1a1a !important; color: #ddd !important; border-bottom: 1px solid #303030 !important; }
         .dark .ant-table-tbody > tr:hover > td { background: #222 !important; }
-        .print-modal { display: grid; grid-template-columns: 200px 1fr; gap: 16px; }
-        .print-template-list { display: flex; flex-direction: column; gap: 8px; }
-        .print-template-item { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; text-align: right; background: #fff; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
-        .print-template-item:hover { border-color: #c58f60; box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
-        .print-template-item.active { border-color: #c58f60; box-shadow: 0 6px 16px rgba(197,143,96,0.25); }
-        .print-template-title { font-weight: 700; color: #111827; font-size: 13px; }
-        .print-template-desc { color: #6b7280; font-size: 11px; margin-top: 4px; }
-        .print-preview { background: #f9fafb; border: 1px dashed #e5e7eb; border-radius: 12px; padding: 12px; overflow: auto; }
-        .print-preview-inner { display: flex; justify-content: center; align-items: flex-start; transform: scale(0.9); transform-origin: top center; }
-        .print-card { width: 105mm; height: 148mm; background: #fff; color: #111827; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8mm; box-sizing: border-box; display: flex; flex-direction: column; }
-        .print-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-        .print-title { font-size: 14px; font-weight: 800; }
-        .print-subtitle { font-size: 11px; color: #6b7280; margin-top: 2px; }
-        .print-table-wrap { margin-top: 8px; overflow: hidden; flex: 1; }
-        .print-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        .print-table td { border: 1px solid #e5e7eb; padding: 4px 6px; vertical-align: top; }
-        .print-label { width: 36%; background: #f8fafc; font-weight: 700; color: #374151; }
-        .print-value { color: #111827; word-break: break-word; }
-        #print-root { display: none; }
-        @media print {
-          @page { size: A6; margin: 6mm; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          body * { visibility: hidden; }
-          #print-root, #print-root * { visibility: visible; }
-          #print-root { display: block; position: fixed; left: 0; top: 0; width: 105mm; height: 148mm; }
-          .print-card { border: none; box-shadow: none; border-radius: 0; }
-        }
       `}</style>
+      <style>{printStyles}</style>
     </div>
   );
 };

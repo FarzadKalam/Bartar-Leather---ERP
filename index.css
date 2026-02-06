@@ -162,51 +162,623 @@
 /* =========================================
    5. استایل‌های چاپ (Print Styles)
    ========================================= */
+
+/* کنتینر پرینت */
+#print-root {
+  display: none !important;
+  position: static !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+}
+
+#print-root[aria-hidden="false"] {
+  display: block !important;
+}
+
+/* کارت چاپ */
+.print-card {
+  width: 105mm;
+  height: 148mm;
+  background: white;
+  color: #111827;
+  padding: 8mm;
+  margin: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  page-break-after: avoid;
+  page-break-inside: avoid;
+  font-family: 'Vazirmatn', sans-serif;
+}
+
 @media print {
-  @page { size: A5; margin: 0; }
-  body * { visibility: hidden; }
-  #print-root, #print-root * { visibility: visible; }
-  #print-root {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    padding: 0;
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background: white !important;
+    overflow: visible !important;
+  }
+
+  /* ✅ تنظیم صفحه */
+  @page {
     margin: 0;
-    display: flex !important;
-    justify-content: center;
-    align-items: flex-start;
-    background: white;
+    padding: 0;
+    size: A6;
+  }
+
+  @page :has(.print-card[style*="width: 148mm"]) {
+    size: A5;
+  }
+
+  /* ✅ مخفی کردن تمام عناصر به جز print-root */
+  body > *:not(#print-root) {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* ✅ نمایش print-root */
+  #print-root {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    top: 0 !important;
+    left: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    z-index: auto !important;
+    overflow: visible !important;
+  }
+
+  /* ✅ نمایش تمام فرزندان print-root */
+  #print-root,
+  #print-root * {
+    visibility: visible !important;
+    display: block !important;
+    background: white !important;
+    color: #111827 !important;
+  }
+
+  /* ✅ کارت چاپ برای پرینت */
+  #print-root .print-card {
+    width: 105mm !important;
+    height: 148mm !important;
+    margin: 0 !important;
+    padding: 8mm !important;
+    page-break-after: avoid !important;
+    page-break-inside: avoid !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: white !important;
+  }
+
+  /* ✅ فاکتور A5 برای پرینت */
+  #print-root .print-card[style*="width: 148mm"] {
+    width: 148mm !important;
+    height: 210mm !important;
+  }
+
+  /* ✅ جداول برای پرینت */
+  #print-root table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  #print-root table td,
+  #print-root table th {
+    border: 1px solid #ddd;
+    padding: 4px;
+    background: white !important;
+    color: #111827 !important;
+  }
+
+  /* ✅ مخفی کردن Modal و Drawer */
+  .ant-modal,
+  .ant-modal-wrap,
+  .ant-drawer,
+  .ant-popover,
+  .ant-tooltip,
+  .print-modal {
+    display: none !important;
   }
 }
 
-/* استایل کارد چاپ (برای نمایش در صفحه) */
-.print-card {
-  width: 148mm; /* A5 Width landscape or A5 height portrait */
-  min-height: 210mm;
-  background: white;
-  padding: 10mm;
-  margin: 0 auto;
-  border: 1px solid #e5e7eb;
-  color: black;
-  font-family: 'Vazirmatn', sans-serif;
+/* استایل معمولی کارت */
+.print-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.print-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #111827;
+}
+
+.print-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
 }
 
 .print-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 11px;
+  margin-top: 8px;
 }
 
-.print-table th, .print-table td {
-  border: 1px solid #000;
-  padding: 6px;
-  text-align: right;
+.print-table td {
+  border: 1px solid #e5e7eb;
+  padding: 4px 6px;
+  word-break: break-word;
 }
 
 .print-label {
-  background-color: #f3f4f6;
+  width: 36%;
+  background: #f8fafc;
+  font-weight: 700;
+  color: #374151;
+}
+
+.print-value {
+  color: #111827;
+}
+
+/* =========================================
+   استایل‌های فاکتور پرینت
+   ========================================= */
+
+.invoice-print-card {
+  width: 210mm;
+  height: 297mm;
+  background: white;
+  padding: 16px;
+  font-family: 'Vazirmatn', sans-serif;
+  page-break-after: avoid;
+}
+
+.invoice-header {
+  text-align: right;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #c58f60;
+  margin-bottom: 16px;
+}
+
+.invoice-title {
+  font-size: 20px;
   font-weight: bold;
-  width: 25%;
+  color: #c58f60;
+  margin-bottom: 4px;
+}
+
+.invoice-code {
+  font-size: 12px;
+  color: #666;
+}
+
+.invoice-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  margin: 16px 0;
+  border: 1px solid #ddd;
+}
+
+.invoice-items-table th {
+  background: #f5f5f5;
+  border-bottom: 2px solid #c58f60;
+  padding: 8px;
+  text-align: right;
+  font-weight: bold;
+}
+
+.invoice-items-table td {
+  padding: 6px;
+  border-bottom: 1px solid #eee;
+}
+
+.invoice-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 16px 0;
+  padding: 12px;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.invoice-total-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  background: #c58f60;
+  border-radius: 6px;
+  color: white;
+}
+
+.invoice-total-box .amount {
+  font-size: 16px;
+  font-weight: bold;
+  font-family: monospace;
+}
+
+.invoice-footer {
+  margin-top: 24px;
+  padding-top: 12px;
+  border-top: 1px solid #ddd;
+  text-align: center;
+  font-size: 9px;
+  color: #999;
+}
+
+@media print {
+  .invoice-print-card {
+    width: 210mm !important;
+    height: 297mm !important;
+    page-break-after: avoid !important;
+    margin: 0 !important;
+    padding: 16px !important;
+  }
+}
+
+/* =========================================
+   Responsive Print Modal & Invoices
+   ========================================= */
+
+@media (max-width: 1024px) {
+  .print-modal-responsive .ant-modal-wrap {
+    padding: 8px;
+  }
+  
+  .print-modal-responsive .ant-modal {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Print Modal موبایل */
+  .print-modal-responsive {
+    width: 98vw !important;
+    height: 95vh !important;
+  }
+  
+  .print-modal-responsive .ant-modal-content {
+    height: calc(95vh - 140px);
+    padding: 0;
+  }
+  
+  /* Invoice Print موبایل */
+  .invoice-print-card {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 148mm;
+    margin: 0 auto;
+  }
+  
+  .print-card {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 105mm;
+    margin: 0 auto;
+  }
+  
+  /* فرم فاکتور */
+  .smart-form {
+    padding: 8px !important;
+  }
+  
+  .smart-form .ant-form-item {
+    margin-bottom: 12px !important;
+  }
+  
+  .smart-form .ant-form-item-label {
+    padding: 4px 0 4px 0 !important;
+  }
+  
+  .smart-form .ant-form-item-label label {
+    font-size: 12px !important;
+    height: auto !important;
+  }
+  
+  /* جداول داخل فاکتور */
+  .invoice-editable-table {
+    font-size: 11px !important;
+  }
+  
+  .invoice-editable-table .ant-table {
+    font-size: 11px !important;
+  }
+  
+  .invoice-editable-table .ant-table-cell {
+    padding: 4px 6px !important;
+  }
+  
+  .invoice-editable-table .ant-table-thead > tr > th {
+    padding: 6px 4px !important;
+    font-size: 10px !important;
+    font-weight: 700;
+  }
+  
+  /* Summary Card موبایل */
+  .summary-card {
+    padding: 8px !important;
+  }
+  
+  .summary-card .ant-statistic-title {
+    font-size: 10px !important;
+  }
+  
+  .summary-card .ant-statistic-content {
+    font-size: 14px !important;
+  }
+
+  
+  /* Grid Layout برای فیلدها */
+  .field-groups-tabs .ant-row {
+    gutter: [8, 8] !important;
+  }
+  
+  .field-groups-tabs .ant-col {
+    margin-bottom: 8px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* موبایل کوچک */
+  .print-modal-responsive .ant-modal {
+    margin: 0 !important;
+    border-radius: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+  }
+  
+  .print-modal-responsive .ant-modal-header {
+    padding: 8px;
+  }
+  
+  .print-modal-responsive .ant-modal-body {
+    padding: 0;
+  }
+  
+  .print-modal-responsive .ant-tabs {
+    font-size: 12px;
+  }
+  
+  .print-modal-responsive .ant-tabs-tab {
+    padding: 4px 8px;
+  }
+  
+  .smart-form {
+    padding: 6px !important;
+  }
+  
+  .smart-form .ant-form-item {
+    margin-bottom: 8px !important;
+  }
+  
+  .invoice-editable-table .ant-table {
+    font-size: 10px !important;
+  }
+  
+  .invoice-editable-table .ant-table-cell {
+    padding: 3px 4px !important;
+  }
+  
+  .invoice-editable-table .ant-table-thead > tr > th {
+    padding: 4px 2px !important;
+    font-size: 9px !important;
+  }
+  
+  /* Button موبایل */
+  .hero-section .ant-button {
+    padding: 4px 12px !important;
+    font-size: 12px !important;
+  }
+}
+
+/* =========================================
+   Responsive Module Show Page
+   ========================================= */
+
+@media (max-width: 1024px) {
+  .ant-layout-sider {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    z-index: 999;
+    height: 100vh !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* هیدر اکشن */
+  .ant-breadcrumb {
+    font-size: 12px !important;
+  }
+  
+  .ant-breadcrumb-link {
+    font-size: 12px !important;
+  }
+  
+  /* HeroSection موبایل */
+  .hero-section-container {
+    padding: 12px !important;
+  }
+  
+  .hero-section-image {
+    width: 100% !important;
+    height: 180px !important;
+    margin-bottom: 16px !important;
+  }
+  
+  .hero-section-title {
+    font-size: 18px !important;
+    line-height: 1.3;
+  }
+  
+  .hero-section-status {
+    font-size: 10px !important;
+  }
+  
+  .hero-section-tags {
+    gap: 6px !important;
+    margin: 8px 0 !important;
+  }
+  
+  /* FieldGroupsTabs موبایل */
+  .field-groups-tabs {
+    padding: 12px !important;
+  }
+  
+  .field-groups-tabs .ant-tabs {
+    margin: 0 !important;
+  }
+  
+  .field-groups-tabs .ant-tabs-tab {
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+  }
+  
+  .field-groups-tabs .ant-tabs-content {
+    padding: 12px 0 !important;
+  }
+  
+  /* TablesSection موبایل */
+  .tables-section {
+    padding: 12px !important;
+  }
+  
+  .tables-section .ant-card {
+    padding: 12px !important;
+    margin-bottom: 12px !important;
+  }
+  
+  .custom-erp-table {
+    font-size: 11px !important;
+  }
+  
+  .custom-erp-table .ant-table {
+    font-size: 11px !important;
+  }
+  
+  .custom-erp-table .ant-table-cell {
+    padding: 4px 6px !important;
+  }
+  
+  .custom-erp-table .ant-table-thead > tr > th {
+    padding: 6px 4px !important;
+    font-size: 10px !important;
+    font-weight: 700;
+  }
+  
+  /* Drawer موبایل */
+  .ant-drawer-body {
+    padding: 12px !important;
+  }
+  
+  /* Button موبایل */
+  .ant-button {
+    padding: 4px 12px !important;
+    font-size: 12px !important;
+    height: auto !important;
+    min-height: 28px !important;
+  }
+  
+  .ant-button-icon {
+    font-size: 14px !important;
+  }
+  
+  /* مسافات کلی */
+  main > div {
+    padding: 8px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* موبایل بسیار کوچک */
+  .ant-layout-sider {
+    display: none !important;
+  }
+  
+  main > div {
+    padding: 4px !important;
+    margin-left: 0 !important;
+  }
+  
+  .hero-section-image {
+    width: 100% !important;
+    height: 150px !important;
+  }
+  
+  .hero-section-title {
+    font-size: 16px !important;
+  }
+  
+  .ant-breadcrumb {
+    font-size: 10px !important;
+  }
+  
+  .ant-button {
+    padding: 2px 8px !important;
+    font-size: 11px !important;
+    min-height: 24px !important;
+  }
+  
+  .ant-button-icon {
+    font-size: 12px !important;
+  }
+  
+  .field-groups-tabs .ant-tabs-tab {
+    padding: 6px 8px !important;
+    font-size: 11px !important;
+  }
+  
+  .custom-erp-table .ant-table-cell {
+    padding: 2px 4px !important;
+  }
+  
+  .custom-erp-table .ant-table-thead > tr > th {
+    padding: 4px 2px !important;
+    font-size: 9px !important;
+  }
+  
+  /* QR کوڈ موبایل */
+  .ant-popover-inner {
+    padding: 8px !important;
+  }
+  
+  /* Breadcrumb بهتر برای موبایل کوچک */
+  .ant-breadcrumb-item {
+    display: none;
+  }
+  
+  .ant-breadcrumb-item:last-child {
+    display: inline-block;
+  }
 }
