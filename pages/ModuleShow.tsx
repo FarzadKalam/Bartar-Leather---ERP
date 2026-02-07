@@ -528,12 +528,12 @@ const ModuleShow: React.FC = () => {
            inputNode = <InputNumber formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={value => value!.replace(/\$\s?|(,*)/g, '')} value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
       } else if (field.type === FieldType.NUMBER || field.type === FieldType.STOCK || field.type === FieldType.PERCENTAGE) {
            inputNode = <InputNumber value={tempValue} onChange={v => setTempValues(prev => ({ ...prev, [field.key]: v }))} className="w-full" />;
-      } else if (field.type === FieldType.DATE) {
-           inputNode = (
+       } else if (field.type === FieldType.DATE) {
+            inputNode = (
               <JalaliDatePicker
                 className="w-full"
-                value={parseDateValue(tempValue)}
-                onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: toGregorianDateString(date, 'YYYY-MM-DD') }))}
+               value={parseDateValue(tempValue)}
+                onChange={(date: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: date ? date.format('YYYY-MM-DD') : null }))}
                 placeholder="انتخاب تاریخ"
                 format={(value: Dayjs | null) => {
                   const formatted = safeJalaliFormat(value, 'YYYY/MM/DD');
@@ -546,11 +546,11 @@ const ModuleShow: React.FC = () => {
                popupStyle={{ zIndex: 1600 }}
              />
            );
-      } else if (field.type === FieldType.TIME) {
-           inputNode = (
-             <JalaliTimePicker
-               className="w-full"
-              value={tempValue ? dayjs(tempValue, ['HH:mm', 'HH:mm:ss']) : null}
+       } else if (field.type === FieldType.TIME) {
+            inputNode = (
+              <JalaliTimePicker
+                className="w-full"
+               value={tempValue ? dayjs(tempValue, ['HH:mm', 'HH:mm:ss']) : null}
                onChange={(time: Dayjs | Dayjs[] | null) => {
                  const picked = Array.isArray(time) ? time[0] : time;
                  setTempValues(prev => ({ ...prev, [field.key]: picked ? picked.format('HH:mm') : null }));
@@ -563,13 +563,13 @@ const ModuleShow: React.FC = () => {
                popupStyle={{ zIndex: 1600 }}
              />
            );
-      } else if (field.type === FieldType.DATETIME) {
-           inputNode = (
+       } else if (field.type === FieldType.DATETIME) {
+            inputNode = (
               <JalaliDatePicker
                 className="w-full"
                 showTime={{ format: 'HH:mm', showSecond: false }}
                 value={parseDateValue(tempValue)}
-                onChange={(datetime: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: toGregorianDateString(datetime, 'YYYY-MM-DD HH:mm') }))}
+                onChange={(datetime: Dayjs | null) => setTempValues(prev => ({ ...prev, [field.key]: datetime ? datetime.format('YYYY-MM-DD HH:mm') : null }))}
                 placeholder="انتخاب تاریخ و زمان"
                 format={(value: Dayjs | null) => {
                   const formatted = safeJalaliFormat(value, 'YYYY/MM/DD HH:mm');

@@ -32,21 +32,10 @@ export const formatPersianPrice = (num: any, withComma = true): string => {
 export const safeJalaliFormat = (value: any, format: string = 'YYYY/MM/DD'): string => {
   if (!value) return '';
   try {
-    const date = dayjs(value).toDate();
-    if (isNaN(date.getTime())) return '';
-    
-    const options: Intl.DateTimeFormatOptions = {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    };
-    if (format.includes('HH') || format.includes('mm')) {
-        options.hour = '2-digit';
-        options.minute = '2-digit';
-        options.hour12 = false;
-    }
-    const formatter = new Intl.DateTimeFormat('fa-IR', options);
-    return formatter.format(date);
+    const base = dayjs.isDayjs(value) ? value : dayjs(value);
+    if (!base.isValid()) return '';
+    const withJalali = (base as any)?.calendar ? (base as any).calendar('jalali') : base;
+    return withJalali.format(format);
   } catch (e) { return ''; }
 };
 
@@ -67,7 +56,7 @@ export const toEnglishTimeForDB = (val: any): string | null => {
   if (!val) return null;
   try {
     if (dayjs.isDayjs(val)) {
-        return val.format('HH:mm:ss');
+      return val.format('HH:mm:ss');
     }
     const str = String(val);
     const englishStr = str.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString());
@@ -79,14 +68,23 @@ export const toEnglishTimeForDB = (val: any): string | null => {
 export const toGregorianDateString = (dateVal: any, format: string = 'YYYY-MM-DD'): string | null => {
   if (!dateVal) return null;
   try {
-    const d = dayjs(dateVal);
+    const d = dayjs.isDayjs(dateVal) ? dateVal : dayjs(dateVal);
     if (!d.isValid()) return null;
-    return d.format('YYYY-MM-DD');
+    return d.format(format);
   } catch (e) { return null; }
 };
 
 export const parseDateValue = (val: any) => {
   if (!val) return null;
+  if (dayjs.isDayjs(val)) return val;
+  if (typeof val === 'string') {
+    const timeMatch = val.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (timeMatch) {
+      const normalized = timeMatch[3] ? val : `${val}:00`;
+      const t = dayjs(`1970-01-01T${normalized}`);
+      return t.isValid() ? t : null;
+    }
+  }
   const d = dayjs(val);
   return d.isValid() ? d : null;
 };

@@ -50,7 +50,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
   // --- 1. تابع کمکی حیاتی برای تبدیل ورودی‌ها به Dayjs (حل مشکل تاریخ) ---
   const ensureDayjs = (val: any): Dayjs | null => {
-      return parseDateValue(val);
+      if (!val) return null;
+      if (dayjs.isDayjs(val)) return val;
+      const d = dayjs(val);
+      return d.isValid() ? d : null;
   };
 
   // --- Logic for 'dependsOn' ---
@@ -359,8 +362,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             value={ensureDayjs(value)}
             // رفع خطای TS و تبدیل به فرمت رشته‌ای برای ذخیره
             onChange={(date: Dayjs | null) => {
-                const finalStr = toGregorianDateString(date, 'YYYY-MM-DD');
-                onChange(finalStr);
+                if (!date) { onChange(null); return; }
+                onChange(date.format('YYYY-MM-DD'));
             }}
             placeholder={compactMode ? undefined : "انتخاب تاریخ"}
             allowClear
@@ -377,7 +380,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
           <JalaliTimePicker 
             className="w-full"
-            value={value ? dayjs(value, 'HH:mm') : null}
+            value={value ? dayjs(value, ['HH:mm', 'HH:mm:ss']) : null}
             onChange={(time: any) => {
                const formatted = time ? time.format('HH:mm') : null;
                onChange(formatted);
@@ -401,8 +404,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             showTime={{ format: 'HH:mm', showSecond: false }}
             value={ensureDayjs(value)}
             onChange={(datetime: Dayjs | null) => {
-                const finalStr = toGregorianDateString(datetime, 'YYYY-MM-DD HH:mm');
-                onChange(finalStr);
+                if (!datetime) { onChange(null); return; }
+                onChange(datetime.format('YYYY-MM-DD HH:mm'));
             }}
             placeholder={compactMode ? undefined : "انتخاب تاریخ و زمان"}
             locale={jalaliDatePickerLocale}
@@ -507,7 +510,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       formItemProps.getValueProps = (val: any) => ({ value: ensureDayjs(val) });
   }
   if (fieldType === FieldType.TIME) {
-      formItemProps.getValueProps = (val: any) => ({ value: val ? dayjs(val, 'HH:mm') : null });
+      formItemProps.getValueProps = (val: any) => ({ value: val ? dayjs(val, ['HH:mm', 'HH:mm:ss']) : null });
   }
 
   const allowQuickCreate = (field.relationConfig as any)?.allowQuickCreate;
