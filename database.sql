@@ -452,3 +452,36 @@ CREATE POLICY "Public Access Tags" ON public.tags FOR ALL USING (true);
 
 ALTER TABLE public.record_tags ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Access Record Tags" ON public.record_tags FOR ALL USING (true);
+
+-- ۲۱. جدول تاریخچه تغییرات (Changelogs)
+CREATE TABLE public.changelogs (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  module_id text NOT NULL,
+  record_id uuid NOT NULL,
+  field_name text NOT NULL,
+  old_value text,
+  new_value text,
+  user_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  user_name text NOT NULL DEFAULT 'Unknown User',
+  created_at timestamptz DEFAULT now()
+);
+
+-- ایجاد ایندکس‌ها برای بهبود کارایی
+CREATE INDEX idx_changelogs_module_record ON public.changelogs(module_id, record_id);
+CREATE INDEX idx_changelogs_created_at_desc ON public.changelogs(created_at DESC);
+CREATE INDEX idx_changelogs_user ON public.changelogs(user_id);
+
+-- فعال‌سازی RLS برای جدول changelogs
+ALTER TABLE public.changelogs ENABLE ROW LEVEL SECURITY;
+
+-- سیاست دسترسی: همه کاربران می‌توانند تاریخچه را ببینند
+CREATE POLICY "Anyone Can View Changelogs" ON public.changelogs FOR SELECT USING (true);
+
+-- سیاست درج: فقط کاربران تائید شده می‌توانند تغییرات را ثبت کنند
+CREATE POLICY "Authenticated Users Can Insert Changelogs" ON public.changelogs FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+-- سیاست بروزرسانی: تغییرات نمی‌تواند ویرایش شود (فقط قابل نمایش)
+CREATE POLICY "No Updates To Changelogs" ON public.changelogs FOR UPDATE USING (false);
+
+-- سیاست حذف: تغییرات نمی‌توانند حذف شود
+CREATE POLICY "No Deletes From Changelogs" ON public.changelogs FOR DELETE USING (false);

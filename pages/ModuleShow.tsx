@@ -340,19 +340,116 @@ const ModuleShow: React.FC = () => {
     return false;
   }, [id, moduleId, msg]);
 
+  const formatValueForLog = useCallback((fieldKey: string, rawValue: any) => {
+    const field = moduleConfig?.fields.find(f => f.key === fieldKey);
+    if (rawValue === null || rawValue === undefined || rawValue === '') return 'خالی';
+
+    if (field?.type === FieldType.MULTI_SELECT) {
+      let normalized = rawValue;
+      if (typeof rawValue === 'string') {
+        try { normalized = JSON.parse(rawValue); } catch { normalized = [rawValue]; }
+      }
+      if (Array.isArray(normalized)) {
+        return normalized.map((val: any) => getSingleOptionLabel(field, val, dynamicOptions, relationOptions)).join('، ');
+      }
+    }
+
+    if (field?.type === FieldType.STATUS || field?.type === FieldType.SELECT || field?.type === FieldType.RELATION) {
+      return getSingleOptionLabel(field, rawValue, dynamicOptions, relationOptions) || String(rawValue);
+    }
+
+    if (field?.type === FieldType.DATE || field?.type === FieldType.DATETIME) {
+      const formatted = safeJalaliFormat(parseDateValue(rawValue), field.type === FieldType.DATE ? 'YYYY/MM/DD' : 'YYYY/MM/DD HH:mm');
+      return formatted ? toPersianNumber(formatted) : String(rawValue);
+    }
+
+    if (field?.type === FieldType.TIME) return formatPersianTime(rawValue);
+    if (field?.type === FieldType.PRICE) return formatPersianPrice(rawValue);
+    if (Array.isArray(rawValue)) return rawValue.join('، ');
+    return typeof rawValue === 'object' ? JSON.stringify(rawValue) : String(rawValue);
+  }, [moduleConfig?.fields, dynamicOptions, relationOptions]);
+
+  const logFieldChange = useCallback(async (fieldKey: string, previousValue: any, nextValue: any) => {
+    try {
+      const field = moduleConfig?.fields.find(f => f.key === fieldKey);
+      const fieldLabel = (field as any)?.label || (field as any)?.title || fieldKey;
+      const oldVal = formatValueForLog(fieldKey, previousValue);
+      const newVal = formatValueForLog(fieldKey, nextValue);
+
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || null;
+      const userName = userId ? (allUsers.find(u => u.id === userId)?.full_name || 'کاربر سیستم') : 'کاربر سیستم';
+
+      const payload = {
+        task_type: `log|${moduleId}|${id}`,
+        name: `${fieldLabel} از "${oldVal}" به "${newVal}" تغییر کرد`,
+        status: 'completed',
+        recurrence_info: {
+          action: 'update',
+          module_id: moduleId,
+          record_id: id,
+          field_key: fieldKey,
+          field_label: fieldLabel,
+          old_value: oldVal,
+          new_value: newVal,
+          user_id: userId,
+          user_name: userName,
+        },
+      } as any;
+
+      await supabase.from('tasks').insert([payload]);
+    } catch (logErr) {
+      console.warn('Could not log change', logErr);
+    }
+  }, [allUsers, formatValueForLog, id, moduleConfig?.fields, moduleId]);
+
   const saveEdit = async (key: string) => {
     if (!canEditModule) return;
     setSavingField(key);
+    const previousValue = data ? data[key] : undefined;
     let newValue = tempValues[key];
     if (newValue === '' || newValue === undefined) newValue = null;
     try {
       const { error } = await supabase.from(moduleId).update({ [key]: newValue }).eq('id', id);
       if (error) throw error;
       setData((prev: any) => ({ ...prev, [key]: newValue }));
+      await logFieldChange(key, previousValue, newValue);
       msg.success('ذخیره شد');
       setTimeout(() => setEditingFields(prev => ({ ...prev, [key]: false })), 100);
     } catch (error: any) { msg.error(error.message); } finally { setSavingField(null); }
   };
+
+  const areValuesEqual = (a: any, b: any) => {
+    if (Array.isArray(a) || Array.isArray(b)) {
+      try {
+        return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+      } catch {
+        return a === b;
+      }
+    }
+    return a === b;
+  };
+
+  const handleSmartFormSave = useCallback(async (values: any) => {
+    try {
+      if (!id) return;
+      const previous = data || {};
+
+      const changedKeys = Object.keys(values).filter((k) => !areValuesEqual(values[k], previous[k]));
+
+      await supabase.from(moduleId).update(values).eq('id', id);
+
+      for (const key of changedKeys) {
+        await logFieldChange(key, previous[key], values[key]);
+      }
+
+      msg.success('ذخیره شد');
+      setIsEditDrawerOpen(false);
+      fetchRecord();
+    } catch (err: any) {
+      msg.error(err.message);
+    }
+  }, [data, fetchRecord, id, logFieldChange, moduleId, msg]);
 
   const startEdit = (key: string, value: any) => {
     if (!canEditModule) return;
@@ -758,6 +855,7 @@ const ModuleShow: React.FC = () => {
           module={moduleConfig}
           visible={isEditDrawerOpen}
           recordId={id}
+          onSave={handleSmartFormSave}
           onCancel={() => {
             setIsEditDrawerOpen(false);
             fetchRecord();

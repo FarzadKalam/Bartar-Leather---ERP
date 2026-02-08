@@ -12,6 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { toPersianNumber, formatPersianPrice, safeJalaliFormat } from '../utils/persianNumberFormatter';
+import { MODULES } from '../moduleRegistry';
 import dayjs from 'dayjs';
 import jalaliday from 'jalaliday';
 import type { MenuProps } from 'antd';
@@ -82,6 +83,14 @@ const Dashboard: React.FC = () => {
         .from('products')
         .select('*');
 
+      // Fetch recent changelogs from tasks table
+      const { data: changelogTasks } = await supabase
+        .from('tasks')
+        .select('id, task_type, name, created_at, recurrence_info')
+        .ilike('task_type', 'log|%')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
       // Calculate total sales
       const totalSales = invoices?.reduce((sum, inv) => sum + (inv.total_invoice_amount || 0), 0) || 0;
 
@@ -110,7 +119,42 @@ const Dashboard: React.FC = () => {
       const latestProductionOrders = (productionOrders || []).slice(0, 5);
 
       // Recent activity timeline (combining invoices and production orders)
+      const moduleTitles: Record<string, string> = Object.keys(MODULES).reduce((acc: any, key) => {
+        acc[key] = MODULES[key]?.titles?.fa || MODULES[key]?.titles?.en || key;
+        return acc;
+      }, {});
+
+      const fieldLabelMap: Record<string, string> = {
+        name: 'نام',
+        sell_price: 'قیمت فروش',
+        buy_price: 'قیمت خرید',
+        price: 'قیمت',
+      };
+
+      const getFieldLabel = (moduleId: string | undefined, fieldKey: string | undefined) => {
+        if (!moduleId || !fieldKey) return fieldKey || 'فیلد';
+        const def = MODULES[moduleId]?.fields?.find((f: any) => f.key === fieldKey);
+        return (def as any)?.label || (def as any)?.title || fieldLabelMap[fieldKey] || fieldKey;
+      };
+
+      const changelogActivity = (changelogTasks || []).map(task => {
+        const meta = (task as any).recurrence_info || {};
+        const fieldLabel = getFieldLabel(meta.module_id, meta.field_key);
+        const oldVal = meta.old_value ?? 'خالی';
+        const newVal = meta.new_value ?? 'خالی';
+        const moduleLabel = meta.module_id ? moduleTitles[meta.module_id] || meta.module_id : '';
+        const userName = meta.user_name || 'سیستم';
+        const description = `${userName} ${fieldLabel}${moduleLabel ? ` در ${moduleLabel}` : ''} را از "${oldVal}" به "${newVal}" تغییر داد`;
+        return {
+          time: task.created_at,
+          type: 'change',
+          description,
+          color: '#fa8c16',
+        };
+      });
+
       const recentActivity = [
+        ...changelogActivity,
         ...(invoices || []).slice(0, 3).filter(inv => inv.created_at).map(inv => ({
           time: inv.created_at,
           type: 'invoice',
@@ -123,7 +167,7 @@ const Dashboard: React.FC = () => {
           description: `سفارش تولید ${po.name} ایجاد شد`,
           color: '#a67c52',
         })),
-      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 6);
+      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
 
       // Monthly sales (last 6 months)
       const monthlySales = calculateMonthlySales(invoices || []);

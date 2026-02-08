@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { List, Input, Button, Checkbox, Timeline, message, Empty, Spin, Select, Tag } from 'antd';
 import { SendOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { supabase } from '../../supabaseClient';
 import dayjs from 'dayjs';
+import { MODULES } from '../../moduleRegistry';
 
 interface ActivityPanelProps {
   moduleId: string;
@@ -21,6 +22,20 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
   const [mentionMap, setMentionMap] = useState<Record<string, { label: string; type: 'user' | 'team' }>>({});
   const [mentionsLoading, setMentionsLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const fieldLabelMap: Record<string, string> = useMemo(() => ({
+    name: 'نام',
+    sell_price: 'قیمت فروش',
+    buy_price: 'قیمت خرید',
+    price: 'قیمت',
+  }), []);
+
+  const resolveFieldLabel = useCallback((fieldKey?: string, fallback?: string) => {
+    if (!fieldKey) return fallback || 'فیلد';
+    const moduleDef = MODULES[moduleId];
+    const fieldDef = moduleDef?.fields?.find((f: any) => f.key === fieldKey);
+    return (fieldDef as any)?.label || (fieldDef as any)?.title || fieldLabelMap[fieldKey] || fallback || 'فیلد';
+  }, [fieldLabelMap, moduleId]);
 
   useEffect(() => {
     fetchData();
@@ -261,25 +276,49 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                 )}
 
             {view === 'changelogs' && (
-              <Timeline items={items.map((log: any) => ({
-                color: 'gray',
-                children: (
-                  <div className="text-xs pb-4">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-bold text-gray-700">{log.action || 'تغییر'}</span>
-                      <span className="text-[10px] text-gray-400">{log.created_at ? dayjs(log.created_at).format('HH:mm - YY/MM/DD') : ''}</span>
-                    </div>
-                    {log.field_name && (
-                      <div className="bg-gray-50 p-2 rounded text-gray-600">
-                        تغییر <b>{log.field_name}</b>: <br/>
-                        <span className="text-red-400 line-through mr-1">{log.old_value || 'خالی'}</span> 
-                        <span className="text-gray-400 mx-1">➜</span>
-                        <span className="text-green-600 font-bold">{log.new_value}</span>
+              <Timeline
+                className="mt-2"
+                items={items.map((log: any) => {
+                  const meta = log.recurrence_info || {};
+                  const localizedField = resolveFieldLabel(meta.field_key, meta.field_label || meta.field_key);
+                  const actionLabel = meta.action === 'update' ? 'ویرایش' : meta.action === 'create' ? 'ایجاد' : 'تغییر';
+                  const oldVal = meta.old_value ?? 'خالی';
+                  const newVal = meta.new_value ?? 'خالی';
+                  const userName = meta.user_name || 'کاربر سیستم';
+                  const sentence = `${userName} ${localizedField} را از "${oldVal}" به "${newVal}" ${actionLabel} کرد`;
+
+                  return {
+                    color: 'gray',
+                    children: (
+                      <div className="text-xs pb-4 space-y-2 whitespace-pre-wrap break-words leading-relaxed w-full">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 w-full">
+                          <div className="flex items-start gap-2 min-w-0 w-full sm:w-auto">
+                            <Tag color="geekblue" className="text-[10px] px-2 shrink-0">{actionLabel}</Tag>
+                            <span className="font-bold text-gray-700 break-words leading-5">{sentence}</span>
+                          </div>
+                          <span className="text-[10px] text-gray-400 whitespace-nowrap sm:self-start">{log.created_at ? dayjs(log.created_at).format('HH:mm - YY/MM/DD') : ''}</span>
+                        </div>
+
+                        {(meta.old_value !== undefined || meta.new_value !== undefined) && (
+                          <div className="bg-gray-50 p-3 rounded text-gray-700 whitespace-pre-wrap break-words w-full">
+                            <div className="text-[11px] text-gray-500 mb-2 break-words">{localizedField}</div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs w-full">
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-500 shrink-0">قبلی:</span>
+                                <span className="text-red-500 line-through break-words">{oldVal}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-500 shrink-0">جدید:</span>
+                                <span className="text-green-600 font-bold break-words">{newVal}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )
-              }))} />
+                    )
+                  };
+                })}
+              />
             )}
       </div>
     </div>
