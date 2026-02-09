@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Form, Input, Button, message, Upload, Avatar } from 'antd';
+import { Form, Input, Button, message, Upload } from 'antd';
 // نکته مهم: Divider و BuildOutlined را کاملا حذف کردم تا هیچ اثری از هدر دوم نباشد
 import { SaveOutlined, UploadOutlined, CloudUploadOutlined, GlobalOutlined } from '@ant-design/icons';
 import { supabase } from '../../supabaseClient';

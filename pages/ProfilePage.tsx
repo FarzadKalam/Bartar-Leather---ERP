@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
-  Avatar, Button, Tag, Spin, Tabs, Statistic, Descriptions, message, Badge 
+    Avatar, Button, Tag, Spin, Tabs, Descriptions, message
 } from 'antd';
 import { 
   UserOutlined, ArrowRightOutlined, CheckCircleOutlined, 
@@ -14,7 +14,7 @@ import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { profilesModule } from '../modules/profilesConfig'; // کانفیگ جدید را ایمپورت کنید
-import { FieldType, FieldDef } from '../types';
+import { FieldType, ModuleField } from '../types';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 
 const ProfilePage: React.FC = () => {
@@ -72,7 +72,7 @@ const ProfilePage: React.FC = () => {
   };
 
   // --- تابع رندر کننده هوشمند فیلدها ---
-  const renderFieldValue = (field: FieldDef, value: any, allData: any) => {
+    const renderFieldValue = (field: ModuleField, value: any, allData: any) => {
     if (value === null || value === undefined || value === '') return <span className="text-gray-400">---</span>;
 
         const formatPersianDate = (val: any, format: string) => {
@@ -94,7 +94,7 @@ const ProfilePage: React.FC = () => {
         };
 
     switch (field.type) {
-        case FieldType.BOOLEAN:
+        case FieldType.CHECKBOX:
             return value ? 
                 <Tag color="green" icon={<CheckCircleOutlined />}>فعال</Tag> : 
                 <Tag color="red" icon={<CloseCircleOutlined />}>غیرفعال</Tag>;
@@ -102,15 +102,18 @@ const ProfilePage: React.FC = () => {
         case FieldType.DATE:
             return formatPersianDate(value, 'YYYY/MM/DD');
 
-        case FieldType.RELATION:
-            // خواندن نام از جدول جوین شده (مثلاً organizations.name)
-            const relData = allData[field.relation?.table || ''];
-            const displayVal = relData ? relData[field.relation?.displayKey || 'name'] : value;
+        case FieldType.RELATION: {
+            const relationKey = field.relationConfig?.targetModule || '';
+            const relData = relationKey ? allData[relationKey] : undefined;
+            const displayKey = field.relationConfig?.targetField || 'name';
+            const displayVal = relData ? relData[displayKey] : value;
             return <span className="font-medium text-leather-600 dark:text-leather-400">{displayVal}</span>;
+        }
 
-        case FieldType.SELECT:
-            const option = field.options?.find(opt => opt.value === value);
+        case FieldType.SELECT: {
+            const option = field.options?.find((opt: any) => opt.value === value);
             return option ? <Tag color={option.color}>{option.label}</Tag> : value;
+        }
 
         default: // TEXT, etc.
             return <span className="text-gray-700 dark:text-gray-300">{value}</span>;
@@ -121,9 +124,9 @@ const ProfilePage: React.FC = () => {
   if (!record) return null;
 
   // جدا کردن فیلدهای اصلی برای نمایش در کارت هدر
-  const mainFields = profilesModule.fields.filter(f => ['full_name', 'job_title', 'is_active'].includes(f.key));
+    const mainFields = profilesModule.fields.filter((f: any) => ['full_name', 'job_title', 'is_active'].includes(f.key));
   // بقیه فیلدها برای نمایش در تب جزئیات
-  const detailFields = profilesModule.fields.filter(f => !['full_name', 'job_title', 'is_active'].includes(f.key));
+    const detailFields = profilesModule.fields.filter((f: any) => !['full_name', 'job_title', 'is_active'].includes(f.key));
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 animate-fadeIn">
@@ -163,7 +166,7 @@ const ProfilePage: React.FC = () => {
                         {record.job_title}
                     </p>
                     <div className="mb-6">
-                        {renderFieldValue(profilesModule.fields.find(f => f.key === 'is_active')!, record.is_active, record)}
+                        {renderFieldValue(profilesModule.fields.find((f: any) => f.key === 'is_active')!, record.is_active, record)}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -188,7 +191,7 @@ const ProfilePage: React.FC = () => {
                                         return '-';
                                     }
                                 })()} suffix=" روز" />
-                <StatisticCard title="نقش سیستم" value={renderFieldValue(profilesModule.fields.find(f => f.key === 'role')!, record.role, record)} />
+                <StatisticCard title="نقش سیستم" value={renderFieldValue(profilesModule.fields.find((f: any) => f.key === 'role')!, record.role, record)} />
             </div>
 
             <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] p-6 shadow-sm border border-gray-200 dark:border-gray-800 min-h-[400px]">
@@ -205,8 +208,8 @@ const ProfilePage: React.FC = () => {
                                         className="custom-descriptions"
                                     >
                                         {/* حلقه روی تمام فیلدها برای ساخت سطرها */}
-                                        {detailFields.map(field => (
-                                            <Descriptions.Item key={field.key} label={field.label}>
+                                        {detailFields.map((field: any) => (
+                                            <Descriptions.Item key={field.key} label={field.labels?.fa || field.key}>
                                                 {renderFieldValue(field, record[field.key], record)}
                                             </Descriptions.Item>
                                         ))}

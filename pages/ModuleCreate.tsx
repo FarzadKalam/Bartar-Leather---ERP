@@ -1,20 +1,17 @@
-import React from "react";
 import { useForm } from "@refinedev/antd";
 import { useParams, useNavigate } from "react-router-dom";
 import { MODULES } from "../moduleRegistry";
 import SmartForm from "../components/SmartForm";
-import { Button, Result, Spin, theme } from "antd";
+import { Button, Result } from "antd";
 import { ArrowRightOutlined, SaveOutlined } from "@ant-design/icons";
 
 export const ModuleCreate = () => {
   const { moduleId } = useParams();
   const navigate = useNavigate();
-  const { token } = theme.useToken();
-  
   const moduleConfig = moduleId ? MODULES[moduleId] : null;
 
   // --- اصلاح مهم: تنظیمات useForm ---
-  const { formProps, saveButtonProps, form, queryResult } = useForm({
+    const { formProps, saveButtonProps, form } = useForm({
     action: "create",
     resource: moduleId,
     redirect: "list",

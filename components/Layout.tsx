@@ -67,12 +67,10 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Keep sidebar open on dashboard for non-mobile devices
+  // Collapse sidebar on route change
   useEffect(() => {
-    if (!isMobile && location.pathname === '/') {
-      setCollapsed(false);
-    }
-  }, [location.pathname, isMobile]);
+    setCollapsed(true);
+  }, [location.pathname]);
 
   const handleLogout = () => {
     Modal.confirm({

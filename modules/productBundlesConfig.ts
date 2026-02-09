@@ -116,8 +116,7 @@ export const productBundlesConfig: ModuleDefinition = {
           type: FieldType.RELATION,
           relationConfig: {
             targetModule: 'products',
-            targetField: 'name',
-            filter: { product_type: 'raw' } // فقط مواد اولیه
+            targetField: 'name'
           }
         },
         {
@@ -128,8 +127,7 @@ export const productBundlesConfig: ModuleDefinition = {
         {
           key: 'unit',
           title: 'واحد',
-          type: FieldType.TEXT,
-          defaultValue: 'عدد'
+          type: FieldType.TEXT
         }
       ]
     }
@@ -137,12 +135,12 @@ export const productBundlesConfig: ModuleDefinition = {
 
   relatedTabs: [
     {
-      name: 'products',
-      label: 'محصولات استفاده‌کننده',
+      id: 'products',
+      title: 'محصولات استفاده‌کننده',
       icon: 'ShoppingCart',
-      relationField: 'bundle_id', // در جدول products: bundle_id → product_bundles
-      displayFields: ['name', 'category', 'status'],
-      displayMode: 'LIST'
+      targetModule: 'products',
+      foreignKey: 'bundle_id',
+      relationType: 'fk'
     }
   ]
 };

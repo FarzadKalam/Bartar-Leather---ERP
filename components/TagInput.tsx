@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Tag, Input, Tooltip, theme, Dropdown, Menu, Button, Space, Divider, ColorPicker } from 'antd';
-import { PlusOutlined, TagOutlined, CheckOutlined } from '@ant-design/icons';
+import { Tag, Input, Dropdown, Button, ColorPicker } from 'antd';
+import { PlusOutlined, TagOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 
 interface TagItem {
@@ -17,7 +17,6 @@ interface TagInputProps {
 }
 
 const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [], onChange }) => {
-  const { token } = theme.useToken();
   const [tags, setTags] = useState<TagItem[]>(initialTags);
   const [allTags, setAllTags] = useState<TagItem[]>([]);
   const [inputVisible, setInputVisible] = useState(false);
@@ -144,7 +143,11 @@ const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [
                   <div className="p-2 border-t border-gray-100 dark:border-gray-700 mt-2">
                       <div className="text-xs text-gray-400 mb-2">ایجاد تگ جدید: "{inputValue}"</div>
                       <div className="flex items-center gap-2">
-                          <ColorPicker size="small" value={selectedColor} onChange={setSelectedColor} />
+                          <ColorPicker
+                            size="small"
+                            value={selectedColor}
+                            onChange={(_, css) => setSelectedColor(css)}
+                          />
                           <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateNewTag} block>ایجاد</Button>
                       </div>
                   </div>

@@ -82,7 +82,9 @@ const RelatedRecordPopover: React.FC<RelatedRecordPopoverProps> = ({ moduleId, r
             .select(targetField)
             .eq('id', data[f.key])
             .single();
-          if (rel && rel[targetField]) relLabels[f.key] = rel[targetField];
+          if (rel && (rel as Record<string, any>)[targetField]) {
+            relLabels[f.key] = String((rel as Record<string, any>)[targetField]);
+          }
         }
         setRelationLabels(relLabels);
       } catch (err) {

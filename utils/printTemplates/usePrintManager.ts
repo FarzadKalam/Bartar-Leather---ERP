@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { getAvailableTemplates, PrintTemplate } from './index';
+import { PrintTemplate } from './index';
 import { InvoiceCard } from './templates/invoice-card';
 import { ProductLabel } from './templates/product-label';
 import { ProductionPassport } from './templates/production-passport';

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { supabase } from '../supabaseClient'; // مسیر رو چک کن
-import { Button, Input, Card, message, Spin } from 'antd';
+import { Button, Input, Card, message } from 'antd';
 import { useNavigate } from 'react-router-dom'; // یا useRouter اگر next/navigation داری
 
 const Login = () => {
@@ -13,7 +13,7 @@ const Login = () => {
     setLoading(true);
     try {
       // 1. درخواست لاگین به سوپابیس
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email: email,
         password: password,
       });

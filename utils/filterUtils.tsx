@@ -1,8 +1,6 @@
-import React from 'react';
-import { Input, InputNumber, Select, Button, Space } from 'antd';
+import { Input, InputNumber, Button, Space } from 'antd';
 import { SearchOutlined, FilterOutlined } from '@ant-design/icons';
 import { FieldType, FilterOperator } from '../types';
-import dayjs from 'dayjs';
 
 
 // نگاشت نوع فیلد به عملگر پیش‌فرض
@@ -24,7 +22,7 @@ export const getColumnSearchProps = (
 ) => {
   
   // 1. جستجوی متنی (Text, Email, Phone)
-  if ([FieldType.TEXT, FieldType.PHONE, FieldType.EMAIL].includes(field.type)) {
+  if ([FieldType.TEXT, FieldType.PHONE].includes(field.type)) {
     return {
       filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
         <div style={{ padding: 8 }} onKeyDown={(e) => e.stopPropagation()}>
@@ -86,7 +84,7 @@ export const getColumnSearchProps = (
       ),
       filterIcon: (filtered: boolean) => <FilterOutlined style={{ color: filtered ? '#c58f60' : undefined }} />,
       // نکته: فیلترینگ کلاینت‌ساید برای دمو (در عمل این باید سمت سرور انجام بشه)
-      onFilter: (value: any, record: any) => true, 
+      onFilter: (_value: any, _record: any) => true, 
     };
   }
 

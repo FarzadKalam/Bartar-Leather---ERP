@@ -32,6 +32,7 @@ interface EditableTableProps {
   canEditModule?: boolean;
   canViewField?: (fieldKey: string) => boolean;
   isMobile?: boolean;
+  readOnly?: boolean;
 }
 
 const EditableTable: React.FC<EditableTableProps> = ({
@@ -48,8 +49,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
   populateSource,
   canEditModule,
   canViewField,
+  readOnly,
 }) => {
-  const isReadOnly = block?.readonly === true || canEditModule === false;
+  const isReadOnly = block?.readonly === true || readOnly === true || canEditModule === false;
   const isProductInventory = moduleId === 'products' && block?.id === 'product_inventory';
   const isShelfInventory = moduleId === 'shelves' && block?.id === 'shelf_inventory';
   const isProductionOrder = moduleId === 'production_orders';
