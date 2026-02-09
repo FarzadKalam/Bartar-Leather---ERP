@@ -895,6 +895,7 @@ const ModuleShow: React.FC = () => {
     moduleConfig,
     printableFields,
     formatPrintValue,
+    relationOptions,
   });
 
   const getUserName = (uid: string) => {
