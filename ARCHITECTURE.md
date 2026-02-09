@@ -1,7 +1,7 @@
 # Architecture Documentation - Bartar Leather ERP
 
 **Version:** 4.0  
-**Last Updated:** January 7, 2026
+**Last Updated:** February 9, 2026
 
 ## 🎯 Overview
 
@@ -169,6 +169,7 @@ Dynamic table generator:
 - Generates columns with sorting/filtering
 - Supports search within columns
 - Custom renderers for complex types
+- Supports layout overrides via `containerClassName`, `scrollX`, and `tableLayout`
 
 #### **EditableTable.tsx**
 Inline editable table for master-detail relationships:
@@ -176,6 +177,17 @@ Inline editable table for master-detail relationships:
 - Edit cells directly
 - Auto-save on blur
 - Supports relations in cells
+- Modular helpers under `components/editableTable/` for scroll handling, table utilities, and domain logic (inventory/invoice/production)
+
+#### **QrScanPopover.tsx**
+Quick QR-based selection for products/shelves in production flows.
+
+#### **Production Workflow Utilities**
+`utils/productionWorkflow.ts` centralizes inventory transfer for production lifecycle:
+- `collectProductionMoves` → compute required material moves
+- `applyProductionMoves` / `rollbackProductionMoves`
+- `consumeProductionMaterials` → final material deduction
+- `addFinishedGoods` + `syncProductStock`
 
 ---
 

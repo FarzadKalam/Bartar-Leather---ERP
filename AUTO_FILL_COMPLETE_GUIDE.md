@@ -34,6 +34,8 @@ The system now automatically populates custom field values from related product 
 │  • Renders table with columns from block.tableColumns        │
 │  • updateRow() triggers enrichRowWithProductData()           │
 │  • Renders SELECT/MULTI_SELECT fields as dropdowns          │
+│  • Normalizes filter values (label/value) for product lookup │
+│  • Deduplicates option labels to avoid duplicates            │
 └──────────────────────────────────────────────────────────────┘
                             ↓
 ┌──────────────────────────────────────────────────────────────┐
@@ -333,6 +335,7 @@ const createBomTableColumns = (relationConfig, specBlockId, usageTitle, unitDefa
 - `dynamicOptionsCategory` is automatically copied from field definition to table column
 - Each SELECT/MULTI_SELECT field needs a corresponding dynamic_options category
 - Categories are used to fetch options from database
+- Filters normalize both `label` and `value`, so options stay consistent even when display labels differ
 
 ---
 
@@ -622,6 +625,7 @@ User clicks "Save" button
 - Add records to dynamic_options table with correct category
 - Verify fetchOptions() includes table column fields
 - Check if category key matches between field and dynamic_options
+- If labels differ from stored values, ensure both `label` and `value` are set correctly (filtering uses normalized matching)
 
 ### Issue: Values Not Saving
 
@@ -703,6 +707,6 @@ For issues or questions:
 
 ---
 
-**Last Updated:** 2024
-**Version:** 1.0
+**Last Updated:** February 9, 2026
+**Version:** 1.1
 **Status:** Production Ready ✅

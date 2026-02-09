@@ -81,7 +81,12 @@ This file imports all individual configs and exports a single `MODULES` object. 
 ### Smart Components
 
 * **`SmartForm.tsx`:** A dynamic form builder that handles validation, file uploads, date picking (via `PersianDatePicker` with Persian calendar UI), and Select options based on the `FieldType`.
-* **`SmartTableRenderer.tsx`:** A dynamic table that handles searching inside columns, custom rendering (Tags, Avatars, Prices), and row selection.
+* **`SmartTableRenderer.tsx`:** A dynamic table that handles searching inside columns, custom rendering (Tags, Avatars, Prices), and row selection. Supports layout overrides via `containerClassName`, `scrollX`, and `tableLayout` for nested tables.
+* **`EditableTable.tsx`:** Split into smaller helpers under `components/editableTable/` (scroll wrapper, table utils, and domain helpers for changelog, inventory, invoices, production orders).
+  - Dynamic option filters are normalized and option labels are deduplicated to avoid mismatches.
+  - Nested SmartTable reloads when filters change (via internal versioning).
+  - Production item rows can show QR scan to quickly select products/shelves.
+  - Field locking enforces editable-only columns for production items (e.g., waste_rate/length/width/usage/main_unit/buy_price).
 
 ### Tagging System
 
@@ -212,12 +217,16 @@ When creating a Production Order:
 - Selecting a **BOM** (`bom_id`) automatically copies all table rows from the BOM into the order.
 - Each row can be expanded to open a **SmartTableRenderer** list of products **filtered by that row’s criteria**.
 - The user selects the product to use and then chooses the **source shelf** (inventory location) for deduction.
+- Filtering uses normalized label/value matching and de-duplicates option labels to avoid mismatches in dynamic options.
 
 ### Auto-Calculation Formula:
 ```typescript
 total_price = usage × buy_price
 grandTotal = Σ(all sections)
 ```
+
+### Production Completion Quantity
+On production completion, the system prefers the latest quantity derived from `production_lines` (or preview) to avoid stale `data.quantity` values when transferring finished goods to inventory.
 
 ### Renderer Component:
 `components/renderers/BomStructureRenderer.tsx` displays the hierarchical structure with real-time calculations.
@@ -399,5 +408,5 @@ A flexible many-to-many tagging system:
 
 ---
 
-**Last Updated:** January 7, 2026
-**Version:** 4.0
+**Last Updated:** February 9, 2026
+**Version:** 4.1
