@@ -11,6 +11,7 @@ interface UsePrintManagerProps {
   moduleConfig: any;
   printableFields: any[];
   formatPrintValue: (field: any, value: any) => string;
+  relationOptions?: Record<string, any[]>;
 }
 
 export const usePrintManager = ({
@@ -19,6 +20,7 @@ export const usePrintManager = ({
   moduleConfig,
   printableFields,
   formatPrintValue,
+  relationOptions = {},
 }: UsePrintManagerProps) => {
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
@@ -120,6 +122,16 @@ export const usePrintManager = ({
     };
   }, [printMode]);
 
+  // ✅ وقتی قالب یا فیلدهای چاپی تغییر کند، تمام فیلدها به صورت پیش‌فرض انتخاب شوند
+  useEffect(() => {
+    if (selectedTemplateId && printableFields.length > 0) {
+      setSelectedPrintFields(prev => ({
+        ...prev,
+        [selectedTemplateId]: printableFields.map(field => field.key)
+      }));
+    }
+  }, [selectedTemplateId, printableFields]);
+
   // تابع تغییر انتخاب فیلدهای چاپ
   const handleTogglePrintField = useCallback((templateId: string, fieldName: string) => {
     setSelectedPrintFields(prev => {
@@ -153,6 +165,7 @@ export const usePrintManager = ({
           formatPersianPrice,
           toPersianNumber,
           safeJalaliFormat,
+          relationOptions,
         });
       
       case 'product_label':

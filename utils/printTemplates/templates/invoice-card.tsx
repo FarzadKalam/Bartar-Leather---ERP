@@ -5,6 +5,7 @@ interface InvoiceCardProps {
   formatPersianPrice: (price: number) => string;
   toPersianNumber: (str: string) => string;
   safeJalaliFormat: (date: any, format: string) => string;
+  relationOptions?: Record<string, any[]>;
 }
 
 export const InvoiceCard: React.FC<InvoiceCardProps> = ({
@@ -12,10 +13,30 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
   formatPersianPrice,
   toPersianNumber,
   safeJalaliFormat,
+  relationOptions = {},
 }) => {
   if (!data) return null;
 
   const isMobilePrint = typeof window !== 'undefined' && window.innerWidth < 768;
+  const getRelationLabel = (fieldKey: string, value: any) => {
+    if (!value) return '';
+    const options = relationOptions[fieldKey] || [];
+    const match = options.find((opt: any) => opt.value === value);
+    return match?.name || match?.label || '';
+  };
+  const customerLabel = getRelationLabel('customer_id', data.customer_id) || data.customer_name || data.customer_id || '-';
+  const getInvoiceItemProductLabel = (item: any) => {
+    if (!item) return '-';
+    return (
+      item.selected_product_name
+      || item.product_name
+      || item.product?.name
+      || getRelationLabel('invoiceItems_product_id', item.product_id)
+      || getRelationLabel('product_id', item.product_id)
+      || item.product_id
+      || '-'
+    );
+  };
 
   return (
     <div 
@@ -85,7 +106,7 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
               <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ fontWeight: 'bold', width: '30%', padding: isMobilePrint ? '1px' : '2px' }}>نام:</td>
                 <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
-                  {data.customer_name || data.customer_id || '-'}
+                  {customerLabel}
                 </td>
               </tr>
               <tr>
@@ -181,8 +202,10 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
           </thead>
           <tbody>
             {data.invoiceItems && Array.isArray(data.invoiceItems) && data.invoiceItems.length > 0 ? (
-              data.invoiceItems.slice(0, isMobilePrint ? 4 : 6).map((item: any, idx: number) => (
-                <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
+              data.invoiceItems.slice(0, isMobilePrint ? 4 : 6).map((item: any, idx: number) => {
+                const productLabel = getInvoiceItemProductLabel(item);
+                return (
+                  <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
                   <td style={{ 
                     padding: isMobilePrint ? '1px 2px' : '3px 4px', 
                     textAlign: 'right', 
@@ -190,7 +213,7 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
                     wordBreak: 'break-word',
                     fontSize: isMobilePrint ? '6px' : '7px'
                   }}>
-                    {item.product_name || item.product_id || '-'}
+                    {productLabel}
                   </td>
                   <td style={{ 
                     padding: isMobilePrint ? '1px 2px' : '3px 4px', 
@@ -217,7 +240,8 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
                     {formatPersianPrice((item.quantity || 0) * (item.unit_price || 0))}
                   </td>
                 </tr>
-              ))
+                );
+              })
             ) : (
               <tr>
                 <td colSpan={4} style={{ 
