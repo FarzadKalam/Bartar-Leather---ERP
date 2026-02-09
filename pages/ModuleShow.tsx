@@ -627,6 +627,19 @@ const ModuleShow: React.FC = () => {
     [moduleId, id, data]
   );
 
+  const logFieldChange = useCallback(
+    async (fieldKey: string, oldValue: any, newValue: any) => {
+      await insertChangelog({
+        action: 'update',
+        fieldName: fieldKey,
+        fieldLabel: getFieldLabel(fieldKey),
+        oldValue,
+        newValue,
+      });
+    },
+    [getFieldLabel, insertChangelog]
+  );
+
   const handleMainImageChange = useCallback(async (url: string | null) => {
     if (!canEditModule || !url) return;
     try {
@@ -672,6 +685,38 @@ const ModuleShow: React.FC = () => {
       setTimeout(() => setEditingFields(prev => ({ ...prev, [key]: false })), 100);
     } catch (error: any) { msg.error(error.message); } finally { setSavingField(null); }
   };
+
+  const areValuesEqual = (a: any, b: any) => {
+    if (Array.isArray(a) || Array.isArray(b)) {
+      try {
+        return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+      } catch {
+        return a === b;
+      }
+    }
+    return a === b;
+  };
+
+  const handleSmartFormSave = useCallback(async (values: any) => {
+    try {
+      if (!id) return;
+      const previous = data || {};
+
+      const changedKeys = Object.keys(values).filter((k) => !areValuesEqual(values[k], previous[k]));
+
+      await supabase.from(moduleId).update(values).eq('id', id);
+
+      for (const key of changedKeys) {
+        await logFieldChange(key, previous[key], values[key]);
+      }
+
+      msg.success('ذخیره شد');
+      setIsEditDrawerOpen(false);
+      fetchRecord();
+    } catch (err: any) {
+      msg.error(err.message);
+    }
+  }, [data, fetchRecord, id, logFieldChange, moduleId, msg]);
 
   const startEdit = (key: string, value: any) => {
     if (!canEditModule) return;
@@ -1252,6 +1297,7 @@ const ModuleShow: React.FC = () => {
           module={moduleConfig}
           visible={isEditDrawerOpen}
           recordId={id}
+          onSave={handleSmartFormSave}
           onCancel={() => {
             setIsEditDrawerOpen(false);
             fetchRecord();

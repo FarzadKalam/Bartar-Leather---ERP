@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
+import { MODULES } from '../moduleRegistry';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
@@ -113,6 +114,14 @@ const Dashboard: React.FC = () => {
         .from('products')
         .select('*');
 
+      // Fetch recent changelogs from tasks table
+      const { data: changelogTasks } = await supabase
+        .from('tasks')
+        .select('id, task_type, name, created_at, recurrence_info')
+        .ilike('task_type', 'log|%')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
       // Calculate total sales
       const totalSales = invoices?.reduce((sum, inv) => sum + (inv.total_invoice_amount || 0), 0) || 0;
 
@@ -141,7 +150,42 @@ const Dashboard: React.FC = () => {
       const latestProductionOrders = (productionOrders || []).slice(0, 5);
 
       // Recent activity timeline (combining invoices and production orders)
+      const moduleTitles: Record<string, string> = Object.keys(MODULES).reduce((acc: any, key) => {
+        acc[key] = MODULES[key]?.titles?.fa || MODULES[key]?.titles?.en || key;
+        return acc;
+      }, {});
+
+      const fieldLabelMap: Record<string, string> = {
+        name: 'نام',
+        sell_price: 'قیمت فروش',
+        buy_price: 'قیمت خرید',
+        price: 'قیمت',
+      };
+
+      const getFieldLabel = (moduleId: string | undefined, fieldKey: string | undefined) => {
+        if (!moduleId || !fieldKey) return fieldKey || 'فیلد';
+        const def = MODULES[moduleId]?.fields?.find((f: any) => f.key === fieldKey);
+        return (def as any)?.label || (def as any)?.title || fieldLabelMap[fieldKey] || fieldKey;
+      };
+
+      const changelogActivity = (changelogTasks || []).map(task => {
+        const meta = (task as any).recurrence_info || {};
+        const fieldLabel = getFieldLabel(meta.module_id, meta.field_key);
+        const oldVal = meta.old_value ?? 'خالی';
+        const newVal = meta.new_value ?? 'خالی';
+        const moduleLabel = meta.module_id ? moduleTitles[meta.module_id] || meta.module_id : '';
+        const userName = meta.user_name || 'سیستم';
+        const description = `${userName} ${fieldLabel}${moduleLabel ? ` در ${moduleLabel}` : ''} را از "${oldVal}" به "${newVal}" تغییر داد`;
+        return {
+          time: task.created_at,
+          type: 'change',
+          description,
+          color: '#fa8c16',
+        };
+      });
+
       const recentActivity = [
+        ...changelogActivity,
         ...(invoices || []).slice(0, 3).filter(inv => inv.created_at).map(inv => ({
           time: inv.created_at,
           type: 'invoice',
@@ -154,7 +198,7 @@ const Dashboard: React.FC = () => {
           description: `سفارش تولید ${po.name} ایجاد شد`,
           color: '#a67c52',
         })),
-      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 6);
+      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
 
       // Monthly sales (last 6 months)
       const monthlySales = calculateMonthlySales(invoices || []);
@@ -285,7 +329,7 @@ const Dashboard: React.FC = () => {
   };
 
   // Widget menu items
-  const getWidgetMenu = (widgetId: string): MenuProps => ({
+  const getWidgetMenu = (): MenuProps => ({
     items: [
       {
         key: 'today',
@@ -386,7 +430,7 @@ const Dashboard: React.FC = () => {
           title={
             <div className="flex items-center justify-between">
               <span className="text-lg font-bold">افزودن سریع</span>
-              <Dropdown menu={getWidgetMenu('quick-add')} trigger={['click']}>
+              <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                 <Button type="text" icon={<MoreOutlined />} />
               </Dropdown>
             </div>
@@ -447,7 +491,7 @@ const Dashboard: React.FC = () => {
             onClick={() => navigate('/invoices')}
           >
             <div className="flex items-center justify-between">
-              <Dropdown menu={getWidgetMenu('total-sales')} trigger={['click']}>
+              <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                 <Button 
                   type="text" 
                   icon={<MoreOutlined />} 
@@ -475,7 +519,7 @@ const Dashboard: React.FC = () => {
             onClick={() => navigate('/production_orders')}
           >
             <div className="flex items-center justify-between">
-              <Dropdown menu={getWidgetMenu('in-production')} trigger={['click']}>
+              <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                 <Button 
                   type="text" 
                   icon={<MoreOutlined />} 
@@ -499,7 +543,7 @@ const Dashboard: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer">
             <div className="flex items-center justify-between">
-              <Dropdown menu={getWidgetMenu('products-count')} trigger={['click']}>
+              <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                 <Button 
                   type="text" 
                   icon={<MoreOutlined />} 
@@ -519,7 +563,7 @@ const Dashboard: React.FC = () => {
         <Col xs={24} sm={12} lg={6}>
           <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer">
             <div className="flex items-center justify-between">
-              <Dropdown menu={getWidgetMenu('monthly-growth')} trigger={['click']}>
+              <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                 <Button 
                   type="text" 
                   icon={<MoreOutlined />} 
@@ -549,7 +593,7 @@ const Dashboard: React.FC = () => {
             title={
               <div className="flex items-center justify-between cursor-pointer" onClick={() => navigate('/production_orders')}>
                 <span className="text-lg font-bold">سفارشات تولید بر اساس وضعیت</span>
-                <Dropdown menu={getWidgetMenu('production-status')} trigger={['click']}>
+                <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                   <Button 
                     type="text" 
                     icon={<MoreOutlined />}
@@ -595,7 +639,7 @@ const Dashboard: React.FC = () => {
             title={
               <div className="flex items-center justify-between cursor-pointer" onClick={() => navigate('/invoices')}>
                 <span className="text-lg font-bold">فروش ماهانه</span>
-                <Dropdown menu={getWidgetMenu('monthly-sales')} trigger={['click']}>
+                <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                   <Button 
                     type="text" 
                     icon={<MoreOutlined />}
@@ -642,7 +686,7 @@ const Dashboard: React.FC = () => {
             title={
               <div className="flex items-center justify-between cursor-pointer" onClick={() => navigate('/invoices')}>
                 <span className="text-lg font-bold">آخرین فاکتورها</span>
-                <Dropdown menu={getWidgetMenu('latest-invoices')} trigger={['click']}>
+                <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                   <Button 
                     type="text" 
                     icon={<MoreOutlined />}
@@ -679,7 +723,7 @@ const Dashboard: React.FC = () => {
             title={
               <div className="flex items-center justify-between cursor-pointer" onClick={() => navigate('/production_orders')}>
                 <span className="text-lg font-bold">آخرین سفارشات تولید</span>
-                <Dropdown menu={getWidgetMenu('latest-production')} trigger={['click']}>
+                <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                   <Button 
                     type="text" 
                     icon={<MoreOutlined />}
@@ -719,7 +763,7 @@ const Dashboard: React.FC = () => {
             title={
               <div className="flex items-center justify-between">
                 <span className="text-lg font-bold">تغییرات اخیر</span>
-                <Dropdown menu={getWidgetMenu('recent-activity')} trigger={['click']}>
+                <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                   <Button type="text" icon={<MoreOutlined />} />
                 </Dropdown>
               </div>
@@ -753,7 +797,7 @@ const Dashboard: React.FC = () => {
             title={
               <div className="flex items-center justify-between cursor-pointer" onClick={() => navigate('/products')}>
                 <span className="text-lg font-bold">پرفروش‌ترین محصولات</span>
-                <Dropdown menu={getWidgetMenu('top-products')} trigger={['click']}>
+                <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                   <Button 
                     type="text" 
                     icon={<MoreOutlined />}
