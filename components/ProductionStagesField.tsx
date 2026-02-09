@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
 import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -15,9 +15,10 @@ interface ProductionStagesFieldProps {
   recordId?: string;
   readOnly?: boolean;
   compact?: boolean;
+  onQuantityChange?: (qty: number) => void;
 }
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, readOnly = false, compact = false }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, readOnly = false, compact = false, onQuantityChange }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -28,10 +29,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [lineForm] = Form.useForm();
   const [taskForm] = Form.useForm();
 
-  const totalQuantity = useMemo(
-    () => lines.reduce((sum, line) => sum + (parseFloat(line.quantity) || 0), 0),
-    [lines]
-  );
+  const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
+
+  useEffect(() => {
+    onQuantityChangeRef.current = onQuantityChange;
+  }, [onQuantityChange]);
 
   const fetchAssignees = async () => {
     try {
@@ -87,17 +89,31 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     if (isTaskModalOpen) fetchAssignees();
   }, [recordId, isTaskModalOpen]);
 
+  const syncOrderQuantity = useCallback(async (nextLines: any[]) => {
+    if (!recordId) return;
+    const nextTotal = nextLines.reduce((sum, line) => sum + (parseFloat(line.quantity) || 0), 0);
+    onQuantityChangeRef.current?.(nextTotal);
+    const { error } = await supabase
+      .from('production_orders')
+      .update({ quantity: nextTotal })
+      .eq('id', recordId);
+    if (error) {
+      message.error(`خطا در بروزرسانی تعداد تولید: ${error.message}`);
+    }
+  }, [recordId]);
+
   useEffect(() => {
     if (!recordId) return;
-    supabase.from('production_orders').update({ quantity: totalQuantity }).eq('id', recordId);
-  }, [totalQuantity, recordId]);
+    syncOrderQuantity(lines);
+  }, [lines, recordId, syncOrderQuantity]);
 
   const tasksByLine = useMemo(() => {
     const map = new Map<string, any[]>();
-    lines.forEach(line => map.set(line.id, []));
+    lines.forEach(line => map.set(String(line.id), []));
     tasks.forEach(task => {
-      if (task.production_line_id && map.has(task.production_line_id)) {
-        map.get(task.production_line_id)!.push(task);
+      const lineId = task.production_line_id ? String(task.production_line_id) : null;
+      if (lineId && map.has(lineId)) {
+        map.get(lineId)!.push(task);
       }
     });
     return map;
@@ -301,24 +317,26 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   return (
     <div className="w-full flex flex-col gap-4 select-none" dir="rtl">
       {lines.map((line) => {
-        const lineTasks = tasksByLine.get(line.id) || [];
+        const lineTasks = tasksByLine.get(String(line.id)) || [];
         return (
           <div key={line.id} className="space-y-2">
-            <div className="flex items-center gap-3 text-xs text-gray-600">
-              <span className="font-bold">خط {toPersianNumber(line.line_no)}</span>
-              {!compact && (
-                <div className="flex items-center gap-2">
-                  <span>تعداد تولید:</span>
-                  <InputNumber
-                    min={0}
-                    className="w-24"
-                    value={line.quantity}
-                    onChange={(val) => handleLineQuantityChange(line.id, Number(val) || 0)}
-                    disabled={readOnly}
-                  />
-                </div>
-              )}
-            </div>
+              <div className="flex items-center gap-3 text-xs text-gray-600">
+                <span className="font-bold">
+                  خط {toPersianNumber(line.line_no)}{compact ? `: ${toPersianNumber(line.quantity || 0)} عدد` : ''}
+                </span>
+                {!compact && (
+                  <div className="flex items-center gap-2">
+                    <span>تعداد تولید:</span>
+                    <InputNumber
+                      min={0}
+                      className="w-24"
+                      value={line.quantity}
+                      onChange={(val) => handleLineQuantityChange(line.id, Number(val) || 0)}
+                      disabled={readOnly}
+                    />
+                  </div>
+                )}
+              </div>
 
             <div className="w-full flex items-center gap-2">
               {!readOnly && (

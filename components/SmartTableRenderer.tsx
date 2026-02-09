@@ -23,11 +23,14 @@ interface SmartTableRendererProps {
   onRow?: (record: any) => any;
   onChange?: (pagination: any, filters: any, sorter: any) => void;
   pagination?: any;
+  scrollX?: string | number;
+  tableLayout?: 'auto' | 'fixed';
   dynamicOptions?: Record<string, any[]>;  // ✅ گزینه‌های dynamic برای نمایش برچسب‌های فارسی
   relationOptions?: Record<string, any[]>;  // ✅ گزینه‌های relation برای نمایش برچسب‌های فارسی
   allUsers?: any[];  // ✅ لیست کاربران
   allRoles?: any[];  // ✅ لیست نقش‌ها
   canViewField?: (fieldKey: string) => boolean;
+  containerClassName?: string;
 }
 
 const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({ 
@@ -39,11 +42,14 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   onRow,
   onChange,
   pagination,
+  scrollX,
+  tableLayout,
   dynamicOptions = {},  // ✅ اضافه شد
   relationOptions = {},   // ✅ اضافه شد
   allUsers = [],  // ✅ اضافه شد
   allRoles = [],   // ✅ اضافه شد
-  canViewField
+  canViewField,
+  containerClassName
 }) => {
   const searchInput = useRef<InputRef>(null);
   const [scrollHeight, setScrollHeight] = useState<number>(500);
@@ -114,10 +120,12 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
         const text = record[dataIndex] ? record[dataIndex].toString() : '';
         return text.toLowerCase().includes((value as string).toLowerCase());
     },
-    onFilterDropdownOpenChange: (visible) => {
-      if (visible) {
-        setTimeout(() => searchInput.current?.select(), 100);
-      }
+    filterDropdownProps: {
+      onOpenChange: (visible) => {
+        if (visible) {
+          setTimeout(() => searchInput.current?.select(), 100);
+        }
+      },
     },
   });
 
@@ -448,13 +456,14 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     }
 
   return (
-    <div className="custom-erp-table">
+    <div className={["custom-erp-table", containerClassName].filter(Boolean).join(' ')}>
       <Table 
           columns={columns} 
           dataSource={data} 
           rowKey="id" 
           loading={loading} 
           size="small" 
+            tableLayout={tableLayout}
           pagination={pagination || { 
               pageSize: 20, 
               position: ['bottomCenter'], 
@@ -463,7 +472,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
               showTotal: (total, range) => `${toPersianNumber(range[0])}-${toPersianNumber(range[1])} از ${toPersianNumber(total)}`
           }} 
           onChange={onChange}
-          scroll={{ x: 'max-content', y: scrollHeight }}
+          scroll={{ x: scrollX ?? 'max-content', y: scrollHeight }}
           // 🔥 اتصال انتخاب گروهی
           rowSelection={rowSelection ? {
               type: 'checkbox',

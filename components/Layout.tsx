@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Layout as AntLayout, Menu, Button, Avatar, Badge, Dropdown, message, Modal } from 'antd';
+import { Layout as AntLayout, Menu, Button, Avatar, Dropdown, message, Modal } from 'antd';
 import { 
   DashboardOutlined, 
   SkinOutlined, 
@@ -8,7 +8,6 @@ import {
   TeamOutlined, 
   SettingOutlined,
   SearchOutlined,
-  BellOutlined,
   UserOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
@@ -24,6 +23,8 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient'; // 👈 ایمپورت سوپابیس
+import QrScanPopover from './QrScanPopover';
+import NotificationsPopover from './NotificationsPopover';
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -126,6 +127,12 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
 
   const userMenu = {
     items: [
+      {
+        key: 'theme',
+        label: isDarkMode ? 'حالت روشن' : 'حالت تیره',
+        icon: isDarkMode ? <SunOutlined /> : <MoonOutlined />,
+        onClick: toggleTheme,
+      },
       {
         key: 'profile',
         label: 'پروفایل کاربری',
@@ -242,15 +249,20 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
             </div>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
-            <Button 
-                type="text" 
-                shape="circle" 
-                icon={isDarkMode ? <SunOutlined /> : <MoonOutlined />} 
-                onClick={toggleTheme}
-                className="text-gray-500 dark:text-gray-400 hover:text-leather-500"
+            <QrScanPopover
+              label=""
+              buttonProps={{ type: 'text', shape: 'circle' }}
+              buttonClassName="text-gray-500 dark:text-gray-400 hover:text-leather-500"
+              onScan={({ moduleId, recordId }) => {
+                if (moduleId && recordId) {
+                  navigate(`/${moduleId}/${recordId}`);
+                  return;
+                }
+                message.warning('کد معتبر نیست');
+              }}
             />
             <div className="w-[1px] h-6 bg-gray-300 dark:bg-gray-700 mx-1"></div>
-            <Badge count={5} size="small" color="#c58f60"><Button type="text" shape="circle" icon={<BellOutlined className="text-gray-500 dark:text-gray-400" />} /></Badge>
+            <NotificationsPopover isMobile={isMobile} />
             {/* اصلاح: قرار دادن آواتار در div برای رفع وارنینگ */}
             <Dropdown menu={userMenu} placement="bottomLeft" trigger={['click']}>
                 <div className="cursor-pointer transition-transform hover:scale-105">
@@ -267,12 +279,12 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
           </div>
         </Header>
 
-        <Content className="relative flex-1">
+        <Content className={`relative flex-1 ${isMobile && !isKeyboardVisible ? 'pb-20' : ''}`}>
           {children}
         </Content>
 
         {!isKeyboardVisible && (
-          <div className="md:hidden fixed bottom-5 left-1/2 -translate-x-1/2 w-[92%] h-16 bg-white/90 dark:bg-[#1a1a1a]/95 backdrop-blur-xl border border-gray-200 dark:border-white/5 rounded-2xl flex items-center justify-around z-[1000] shadow-2xl transition-colors">
+          <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white/95 dark:bg-[#1a1a1a]/95 backdrop-blur-xl border-t border-gray-200 dark:border-white/5 rounded-t-2xl flex items-center justify-around z-[1000] shadow-2xl transition-colors pb-[env(safe-area-inset-bottom)]">
              {mobileNavItems.map((item) => {
                const isActive = location.pathname === item.key;
                if (item.isCenter) {

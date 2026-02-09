@@ -54,6 +54,16 @@ export const productionBomModule: ModuleDefinition = {
     { key: 'name', labels: { fa: 'عنوان مدل', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 1, isKey: true, validation: { required: true } },
     { key: 'system_code', labels: { fa: 'کد سیستمی', en: 'Sys Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, readonly: true },
     { key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4, options: [{ label: 'فعال', value: 'active', color: 'green' }, { label: 'بایگانی', value: 'archived', color: 'gray' }], defaultValue: 'active' },
+    { 
+      key: 'product_category', 
+      labels: { fa: 'دسته بندی محصول', en: 'Product Category' }, 
+      type: FieldType.SELECT, 
+      location: FieldLocation.HEADER, 
+      order: 2.5, 
+      dynamicOptionsCategory: 'product_categories',
+      nature: FieldNature.STANDARD, 
+      validation: { required: false },
+    },  
   ],
   blocks: [
     BOM_BLOCKS.leather,
@@ -63,7 +73,10 @@ export const productionBomModule: ModuleDefinition = {
     BOM_BLOCKS.labor
   ],
   relatedTabs: [],
-  table: ''
+  table: 'production_boms',
+  actionButtons: [
+    { id: 'create_production_order', label: 'ایجاد سفارش تولید', placement: 'header', variant: 'primary' }
+  ]
 };
 
 export const productionOrderModule: ModuleDefinition = {
@@ -76,7 +89,8 @@ export const productionOrderModule: ModuleDefinition = {
     { key: 'name', labels: { fa: 'عنوان سفارش', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 0, isKey: true, validation: { required: true }, isTableColumn: true },
     { key: 'system_code', labels: { fa: 'کد سیستمی', en: 'Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },
     { key: 'bom_id', labels: { fa: 'انتخاب شناسنامه (BOM)', en: 'Select BOM' }, type: FieldType.RELATION, location: FieldLocation.HEADER, order: 2, relationConfig: { targetModule: 'production_boms', targetField: 'name' } },
-    { key: 'quantity', labels: { fa: 'تعداد تولید', en: 'Production Qty' }, type: FieldType.NUMBER, location: FieldLocation.HEADER, order: 3, validation: { required: true }, readonly: true, nature: FieldNature.SYSTEM },
+    { key: 'quantity', labels: { fa: 'تعداد تولید', en: 'Production Qty' }, type: FieldType.STOCK, location: FieldLocation.HEADER, order: 3, validation: { required: true }, readonly: true, nature: FieldNature.SYSTEM },
+    { key: 'production_cost', labels: { fa: 'جمع کل (برآورد هزینه)', en: 'Estimated Cost' }, type: FieldType.PRICE, location: FieldLocation.HEADER, order: 3.5, readonly: true, nature: FieldNature.SYSTEM },
     { key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4, options: [{ label: 'در انتظار', value: 'pending', color: 'orange' }, { label: 'در حال تولید', value: 'in_progress', color: 'blue' }, { label: 'تکمیل شده', value: 'completed', color: 'green' }], defaultValue: 'pending', isTableColumn: true },
     { 
       key: 'production_stages', 
@@ -84,7 +98,7 @@ export const productionOrderModule: ModuleDefinition = {
       type: FieldType.PROGRESS_STAGES, // 👈 استفاده از تایپ جدید
       location: FieldLocation.BLOCK, 
       blockId: 'baseInfo', // یا هر بلاک دیگری
-      order: 10, 
+      order: 10,  
       isTableColumn: true, // نمایش در لیست
       nature: FieldNature.STANDARD 
     }
@@ -99,5 +113,5 @@ export const productionOrderModule: ModuleDefinition = {
   ],
   
   relatedTabs: [],
-  table: ''
+  table: 'production_orders'
 };

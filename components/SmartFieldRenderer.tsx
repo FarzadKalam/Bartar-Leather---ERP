@@ -2,12 +2,15 @@ import React, { useState } from 'react';
 import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button } from 'antd';
 import { UploadOutlined, LoadingOutlined, QrcodeOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
-import { toPersianNumber } from '../utils/persianNumberFormatter';
+import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 import { supabase } from '../supabaseClient';
 import DynamicSelectField from './DynamicSelectField';
 import TagInput from './TagInput';
 import ProductionStagesField from './ProductionStagesField';
 import PersianDatePicker from './PersianDatePicker';
+import RelatedRecordPopover from './RelatedRecordPopover';
+import QrScanPopover from './QrScanPopover';
+import ProductImagesManager from './ProductImagesManager';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
@@ -36,12 +39,12 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 }) => {
   const { message: msg } = App.useApp();
   const [uploading, setUploading] = useState(false);
-  
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [quickCreateValue, setQuickCreateValue] = useState('');
   const [, setQuickCreateLoading] = useState(false);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState('');
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
 
   const fieldLabel = field?.labels?.fa || label || 'بدون نام';
   const fieldType = field?.type || type || FieldType.TEXT;
@@ -50,7 +53,6 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const fieldOptions = field?.options || options || [];
   const isReadonly = field?.readonly === true || field?.nature === FieldNature.SYSTEM;
 
-  // --- Logic for 'dependsOn' ---
   const fieldAny = field as any;
   if (fieldAny?.dependsOn && allValues) {
       const parentValue = allValues[fieldAny.dependsOn.field];
@@ -59,17 +61,14 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       }
   }
 
-  // --- عدم نمایش فیلدهای سیستمی در فرم ویرایش ---
-  // اگر فیلد سیستمی است (مثل system_code) و در حالت compact (جدول) نیستیم، مخفی شود
   if (!compactMode && forceEditMode && field?.nature === FieldNature.SYSTEM) {
-      // فقط یک Input مخفی برمی‌گردانیم تا در Form.Item مشکلی پیش نیاید ولی دیده نشود
       return <Input type="hidden" value={value} />;
   }
 
   const formatPersian = (val: any, kind: 'DATE' | 'TIME' | 'DATETIME') => {
     if (!val) return '-';
     try {
-      let dateObj: DateObject;
+      let dateObj: DateObject | null = null;
 
       if (kind === 'TIME') {
         dateObj = new DateObject({
@@ -86,15 +85,26 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
           locale: gregorian_en,
         });
       } else {
-        const jsDate = new Date(val);
-        if (Number.isNaN(jsDate.getTime())) return '-';
-        dateObj = new DateObject({
-          date: jsDate,
-          calendar: gregorian,
-          locale: gregorian_en,
-        });
+        if (typeof val === 'string') {
+          const direct = new Date(val);
+          if (!Number.isNaN(direct.getTime())) {
+            dateObj = new DateObject({ date: direct, calendar: gregorian, locale: gregorian_en });
+          } else {
+            dateObj = new DateObject({
+              date: val,
+              format: 'YYYY-MM-DD HH:mm',
+              calendar: gregorian,
+              locale: gregorian_en,
+            });
+          }
+        } else if (val instanceof Date) {
+          dateObj = new DateObject({ date: val, calendar: gregorian, locale: gregorian_en });
+        } else {
+          dateObj = new DateObject({ date: val, calendar: gregorian, locale: gregorian_en });
+        }
       }
 
+      if (!dateObj) return '-';
       const format = kind === 'DATE' ? 'YYYY/MM/DD' : kind === 'TIME' ? 'HH:mm' : 'YYYY/MM/DD HH:mm';
       return dateObj.convert(persian, persian_fa).format(format);
     } catch {
@@ -180,9 +190,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     }
   };
 
-  // --- رندر محتوا ---
   const renderInputContent = () => {
-    // 1. حالت نمایش (View Mode)
     if (!forceEditMode) {
         if (fieldType === FieldType.CHECKBOX) {
             return value ? <Tag color="green">بله</Tag> : <Tag color="red">خیر</Tag>;
@@ -191,7 +199,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             return <Image src={value} width={40} className="rounded border" />;
         }
         if (fieldType === FieldType.PRICE) {
-            return <span className="font-mono font-bold text-gray-700">{value ? Number(value).toLocaleString() : '0'}</span>;
+          const formatted = value ? formatPersianPrice(value, true) : '۰';
+          return <span className="font-bold text-gray-700 dark:text-gray-300 text-xs persian-number">{formatted}</span>;
         }
         if (fieldType === FieldType.DATE) {
           return <span className="font-mono persian-number">{formatPersian(value, 'DATE')}</span>;
@@ -207,6 +216,15 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
              if (fieldType === FieldType.STATUS && selectedOpt) {
                  return <Tag color={selectedOpt.color}>{selectedOpt.label}</Tag>;
              }
+             if (fieldType === FieldType.RELATION && field.relationConfig?.targetModule && value) {
+                 return (
+                   <RelatedRecordPopover
+                     moduleId={field.relationConfig.targetModule}
+                     recordId={String(value)}
+                     label={selectedOpt ? selectedOpt.label : String(value)}
+                   />
+                 );
+             }
              return <span className="text-gray-800">{selectedOpt ? selectedOpt.label : (value || '-')}</span>;
         }
         if (fieldType === FieldType.TAGS) {
@@ -219,11 +237,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return <span className="text-gray-800 break-words">{toPersianNumber(value) || (compactMode ? '' : '-')}</span>;
     }
 
-    // 2. تنظیمات مشترک برای حالت ویرایش
     const commonProps = {
         value,
         onChange: (val: any) => onChange(val),
-      disabled: !forceEditMode || isReadonly,
+        disabled: !forceEditMode || isReadonly,
         placeholder: compactMode ? undefined : fieldLabel,
         style: { width: '100%' }
     };
@@ -271,6 +288,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
                     getPopupContainer={() => document.body}
+                    dropdownStyle={{ zIndex: 4000 }}
                 />
             );
         }
@@ -282,7 +300,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 allowClear
                 optionFilterProp="label"
                 getPopupContainer={() => document.body}
-                dropdownStyle={{ zIndex: 9999 }}
+                dropdownStyle={{ zIndex: 4000 }}
             />
         );
 
@@ -299,6 +317,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
                     getPopupContainer={() => document.body}
+                    dropdownStyle={{ zIndex: 4000 }}
                 />
             );
         }
@@ -311,7 +330,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 allowClear
                 optionFilterProp="label"
                 getPopupContainer={() => document.body}
-                dropdownStyle={{ zIndex: 9999 }}
+                dropdownStyle={{ zIndex: 4000 }}
             />
         );
 
@@ -328,34 +347,60 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
              filteredOptions = fieldOptions.filter((opt: any) => opt.module === depVal);
         }
 
-        return (
-           <div className="flex gap-1 w-full">
-              <Select 
-                  {...commonProps}
-                  showSearch
-                  options={filteredOptions}
-                  optionFilterProp="label"
-                  getPopupContainer={() => document.body}
-                  dropdownStyle={{ zIndex: 9999 }}
-                  filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                  dropdownRender={(menu) => (
-                      <>
-                        {menu}
-                        {!compactMode && allowQuickCreate && (
-                            <>
-                                <div className="h-[1px] bg-gray-100 my-1"></div>
-                                <div 
-                                    className="p-2 text-blue-500 cursor-pointer text-xs hover:bg-blue-50 flex items-center gap-1"
-                                    onClick={() => setQuickCreateOpen(true)}
-                                >
-                                    <LoadingOutlined spin={false} /> افزودن مورد جدید...
-                                </div>
-                            </>
-                        )}
-                      </>
-                  )}
-              />
-              <Button icon={<QrcodeOutlined />} onClick={() => setIsScanModalOpen(true)} />
+          return (
+            <div className="flex flex-col gap-1 w-full">
+              <div className="flex gap-1 w-full">
+                <Select 
+                    {...commonProps}
+                    showSearch
+                    options={filteredOptions}
+                    optionFilterProp="label"
+                    getPopupContainer={() => document.body}
+                    dropdownStyle={{ zIndex: 4000 }}
+                    filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                    dropdownRender={(menu) => (
+                        <>
+                          {menu}
+                          {!compactMode && allowQuickCreate && (
+                              <>
+                                  <div className="h-[1px] bg-gray-100 my-1"></div>
+                                  <div 
+                                      className="p-2 text-blue-500 cursor-pointer text-xs hover:bg-blue-50 flex items-center gap-1"
+                                      onClick={() => setQuickCreateOpen(true)}
+                                  >
+                                      <LoadingOutlined spin={false} /> افزودن مورد جدید...
+                                  </div>
+                              </>
+                          )}
+                        </>
+                    )}
+                />
+                <QrScanPopover
+                  label=""
+                  buttonClassName="shrink-0"
+                  onScan={({ raw, moduleId, recordId }) => {
+                    if (recordId && moduleId === field.relationConfig?.targetModule) {
+                      onChange(recordId);
+                      return;
+                    }
+                    const match = filteredOptions.find((opt: any) =>
+                      String(opt.value) === raw || String(opt.label) === raw
+                    );
+                    if (match) onChange(match.value);
+                  }}
+                />
+              </div>
+              {value && field.relationConfig?.targetModule && (
+                <RelatedRecordPopover
+                  moduleId={field.relationConfig.targetModule}
+                  recordId={String(value)}
+                  label={filteredOptions.find((opt: any) => opt.value === value)?.label || String(value)}
+                >
+                  <span className="text-xs text-leather-600 cursor-pointer hover:underline">
+                    مشاهده سریع رکورد مرتبط
+                  </span>
+                </RelatedRecordPopover>
+              )}
            </div>
         );
 
@@ -411,21 +456,38 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
       case FieldType.IMAGE:
         return (
-            <Upload 
-                listType="picture-card" 
-                showUploadList={false} 
-                beforeUpload={(file) => { handleImageUpload(file); return false; }}
-            disabled={uploading || !forceEditMode || isReadonly}
-                fileList={[]}
-            >
-                {uploading ? (
-                  <div><LoadingOutlined /><div style={{ marginTop: 8 }}>...</div></div>
-                ) : value ? (
-                  <img src={value} alt="avatar" style={{ width: '100%', borderRadius: 8 }} />
-                ) : (
-                  <div><UploadOutlined /><div style={{ marginTop: 8 }}>آپلود</div></div>
-                )}
-            </Upload>
+            <div className="flex flex-col gap-2">
+              <Upload 
+                  listType="picture-card" 
+                  showUploadList={false} 
+                  beforeUpload={(file) => { handleImageUpload(file); return false; }}
+                  disabled={uploading || !forceEditMode || isReadonly}
+                  fileList={[]}
+              >
+                  {uploading ? (
+                    <div><LoadingOutlined /><div style={{ marginTop: 8 }}>...</div></div>
+                  ) : value ? (
+                    <img src={value} alt="avatar" style={{ width: '100%', borderRadius: 8 }} />
+                  ) : (
+                    <div><UploadOutlined /><div style={{ marginTop: 8 }}>آپلود</div></div>
+                  )}
+              </Upload>
+              {moduleId === 'products' && (
+                <>
+                  <Button size="small" onClick={() => setIsGalleryOpen(true)} disabled={!forceEditMode}>
+                    مدیریت تصاویر
+                  </Button>
+                  <ProductImagesManager
+                    open={isGalleryOpen}
+                    onClose={() => setIsGalleryOpen(false)}
+                    productId={recordId}
+                    mainImage={value}
+                    onMainImageChange={(url) => onChange(url)}
+                    canEdit={forceEditMode && !isReadonly}
+                  />
+                </>
+              )}
+            </div>
         );
 
       case FieldType.CHECKBOX:
@@ -436,15 +498,12 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     }
   };
 
-  // --- Wrapper نهایی ---
-  
   if (compactMode) {
       const allowQuickCreate = (field.relationConfig as any)?.allowQuickCreate;
       return (
         <div className="w-full">
             {renderInputContent()}
             
-            {/* مودال‌ها */}
             {fieldType === FieldType.RELATION && allowQuickCreate && (
                 <RelationQuickCreateInline 
                     open={quickCreateOpen}
@@ -475,7 +534,6 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       );
   }
 
-  // --- تنظیمات Form.Item برای حالت عادی ---
   const formItemProps: any = {
       label: fieldLabel,
       name: fieldKey,
@@ -523,7 +581,6 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
 export default SmartFieldRenderer;
 
-// --- کامپوننت داخلی ---
 interface QuickCreateProps {
     open: boolean;
     label: string;

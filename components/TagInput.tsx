@@ -41,6 +41,27 @@ const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [
     if (data) setAllTags(data);
   };
 
+  const insertChangelog = async (prevTags: TagItem[], nextTags: TagItem[]) => {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || null;
+      await supabase.from('changelogs').insert([
+        {
+          module_id: moduleId,
+          record_id: recordId,
+          action: 'update',
+          field_name: 'tags',
+          field_label: 'برچسب‌ها',
+          old_value: JSON.stringify(prevTags.map(t => t.title)),
+          new_value: JSON.stringify(nextTags.map(t => t.title)),
+          user_id: userId,
+        }
+      ]);
+    } catch (err) {
+      console.warn('Changelog insert failed (tags):', err);
+    }
+  };
+
   const handleClose = async (removedTagId: string) => {
     // حذف ارتباط تگ با رکورد
     const { error } = await supabase
@@ -49,9 +70,10 @@ const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [
         .match({ record_id: recordId, tag_id: removedTagId });
 
     if (!error) {
-        const newTags = tags.filter((tag) => tag.id !== removedTagId);
-        setTags(newTags);
-        if (onChange) onChange();
+      const newTags = tags.filter((tag) => tag.id !== removedTagId);
+      setTags(newTags);
+      await insertChangelog(tags, newTags);
+      if (onChange) onChange();
     }
   };
 
@@ -66,12 +88,14 @@ const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [
           module_id: moduleId
       }]);
 
-      if (!error) {
-          setTags([...tags, tag]);
+        if (!error) {
+          const nextTags = [...tags, tag];
+          setTags(nextTags);
           setInputVisible(false);
           setInputValue('');
+          await insertChangelog(tags, nextTags);
           if (onChange) onChange();
-      }
+        }
   };
 
   const handleCreateNewTag = async () => {

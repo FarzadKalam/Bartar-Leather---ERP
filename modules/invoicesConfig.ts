@@ -22,7 +22,7 @@ const BLOCKS = {
     tableColumns: [
         { key: 'product_id', title: 'نام محصول', type: FieldType.RELATION, width: 250, relationConfig: { targetModule: 'products', targetField: 'name' } },
         { key: 'quantity', title: 'تعداد', type: FieldType.NUMBER, width: 100 },
-        { key: 'unit', title: 'واحد', type: FieldType.TEXT, width: 100 }, 
+        { key: 'unit', title: 'واحد', type: FieldType.SELECT, width: 100, dynamicOptionsCategory: 'main_unit' }, 
         { key: 'unit_price', title: 'قیمت واحد', type: FieldType.PRICE, width: 150 },
         // 👇 استفاده از تایپ جدید برای امکان وارد کردن مبلغ یا درصد
         { key: 'discount', title: 'تخفیف', type: FieldType.PERCENTAGE_OR_AMOUNT, width: 130, showTotal: true },

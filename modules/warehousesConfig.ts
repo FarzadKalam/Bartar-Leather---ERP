@@ -7,6 +7,26 @@ const BLOCKS = {
     icon: 'GoldOutlined',
     order: 1,
     type: BlockType.FIELD_GROUP
+  },
+  shelvesTable: {
+    id: 'warehouse_shelves',
+    titles: { fa: 'قفسه‌های انبار', en: 'Warehouse Shelves' },
+    icon: 'AppstoreOutlined',
+    order: 2,
+    type: BlockType.TABLE,
+    readonly: true,
+    tableColumns: [
+      { key: 'image_url', title: 'تصویر', type: FieldType.IMAGE },
+      { key: 'name', title: 'نام قفسه', type: FieldType.TEXT },
+      { key: 'shelf_number', title: 'شماره قفسه', type: FieldType.TEXT },
+      { key: 'location_detail', title: 'جزئیات مکان', type: FieldType.TEXT },
+      { key: 'responsible_id', title: 'مسئول', type: FieldType.RELATION, relationConfig: { targetModule: 'profiles', targetField: 'full_name' } }
+    ],
+    externalDataConfig: {
+      relationFieldKey: 'warehouse_id',
+      targetModule: 'shelves',
+      targetColumn: '*'
+    }
   }
 };
 
@@ -51,6 +71,6 @@ export const warehousesConfig: ModuleDefinition = {
       nature: FieldNature.STANDARD
     }
   ],
-  blocks: [BLOCKS.baseInfo],
+  blocks: [BLOCKS.baseInfo, BLOCKS.shelvesTable],
   relatedTabs: []
 };

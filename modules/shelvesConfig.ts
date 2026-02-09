@@ -29,11 +29,29 @@ export const shelvesConfig: ModuleDefinition = {
   defaultViewMode: ViewMode.LIST,
   fields: [
     {
+      key: 'image_url',
+      labels: { fa: 'تصویر قفسه', en: 'Shelf Image' },
+      type: FieldType.IMAGE,
+      location: FieldLocation.HEADER,
+      order: 0,
+      nature: FieldNature.STANDARD,
+      isTableColumn: true
+    },
+    {
+      key: 'name',
+      labels: { fa: 'نام قفسه', en: 'Shelf Name' },
+      type: FieldType.TEXT,
+      location: FieldLocation.HEADER,
+      order: 1,
+      nature: FieldNature.STANDARD,
+      isTableColumn: true
+    },
+    {
       key: 'shelf_number',
       labels: { fa: 'شماره قفسه', en: 'Shelf Number' },
       type: FieldType.TEXT,
       location: FieldLocation.HEADER,
-      order: 1,
+      order: 2,
       readonly: true,
       nature: FieldNature.PREDEFINED,
       isKey: true,

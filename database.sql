@@ -28,6 +28,8 @@ CREATE TABLE public.shelves (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   warehouse_id uuid REFERENCES public.warehouses(id) ON DELETE CASCADE,
   shelf_number text NOT NULL,
+  name text,
+  image_url text,
   location_detail text,
   responsible_id uuid REFERENCES public.profiles(id),
   created_at timestamptz DEFAULT now()
@@ -234,6 +236,26 @@ CREATE TABLE public.stock_transfers (
   created_at timestamptz DEFAULT now()
 );
 
+-- افزودن ستون‌های جداول مواد اولیه به سفارش تولید
+ALTER TABLE public.production_orders
+ADD COLUMN IF NOT EXISTS items_leather jsonb,
+ADD COLUMN IF NOT EXISTS items_lining jsonb,
+ADD COLUMN IF NOT EXISTS items_fitting jsonb,
+ADD COLUMN IF NOT EXISTS items_accessory jsonb,
+ADD COLUMN IF NOT EXISTS items_labor jsonb;
+
+-- ذخیره جمع کل (برآورد هزینه) سفارش تولید
+ALTER TABLE public.production_orders
+ADD COLUMN IF NOT EXISTS production_cost numeric;
+
+-- ستون‌های گردش کار تولید
+ALTER TABLE public.production_orders
+ADD COLUMN IF NOT EXISTS production_shelf_id uuid REFERENCES public.shelves(id),
+ADD COLUMN IF NOT EXISTS production_moves jsonb,
+ADD COLUMN IF NOT EXISTS production_output_product_id uuid REFERENCES public.products(id),
+ADD COLUMN IF NOT EXISTS production_output_shelf_id uuid REFERENCES public.shelves(id),
+ADD COLUMN IF NOT EXISTS production_output_qty numeric;
+
 -- اضافه کردن فیلد تصویر به محصولات و مشتریان
 ALTER TABLE public.products ADD COLUMN image_url text;
 ALTER TABLE public.customers ADD COLUMN image_url text;
@@ -399,6 +421,29 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+-- اطمینان از وجود pgcrypto برای gen_random_uuid
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- توابع کمکی برای RLS بر اساس مسئول/سازنده
+CREATE OR REPLACE FUNCTION public.get_current_user_role_id()
+RETURNS uuid AS $$
+  SELECT role_id FROM public.profiles WHERE id = auth.uid();
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION public.has_assignee_access(
+  assignee_id uuid,
+  assignee_type text,
+  created_by uuid
+)
+RETURNS boolean AS $$
+  SELECT (
+    assignee_id IS NULL
+    OR created_by = auth.uid()
+    OR (assignee_type = 'user' AND assignee_id = auth.uid())
+    OR (assignee_type = 'role' AND assignee_id = public.get_current_user_role_id())
+  );
+$$ LANGUAGE sql STABLE;
+
 -- ایجاد ستون‌های سیستمی برای جدول محصولات
 ALTER TABLE public.products 
 ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id),
@@ -406,7 +451,41 @@ ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id),
 ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
 ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now(),
 ADD COLUMN IF NOT EXISTS assignee_id uuid, -- آیدی کاربر یا نقش
-ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user'; -- 'user' یا 'role'
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user', -- 'user' یا 'role'
+ADD COLUMN IF NOT EXISTS auto_name_enabled boolean DEFAULT false;
+
+-- اضافه کردن ستون مسئول به سایر جداول ماژول‌ها
+ALTER TABLE public.product_bundles
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+ALTER TABLE public.warehouses
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+ALTER TABLE public.shelves
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+ALTER TABLE public.production_orders
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+ALTER TABLE public.customers
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+ALTER TABLE public.suppliers
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+ALTER TABLE public.invoices
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
+
+ALTER TABLE public.tasks
+ADD COLUMN IF NOT EXISTS assignee_id uuid,
+ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user';
 
 -- ایجاد ستون‌های سیستمی برای جدول BOM
 ALTER TABLE public.production_boms 
@@ -475,6 +554,130 @@ CREATE INDEX IF NOT EXISTS idx_product_inventory_product ON public.product_inven
 CREATE INDEX IF NOT EXISTS idx_product_inventory_shelf ON public.product_inventory (shelf_id);
 CREATE INDEX IF NOT EXISTS idx_product_inventory_warehouse ON public.product_inventory (warehouse_id);
 
+-- اطمینان از ساخت ID در موجودی قفسه
+ALTER TABLE public.product_inventory ALTER COLUMN id SET DEFAULT gen_random_uuid();
+UPDATE public.product_inventory SET id = gen_random_uuid() WHERE id IS NULL;
+
+-- RLS برای ماژول‌ها بر اساس مسئول/سازنده
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access products" ON public.products;
+DROP POLICY IF EXISTS "Assignee update products" ON public.products;
+DROP POLICY IF EXISTS "Assignee delete products" ON public.products;
+DROP POLICY IF EXISTS "Authenticated insert products" ON public.products;
+CREATE POLICY "Assignee access products" ON public.products FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update products" ON public.products FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete products" ON public.products FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert products" ON public.products FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.production_boms ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access production_boms" ON public.production_boms;
+DROP POLICY IF EXISTS "Assignee update production_boms" ON public.production_boms;
+DROP POLICY IF EXISTS "Assignee delete production_boms" ON public.production_boms;
+DROP POLICY IF EXISTS "Authenticated insert production_boms" ON public.production_boms;
+CREATE POLICY "Assignee access production_boms" ON public.production_boms FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update production_boms" ON public.production_boms FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete production_boms" ON public.production_boms FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert production_boms" ON public.production_boms FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.production_orders ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access production_orders" ON public.production_orders;
+DROP POLICY IF EXISTS "Assignee update production_orders" ON public.production_orders;
+DROP POLICY IF EXISTS "Assignee delete production_orders" ON public.production_orders;
+DROP POLICY IF EXISTS "Authenticated insert production_orders" ON public.production_orders;
+CREATE POLICY "Assignee access production_orders" ON public.production_orders FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update production_orders" ON public.production_orders FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete production_orders" ON public.production_orders FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert production_orders" ON public.production_orders FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.product_bundles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access product_bundles" ON public.product_bundles;
+DROP POLICY IF EXISTS "Assignee update product_bundles" ON public.product_bundles;
+DROP POLICY IF EXISTS "Assignee delete product_bundles" ON public.product_bundles;
+DROP POLICY IF EXISTS "Authenticated insert product_bundles" ON public.product_bundles;
+CREATE POLICY "Assignee access product_bundles" ON public.product_bundles FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update product_bundles" ON public.product_bundles FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete product_bundles" ON public.product_bundles FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert product_bundles" ON public.product_bundles FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.warehouses ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access warehouses" ON public.warehouses;
+DROP POLICY IF EXISTS "Assignee update warehouses" ON public.warehouses;
+DROP POLICY IF EXISTS "Assignee delete warehouses" ON public.warehouses;
+DROP POLICY IF EXISTS "Authenticated insert warehouses" ON public.warehouses;
+CREATE POLICY "Assignee access warehouses" ON public.warehouses FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update warehouses" ON public.warehouses FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete warehouses" ON public.warehouses FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert warehouses" ON public.warehouses FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.shelves ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access shelves" ON public.shelves;
+DROP POLICY IF EXISTS "Assignee update shelves" ON public.shelves;
+DROP POLICY IF EXISTS "Assignee delete shelves" ON public.shelves;
+DROP POLICY IF EXISTS "Authenticated insert shelves" ON public.shelves;
+CREATE POLICY "Assignee access shelves" ON public.shelves FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update shelves" ON public.shelves FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete shelves" ON public.shelves FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert shelves" ON public.shelves FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access customers" ON public.customers;
+DROP POLICY IF EXISTS "Assignee update customers" ON public.customers;
+DROP POLICY IF EXISTS "Assignee delete customers" ON public.customers;
+DROP POLICY IF EXISTS "Authenticated insert customers" ON public.customers;
+CREATE POLICY "Assignee access customers" ON public.customers FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update customers" ON public.customers FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete customers" ON public.customers FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert customers" ON public.customers FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access suppliers" ON public.suppliers;
+DROP POLICY IF EXISTS "Assignee update suppliers" ON public.suppliers;
+DROP POLICY IF EXISTS "Assignee delete suppliers" ON public.suppliers;
+DROP POLICY IF EXISTS "Authenticated insert suppliers" ON public.suppliers;
+CREATE POLICY "Assignee access suppliers" ON public.suppliers FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update suppliers" ON public.suppliers FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete suppliers" ON public.suppliers FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert suppliers" ON public.suppliers FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access invoices" ON public.invoices;
+DROP POLICY IF EXISTS "Assignee update invoices" ON public.invoices;
+DROP POLICY IF EXISTS "Assignee delete invoices" ON public.invoices;
+DROP POLICY IF EXISTS "Authenticated insert invoices" ON public.invoices;
+CREATE POLICY "Assignee access invoices" ON public.invoices FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update invoices" ON public.invoices FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete invoices" ON public.invoices FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert invoices" ON public.invoices FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Assignee access tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Assignee update tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Assignee delete tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Authenticated insert tasks" ON public.tasks;
+CREATE POLICY "Assignee access tasks" ON public.tasks FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee update tasks" ON public.tasks FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Assignee delete tasks" ON public.tasks FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+CREATE POLICY "Authenticated insert tasks" ON public.tasks FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+-- ستون مرتبط با فاکتور در وظایف
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS related_invoice uuid;
+
+-- تصاویر چندگانه محصولات
+CREATE TABLE IF NOT EXISTS public.product_images (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  product_id uuid REFERENCES public.products(id) ON DELETE CASCADE,
+  image_url text NOT NULL,
+  sort_order int4 DEFAULT 0,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.product_images ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Product Images" ON public.product_images FOR SELECT USING (true);
+CREATE POLICY "Public Insert Product Images" ON public.product_images FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Delete Product Images" ON public.product_images FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_product_images_product ON public.product_images (product_id);
+
 -- ۱۶. جدول لاگ تغییرات (Changelogs)
 CREATE TABLE IF NOT EXISTS public.changelogs (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -495,6 +698,50 @@ ALTER TABLE public.changelogs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Access Changelogs" ON public.changelogs FOR SELECT USING (true);
 CREATE POLICY "Public Insert Changelogs" ON public.changelogs FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public Update Changelogs" ON public.changelogs FOR UPDATE USING (true) WITH CHECK (true);
+
+-- ۱۶.۱ جدول یادداشت‌ها (Notes)
+CREATE TABLE IF NOT EXISTS public.notes (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  module_id text NOT NULL,
+  record_id uuid NOT NULL,
+  content text NOT NULL,
+  reply_to uuid,
+  mention_user_ids uuid[] DEFAULT '{}'::uuid[],
+  mention_role_ids uuid[] DEFAULT '{}'::uuid[],
+  author_id uuid REFERENCES auth.users(id),
+  author_name text,
+  is_edited boolean DEFAULT false,
+  edited_at timestamptz,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Notes" ON public.notes FOR SELECT USING (true);
+CREATE POLICY "Public Insert Notes" ON public.notes FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Notes" ON public.notes FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Public Delete Notes" ON public.notes FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_notes_module_record ON public.notes (module_id, record_id);
+CREATE INDEX IF NOT EXISTS idx_notes_created_at ON public.notes (created_at);
+
+-- ۱۶.۲ جدول وضعیت مشاهده سایدبار (Unread)
+CREATE TABLE IF NOT EXISTS public.sidebar_unread (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  module_id text NOT NULL,
+  record_id uuid NOT NULL,
+  tab_key text NOT NULL,
+  last_seen_at timestamptz DEFAULT now(),
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, module_id, record_id, tab_key)
+);
+
+ALTER TABLE public.sidebar_unread ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "User Access Sidebar Unread" ON public.sidebar_unread FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "User Upsert Sidebar Unread" ON public.sidebar_unread FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "User Update Sidebar Unread" ON public.sidebar_unread FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_sidebar_unread_user ON public.sidebar_unread (user_id, module_id, record_id);
 
 -- ۱۷. خطوط تولید برای سفارشات
 CREATE TABLE IF NOT EXISTS public.production_lines (

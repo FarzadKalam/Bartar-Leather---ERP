@@ -128,3 +128,59 @@ CREATE POLICY "Allow update for authenticated users" ON dynamic_options
 
 با استفاده از `mode: 'tags'` در فیلد SELECT، کاربران می‌توانند گزینه‌های جدید اضافه کنند. 
 این گزینه‌ها باید به صورت خودکار در جدول `dynamic_options` ذخیره شوند (این قابلیت در نسخه آینده اضافه می‌شود).
+
+## یادداشت‌ها (Notes)
+
+```sql
+CREATE TABLE IF NOT EXISTS public.notes (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  module_id text NOT NULL,
+  record_id uuid NOT NULL,
+  content text NOT NULL,
+  reply_to uuid,
+  mention_user_ids uuid[] DEFAULT '{}'::uuid[],
+  mention_role_ids uuid[] DEFAULT '{}'::uuid[],
+  author_id uuid REFERENCES auth.users(id),
+  author_name text,
+  is_edited boolean DEFAULT false,
+  edited_at timestamptz,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public Access Notes" ON public.notes FOR SELECT USING (true);
+CREATE POLICY "Public Insert Notes" ON public.notes FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Notes" ON public.notes FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Public Delete Notes" ON public.notes FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_notes_module_record ON public.notes (module_id, record_id);
+CREATE INDEX IF NOT EXISTS idx_notes_created_at ON public.notes (created_at);
+```
+
+## وضعیت مشاهده سایدبار (Unread)
+
+```sql
+CREATE TABLE IF NOT EXISTS public.sidebar_unread (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES auth.users(id),
+  module_id text NOT NULL,
+  record_id uuid NOT NULL,
+  tab_key text NOT NULL,
+  last_seen_at timestamptz DEFAULT now(),
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, module_id, record_id, tab_key)
+);
+
+ALTER TABLE public.sidebar_unread ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "User Access Sidebar Unread" ON public.sidebar_unread FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "User Upsert Sidebar Unread" ON public.sidebar_unread FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "User Update Sidebar Unread" ON public.sidebar_unread FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_sidebar_unread_user ON public.sidebar_unread (user_id, module_id, record_id);
+```
+
+## وظایف مرتبط با فاکتور
+
+```sql
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS related_invoice uuid;
+```

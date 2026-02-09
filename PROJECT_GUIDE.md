@@ -198,6 +198,21 @@ The BOM system calculates production costs across multiple categories:
 - **Accessories Section** (`items_accessory`): Additional materials
 - **Labor Section** (`items_labor`): Workforce costs
 
+### BOM as “Filter Definition” (Updated Workflow)
+In the current production flow, BOM tables **do not select a specific product**. Instead, each row represents a **filter** that later drives product selection inside Production Orders.
+
+Key changes:
+- The first column in BOM tables is **"محصول مادر"** and is **read-only**.
+- It stores the **material category** (`leather`, `lining`, `accessory`, `fitting`) and acts as a base filter.
+- Each row uses the **spec fields** (e.g., `leather_type`, `lining_color`, `fitting_type`) to define product constraints.
+- For **Leather/Lining/Accessory**, optional **Length/Width** are available and **Usage** is auto-calculated as $\text{length} \times \text{width}$ when filled.
+
+### Production Orders – BOM-driven Product Selection
+When creating a Production Order:
+- Selecting a **BOM** (`bom_id`) automatically copies all table rows from the BOM into the order.
+- Each row can be expanded to open a **SmartTableRenderer** list of products **filtered by that row’s criteria**.
+- The user selects the product to use and then chooses the **source shelf** (inventory location) for deduction.
+
 ### Auto-Calculation Formula:
 ```typescript
 total_price = usage × buy_price

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Form, Button, message, Spin, Divider, Select, Space } from 'antd';
+import { Form, Button, message, Spin, Divider, Select, Space, Modal, Checkbox } from 'antd';
 import { UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -8,12 +8,13 @@ import EditableTable from './EditableTable.tsx';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType } from '../types';
+import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 
 interface SmartFormProps {
   module: ModuleDefinition;
   visible: boolean;
   onCancel: () => void;
-  onSave?: (values: any) => void;
+  onSave?: (values: any, meta?: { productInventory?: any[] }) => void;
   recordId?: string;
   title?: string;
   isBulkEdit?: boolean;
@@ -25,6 +26,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   initialValues: initialValuesProp
 }) => {
   const initialValues = useMemo(() => initialValuesProp ?? {}, [initialValuesProp]);
+  const requireInventoryShelf = initialValuesProp?.__requireInventoryShelf === true;
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
@@ -34,21 +36,31 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
-  const [optionsLoaded, setOptionsLoaded] = useState(false);
+  const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
+  const [lastAppliedBomId, setLastAppliedBomId] = useState<string | null>(null);
+
+  const buildAssigneeCombo = (assigneeType?: string | null, assigneeId?: string | null) => {
+    if (!assigneeType || !assigneeId) return null;
+    return `${assigneeType}_${assigneeId}`;
+  };
+
+  const parseAssigneeCombo = (val?: string | null) => {
+    if (!val) return { assignee_type: null, assignee_id: null };
+    const [type, id] = String(val).split('_');
+    return { assignee_type: type || 'user', assignee_id: id || null };
+  };
   
   const fetchAllRelationOptionsWrapper = async () => {
     await fetchRelationOptions();
     await loadDynamicOptions();
-    setOptionsLoaded(true);
   };
 
   useEffect(() => {
-    // Fetch options فقط یک بار در اولین باز شدن
-    if (!optionsLoaded) {
+    if (visible) {
       fetchAllRelationOptionsWrapper();
     }
-  }, []);
+  }, [visible, module.id]);
 
   useEffect(() => {
     if (visible) {
@@ -70,7 +82,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
         // 2. ترکیب با مقادیر اولیه ورودی (اولویت با ورودی‌هاست)
         const initialProps = initialValues || {};
-        const finalValues = { ...defaults, ...initialProps };
+        const assigneeCombo = buildAssigneeCombo(initialProps?.assignee_type, initialProps?.assignee_id);
+        const finalValues = { ...defaults, ...initialProps, assignee_combo: assigneeCombo };
 
         // 3. اعمال مقادیر اولیه بدون تاخیر (برای جلوگیری از flicker)
         setFormData(finalValues);
@@ -98,7 +111,37 @@ const SmartForm: React.FC<SmartFormProps> = ({
     { label: 'تیم‌ها', title: 'roles', options: assignees.roles.map(r => ({ label: r.title, value: `role_${r.id}`, emoji: <TeamOutlined /> })) }
   ];
 
-  const fetchUserPermissions = async () => { /* کد قبلی */ setModulePermissions({ view: true, edit: true, delete: true }); };
+  const fetchUserPermissions = async () => {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) return;
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.role_id) return;
+
+      const { data: role } = await supabase
+        .from('org_roles')
+        .select('permissions')
+        .eq('id', profile.role_id)
+        .single();
+
+      const modulePerms = role?.permissions?.[module.id] || {};
+      setModulePermissions({
+        view: modulePerms.view,
+        edit: modulePerms.edit,
+        delete: modulePerms.delete,
+      });
+      setFieldPermissions(modulePerms.fields || {});
+    } catch (err) {
+      console.warn('Could not fetch permissions:', err);
+    }
+  };
   
   // --- 2. دریافت آپشن‌های ارتباطی (Relation) ---
   const fetchRelationOptions = async () => {
@@ -195,6 +238,64 @@ const SmartForm: React.FC<SmartFormProps> = ({
     setDynamicOptions(newOptions);
   };
 
+  const getFieldValueLabel = (fieldKey: string, value: any) => {
+    if (value === undefined || value === null) return '';
+    const field = module.fields.find(f => f.key === fieldKey);
+    if (!field) return String(value);
+
+    const formatOptionLabel = (val: any) => {
+      if (val === undefined || val === null) return '';
+      let opt = field.options?.find((o: any) => o.value === val);
+      if (opt) return opt.label;
+      if (field.dynamicOptionsCategory) {
+        opt = dynamicOptions[field.dynamicOptionsCategory]?.find((o: any) => o.value === val);
+        if (opt) return opt.label;
+      }
+      if (field.type === FieldType.RELATION) {
+        const rel = relationOptions[fieldKey]?.find((o: any) => o.value === val);
+        if (rel) return rel.label;
+      }
+      return String(val);
+    };
+
+    if (Array.isArray(value)) {
+      return value.map(v => formatOptionLabel(v)).filter(Boolean).join('، ');
+    }
+    return formatOptionLabel(value);
+  };
+
+  const buildAutoProductName = (values: any) => {
+    const parts: string[] = [];
+    const addPart = (part?: string) => {
+      if (!part) return;
+      const trimmed = String(part).trim();
+      if (trimmed) parts.push(trimmed);
+    };
+
+    const productType = values?.product_type;
+    if (productType === 'raw') {
+      addPart(getFieldValueLabel('category', values?.category));
+      const category = values?.category;
+      const specKeys = category === 'leather'
+        ? ['leather_type', 'leather_colors', 'leather_finish_1', 'leather_effect', 'leather_sort']
+        : category === 'lining'
+          ? ['lining_material', 'lining_color', 'lining_width']
+          : category === 'accessory'
+            ? ['acc_material']
+            : category === 'fitting'
+              ? ['fitting_type', 'fitting_colors', 'fitting_size']
+              : [];
+      specKeys.forEach(key => addPart(getFieldValueLabel(key, values?.[key])));
+    } else {
+      addPart(getFieldValueLabel('product_category', values?.product_category));
+      if (values?.related_bom) {
+        addPart(getFieldValueLabel('related_bom', values?.related_bom));
+      }
+    }
+
+    return parts.join(' ');
+  };
+
   // --- 4. دریافت رکورد (در حالت ویرایش) ---
   const fetchRecord = async () => {
     setLoading(true);
@@ -202,8 +303,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
       const { data, error } = await supabase.from(module.table).select('*').eq('id', recordId).single();
       if (error) throw error;
       if (data) {
-        form.setFieldsValue(data);
-        setFormData(data);
+        const assigneeCombo = buildAssigneeCombo(data?.assignee_type, data?.assignee_id);
+        const nextValues = { ...data, assignee_combo: assigneeCombo };
+        form.setFieldsValue(nextValues);
+        setFormData(nextValues);
         setInitialRecord(data);
       }
     } catch (err: any) {
@@ -212,6 +315,54 @@ const SmartForm: React.FC<SmartFormProps> = ({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (module.id !== 'production_orders') return;
+    const bomId = (watchedValues?.bom_id || formData?.bom_id) as string | undefined;
+    if (!bomId || bomId === lastAppliedBomId) return;
+
+    const applyBom = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('production_boms')
+          .select('items_leather, items_lining, items_fitting, items_accessory, items_labor')
+          .eq('id', bomId)
+          .single();
+        if (error) throw error;
+
+        const payload = {
+          items_leather: data?.items_leather || [],
+          items_lining: data?.items_lining || [],
+          items_fitting: data?.items_fitting || [],
+          items_accessory: data?.items_accessory || [],
+          items_labor: data?.items_labor || []
+        };
+
+        form.setFieldsValue(payload);
+        setFormData((prev: any) => ({ ...prev, ...payload, bom_id: bomId }));
+        setLastAppliedBomId(bomId);
+        message.success('اقلام BOM به سفارش تولید منتقل شد');
+      } catch (err: any) {
+        console.error(err);
+        message.error('دریافت اقلام BOM ناموفق بود');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    applyBom();
+  }, [module.id, watchedValues?.bom_id]);
+
+  useEffect(() => {
+    if (module.id !== 'products') return;
+    const currentValues = watchedValues || formData;
+    if (!currentValues?.auto_name_enabled) return;
+    const nextName = buildAutoProductName(currentValues);
+    if (!nextName || nextName === currentValues?.name) return;
+    form.setFieldValue('name', nextName);
+    setFormData((prev: any) => ({ ...prev, name: nextName }));
+  }, [module.id, watchedValues, relationOptions, dynamicOptions]);
 
   // --- تابع کمکی: دریافت دیتای خلاصه (Summary) ---
   const getSummaryData = (currentData: any) => {
@@ -230,6 +381,42 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const handleFinish = async (values: any) => {
     setLoading(true);
     try {
+      const assigneeCombo = values?.assignee_combo ?? formData?.assignee_combo;
+      if (assigneeCombo) {
+        const { assignee_id, assignee_type } = parseAssigneeCombo(assigneeCombo);
+        values.assignee_id = assignee_id;
+        values.assignee_type = assignee_type;
+      } else {
+        if (formData?.assignee_id && !values?.assignee_id) {
+          values.assignee_id = formData.assignee_id;
+        }
+        if (formData?.assignee_type && !values?.assignee_type) {
+          values.assignee_type = formData.assignee_type;
+        }
+      }
+      if (values?.assignee_combo !== undefined) {
+        delete values.assignee_combo;
+      }
+      const productInventoryRows = Array.isArray(values?.product_inventory) ? values.product_inventory : [];
+      if (requireInventoryShelf && module.id === 'products') {
+        const missingShelf = productInventoryRows.some((row: any) => !row?.shelf_id);
+        if (missingShelf) {
+          message.error(PRODUCTION_MESSAGES.requireInventoryShelf);
+          setLoading(false);
+          return;
+        }
+      }
+
+      if (values?.__requireInventoryShelf !== undefined) {
+        delete values.__requireInventoryShelf;
+      }
+
+      if (module.id === 'products' && values.auto_name_enabled) {
+        const nextName = buildAutoProductName(values);
+        if (nextName) {
+          values.name = nextName;
+        }
+      }
       if (module.id === 'products') {
         delete values.product_inventory;
       }
@@ -245,12 +432,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
           if (mapping.total && summaryData.total !== undefined) values[mapping.total] = summaryData.total;
           if (mapping.received && summaryData.received !== undefined) values[mapping.received] = summaryData.received;
           if (mapping.remaining && summaryData.remaining !== undefined) values[mapping.remaining] = summaryData.remaining;
-      } else if (summaryData && (module.id === 'products' || module.id === 'production_boms')) {
+        } else if (summaryData && (module.id === 'products' || module.id === 'production_boms' || module.id === 'production_orders')) {
           values['production_cost'] = summaryData.total;
       }
 
       if (onSave) {
-        await onSave(values);
+        await onSave(values, { productInventory: productInventoryRows });
       } else {
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || null;
@@ -283,7 +470,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
           if (changes.length > 0) {
             try {
-              await supabase.from('changelogs').insert(changes);
+              const { error } = await supabase.from('changelogs').insert(changes);
+              if (error) throw error;
             } catch (err) {
               console.warn('Changelog insert failed:', err);
             }
@@ -298,7 +486,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
           if (inserted?.id) {
             try {
-              await supabase.from('changelogs').insert([
+              const { error } = await supabase.from('changelogs').insert([
                 {
                   module_id: module.id,
                   record_id: inserted.id,
@@ -307,6 +495,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                   record_title: values?.name || values?.title || values?.system_code || null,
                 },
               ]);
+              if (error) throw error;
             } catch (err) {
               console.warn('Changelog insert failed:', err);
             }
@@ -319,7 +508,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
     } catch (err: any) { message.error(err.message); } finally { setLoading(false); }
   };
 
-  const handleValuesChange = (_: any, allValues: any) => { setFormData(allValues); };
+  const handleValuesChange = (_: any, allValues: any) => {
+    const cleanedValues = Object.fromEntries(
+      Object.entries(allValues || {}).filter(([, value]) => value !== undefined)
+    );
+    setFormData((prev: any) => ({ ...prev, ...cleanedValues }));
+  };
   const checkVisibility = (logicOrRule: any, values?: any) => {
     if (!logicOrRule) return true;
     
@@ -355,33 +549,129 @@ const SmartForm: React.FC<SmartFormProps> = ({
   };
 
   const canEditModule = modulePermissions.edit !== false;
+  const canViewField = (fieldKey: string) => {
+    if (Object.prototype.hasOwnProperty.call(fieldPermissions, fieldKey)) {
+      return fieldPermissions[fieldKey] !== false;
+    }
+    return true;
+  };
+  const formActionButtons = (module.actionButtons || []).filter(b => b.placement === 'form');
   const sortedBlocks = [...(module.blocks || [])].sort((a, b) => a.order - b.order);
   const headerFields = module.fields
       .filter(f => f.location === FieldLocation.HEADER)
+      .filter(f => canViewField(f.key))
+      .filter(f => f.key !== 'assignee_id' && f.key !== 'assignee_type')
       .filter(f => f.nature !== 'system') // 👈 این خط را اینجا هم اضافه کنید
       .sort((a, b) => (a.order || 0) - (b.order || 0));
   // محاسبه دیتا برای نمایش در لحظه (رندر)
   const currentValues = watchedValues || formData;
   const currentSummaryData = getSummaryData(currentValues);
-  const summaryConfigObj = module.blocks?.find(b => b.summaryConfig)?.summaryConfig;  return (
+  const summaryConfigObj = module.blocks?.find(b => b.summaryConfig)?.summaryConfig;
+
+  const handleFormAction = (actionId: string) => {
+    if (actionId === 'auto_name' && module.id === 'products') {
+      let enableAuto = !!form.getFieldValue('auto_name_enabled');
+      Modal.confirm({
+        title: 'نامگذاری خودکار محصول',
+        content: (
+          <div className="space-y-3">
+            <div>نام محصول براساس مشخصات فعلی ساخته شود؟</div>
+            <Checkbox defaultChecked={enableAuto} onChange={(e) => { enableAuto = e.target.checked; }}>
+              بروزرسانی خودکار هنگام تغییر مشخصات
+            </Checkbox>
+          </div>
+        ),
+        okText: 'اعمال',
+        cancelText: 'انصراف',
+        onOk: () => {
+          const currentValues = form.getFieldsValue();
+          const nextName = buildAutoProductName({ ...currentValues, auto_name_enabled: enableAuto });
+          if (!nextName) {
+            message.warning('اطلاعات کافی برای نامگذاری وجود ندارد');
+            return;
+          }
+          form.setFieldValue('auto_name_enabled', enableAuto);
+          form.setFieldValue('name', nextName);
+          setFormData({ ...currentValues, name: nextName, auto_name_enabled: enableAuto });
+          message.success('نام محصول بروزرسانی شد');
+        }
+      });
+      return;
+    }
+    message.info('این عملیات هنوز پیاده‌سازی نشده است');
+  };
+
+  return (
     <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
       <div className="bg-white dark:bg-[#1e1e1e] w-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
         
         {/* Header */}
         <div className="flex justify-between items-center p-5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-white/5">
-          <h2 className="text-xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
-            <span className="w-2 h-8 bg-leather-500 rounded-full inline-block"></span>
-            {title || (recordId ? `ویرایش ${module.titles.fa}` : `افزودن ${module.titles.fa} جدید`)}
-          </h2>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h2 className="text-xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
+              <span className="w-2 h-8 bg-leather-500 rounded-full inline-block"></span>
+              {title || (recordId ? `ویرایش ${module.titles.fa}` : `افزودن ${module.titles.fa} جدید`)}
+            </h2>
+            {formActionButtons.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                {formActionButtons.map(btn => (
+                  <Button
+                    key={btn.id}
+                    type={btn.variant === 'primary' ? 'primary' : 'default'}
+                    className={btn.variant === 'primary' ? 'bg-leather-600 hover:!bg-leather-500 border-none' : ''}
+                    onClick={() => handleFormAction(btn.id)}
+                  >
+                    {btn.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
           <Button shape="circle" icon={<CloseOutlined />} onClick={onCancel} className="border-none hover:bg-red-50 hover:text-red-500" />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar" style={{ position: 'relative', zIndex: 0 }}>
           {loading && !isBulkEdit ? (
             <div className="h-full flex items-center justify-center"><Spin size="large" /></div>
           ) : (
             <Form form={form} layout="vertical" onFinish={handleFinish} onValuesChange={handleValuesChange} initialValues={formData}>
               
+              {(canViewField('assignee_id')) && (
+                <div className="mb-6">
+                  <div className="flex items-center justify-between sm:justify-start bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-lg sm:rounded-full pl-2 sm:pl-1 pr-3 py-1 gap-1 sm:gap-2">
+                    <span className="text-xs text-gray-400 shrink-0">مسئول:</span>
+                    <Form.Item name="assignee_combo" noStyle>
+                      <Select
+                        bordered={false}
+                        placeholder="انتخاب کنید"
+                        className="min-w-[180px] font-bold text-gray-700 dark:text-gray-300"
+                        dropdownStyle={{ minWidth: 200, zIndex: 4000 }}
+                        options={assigneeOptions}
+                        optionRender={(option) => (
+                          <Space>
+                            <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
+                            {option.data.label}
+                          </Space>
+                        )}
+                        disabled={!canEditModule}
+                        getPopupContainer={() => document.body}
+                        onChange={(val) => {
+                          const { assignee_id, assignee_type } = parseAssigneeCombo(String(val));
+                          form.setFieldValue('assignee_id', assignee_id);
+                          form.setFieldValue('assignee_type', assignee_type);
+                          setFormData((prev: any) => ({
+                            ...prev,
+                            assignee_combo: val,
+                            assignee_id,
+                            assignee_type
+                          }));
+                        }}
+                      />
+                    </Form.Item>
+                  </div>
+                </div>
+              )}
+
               {/* Header Fields */}
               {headerFields.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 bg-gray-50 dark:bg-white/5 p-4 rounded-2xl border border-gray-100 dark:border-gray-800">
@@ -390,32 +680,6 @@ const SmartForm: React.FC<SmartFormProps> = ({
                      let options = field.options; 
                      if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
                      if (field.type === FieldType.RELATION) options = relationOptions[field.key];
-                     if (field.key === 'assignee_id') {
-                       return (
-                         <div key={field.key}>
-                           <Form.Item label={field.labels?.fa || 'مسئول'} name={field.key}>
-                             <Select
-                               value={formData.assignee_id ? `${formData.assignee_type}_${formData.assignee_id}` : null}
-                               onChange={(val) => {
-                                 const [type, id] = String(val).split('_');
-                                 form.setFieldValue('assignee_id', id || null);
-                                 form.setFieldValue('assignee_type', type || 'user');
-                                 setFormData({ ...form.getFieldsValue(), assignee_id: id || null, assignee_type: type || 'user' });
-                               }}
-                               placeholder="انتخاب مسئول"
-                               options={assigneeOptions}
-                               optionRender={(option) => (
-                                 <Space>
-                                   <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
-                                   {option.data.label}
-                                 </Space>
-                               )}
-                               disabled={!canEditModule}
-                             />
-                           </Form.Item>
-                         </div>
-                       );
-                     }
                      return (
                         <div key={field.key} className={field.type === FieldType.IMAGE ? 'row-span-2' : ''}>
                           <SmartFieldRenderer 
@@ -427,6 +691,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
                             }}
                             forceEditMode={true}
                             options={options}
+                            moduleId={module.id}
+                            recordId={recordId}
                           />
                         </div>
                      );
@@ -442,6 +708,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
                   const blockFields = module.fields
                     .filter(f => f.blockId === block.id)
                     .filter(f => f.nature !== 'system') // 👈 این خط اضافه شد: حذف کامل فیلدهای سیستمی از گرید
+                    .filter(f => canViewField(f.key))
+                    .filter(f => f.key !== 'assignee_id' && f.key !== 'assignee_type')
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
                   return (
@@ -461,32 +729,6 @@ const SmartForm: React.FC<SmartFormProps> = ({
                            let options = field.options;
                            if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
                            if (field.type === FieldType.RELATION) options = relationOptions[field.key];
-                           if (field.key === 'assignee_id') {
-                             return (
-                               <div key={field.key}>
-                                 <Form.Item label={field.labels?.fa || 'مسئول'} name={field.key}>
-                                   <Select
-                                     value={formData.assignee_id ? `${formData.assignee_type}_${formData.assignee_id}` : null}
-                                     onChange={(val) => {
-                                       const [type, id] = String(val).split('_');
-                                       form.setFieldValue('assignee_id', id || null);
-                                       form.setFieldValue('assignee_type', type || 'user');
-                                       setFormData({ ...form.getFieldsValue(), assignee_id: id || null, assignee_type: type || 'user' });
-                                     }}
-                                     placeholder="انتخاب مسئول"
-                                     options={assigneeOptions}
-                                     optionRender={(option) => (
-                                       <Space>
-                                         <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
-                                         {option.data.label}
-                                       </Space>
-                                     )}
-                                     disabled={!canEditModule}
-                                   />
-                                 </Form.Item>
-                               </div>
-                             );
-                           }
                            return (
                              <SmartFieldRenderer 
                                key={field.key}
@@ -497,6 +739,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                  if (!isReadOnly) { form.setFieldValue(field.key, val); setFormData({ ...form.getFieldsValue(), [field.key]: val }); }
                                }}
                                forceEditMode={true} options={options}
+                               moduleId={module.id}
                              />
                            );
                         })}
@@ -511,6 +754,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
                               moduleId={module.id}
                               relationOptions={relationOptions}
                               dynamicOptions={dynamicOptions}
+                              canEditModule={canEditModule}
+                              canViewField={canViewField}
                               onChange={(newData: any[]) => {
                                 const newFormData = { ...formData, [block.id]: newData };
                                 setFormData(newFormData);
@@ -535,6 +780,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                     moduleId={module.id}
                                     relationOptions={relationOptions}
                                     dynamicOptions={dynamicOptions}
+                                  canEditModule={canEditModule}
+                                  canViewField={canViewField}
                                     onChange={(newData: any[]) => {
                                         const newFormData = { ...formData, [block.id]: newData };
                                         setFormData(newFormData);

@@ -64,6 +64,28 @@ export const customerModule: ModuleDefinition = {
       order: 0
     },
   ],
-  relatedTabs: [],
+  relatedTabs: [
+    {
+      id: 'customer_invoices',
+      title: 'فاکتورهای مشتری',
+      icon: 'FileTextOutlined',
+      relationType: 'fk',
+      targetModule: 'invoices',
+      foreignKey: 'customer_id'
+    },
+    {
+      id: 'customer_payments',
+      title: 'پرداختی‌های مشتری',
+      icon: 'CreditCardOutlined',
+      relationType: 'customer_payments'
+    },
+    {
+      id: 'customer_products',
+      title: 'محصولات خریداری شده',
+      icon: 'ShoppingOutlined',
+      relationType: 'customer_products',
+      targetModule: 'products'
+    }
+  ],
   table: ''
 };

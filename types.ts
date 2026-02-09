@@ -214,6 +214,22 @@ summaryConfig?: {
   };
 }
 
+export type RelatedTabRelationType = 'fk' | 'jsonb_contains' | 'join_table' | 'customer_products' | 'customer_payments' | 'product_customers';
+
+export interface RelatedTabConfig {
+  id: string;
+  title: string;
+  icon?: string;
+  targetModule?: string;
+  foreignKey?: string;
+  relationType?: RelatedTabRelationType;
+  jsonbColumn?: string;
+  jsonbMatchKey?: string;
+  joinTable?: string;
+  joinSourceKey?: string;
+  joinTargetKey?: string;
+}
+
 export interface ModuleDefinition {
   id: string;
   titles: { fa: string; en?: string };
@@ -223,7 +239,13 @@ export interface ModuleDefinition {
   blocks: BlockDefinition[];
   supportedViewModes?: ViewMode[];
   defaultViewMode?: ViewMode;
-  relatedTabs?: any[];
+  relatedTabs?: RelatedTabConfig[];
+  actionButtons?: {
+    id: string;
+    label: string;
+    placement: 'form' | 'header';
+    variant?: 'primary' | 'default';
+  }[];
 }
 
 // --- VIEW & FILTER INTERFACES ---

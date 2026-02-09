@@ -14,6 +14,7 @@ interface HeaderActionsProps {
   onDelete: () => void;
   canEdit?: boolean;
   canDelete?: boolean;
+  extraActions?: { id: string; label: string; variant?: 'primary' | 'default'; onClick: () => void; }[];
 }
 
 const HeaderActions: React.FC<HeaderActionsProps> = ({
@@ -28,6 +29,7 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
   onDelete,
   canEdit = true,
   canDelete = true,
+  extraActions = [],
 }) => {
   return (
     <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-2 md:gap-4">
@@ -44,11 +46,22 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
           items={[
             { title: <HomeOutlined />, onClick: onHome },
             { title: moduleTitle, onClick: onModule },
-            { title: recordName },
-          ]}
+            { title: recordName},
+        ]}
         />
       </div>
       <div className="flex gap-2 md:gap-3 w-full md:w-auto justify-end flex-wrap">
+        {extraActions.map(action => (
+          <Button
+            key={action.id}
+            type={action.variant === 'primary' ? 'primary' : 'default'}
+            onClick={action.onClick}
+            size="middle"
+            className={action.variant === 'primary' ? 'bg-leather-600 hover:!bg-leather-500 border-none' : 'hover:text-leather-600 hover:border-leather-600'}
+          >
+            {action.label}
+          </Button>
+        ))}
         <Tooltip title="چاپ">
           <Button
             icon={<PrinterOutlined />}

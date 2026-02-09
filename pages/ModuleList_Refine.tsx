@@ -42,6 +42,8 @@ export const ModuleListRefine = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserRoleId, setCurrentUserRoleId] = useState<string | null>(null);
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: moduleId,
@@ -116,6 +118,26 @@ export const ModuleListRefine = () => {
     fetchPermissions();
   }, [fetchPermissions]);
 
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const user = authData?.user;
+        if (!user) return;
+        setCurrentUserId(user.id);
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role_id')
+          .eq('id', user.id)
+          .single();
+        setCurrentUserRoleId(profile?.role_id || null);
+      } catch (err) {
+        console.warn('Could not fetch current user role:', err);
+      }
+    };
+    fetchCurrentUser();
+  }, []);
+
   const canViewField = useCallback(
     (fieldKey: string) => {
       if (Object.prototype.hasOwnProperty.call(fieldPermissions, fieldKey)) {
@@ -139,14 +161,26 @@ export const ModuleListRefine = () => {
     : moduleConfig?.fields.find(f => f.key === 'category' || f.key === 'product_category')?.key;
 
   // ✅ Merge tags into allData
+  const accessibleData = useMemo(() => {
+    if (!currentUserId) return allData;
+    return allData.filter((record: any) => {
+      if (!record) return false;
+      if (!record.assignee_id) return true;
+      if (record.created_by && record.created_by === currentUserId) return true;
+      if (record.assignee_type === 'user' && record.assignee_id === currentUserId) return true;
+      if (record.assignee_type === 'role' && record.assignee_id === currentUserRoleId) return true;
+      return false;
+    });
+  }, [allData, currentUserId, currentUserRoleId]);
+
   const enrichedData = useMemo(() => {
-    if (!tagsField) return allData;
+    if (!tagsField) return accessibleData;
     const tf: string = tagsField;
-    return allData.map(record => ({
+    return accessibleData.map(record => ({
       ...record,
       [tf]: tagsMap[record.id as string] || []
     }));
-  }, [allData, tagsMap, tagsField]);
+  }, [accessibleData, tagsMap, tagsField]);
 
   // ✅ Grid view - paginated data
   const gridData = useMemo(() => {
@@ -170,7 +204,7 @@ export const ModuleListRefine = () => {
         if (users) setAllUsers(users);
         if (roles) setAllRoles(roles);
 
-        const dynFields = [...moduleConfig.fields.filter((f) => (f as any).dynamicOptionsCategory)];
+        const dynFields: any[] = [...moduleConfig.fields.filter((f) => (f as any).dynamicOptionsCategory)];
         moduleConfig.blocks?.forEach((b) => {
           if (b.type === BlockType.TABLE && b.tableColumns) {
             b.tableColumns.forEach((c) => {
@@ -210,7 +244,7 @@ export const ModuleListRefine = () => {
         });
         setDynamicOptions(dynOpts);
 
-        const relFields = [...moduleConfig.fields.filter((f) => f.type === FieldType.RELATION || f.type === FieldType.USER)];
+        const relFields: any[] = [...moduleConfig.fields.filter((f) => f.type === FieldType.RELATION || f.type === FieldType.USER)];
         moduleConfig.blocks?.forEach((b) => {
           if (b.type === BlockType.TABLE && b.tableColumns) {
             b.tableColumns.forEach((c) => {
@@ -271,12 +305,12 @@ export const ModuleListRefine = () => {
 
   // ✅ Fetch tags for all records
   useEffect(() => {
-    if (!tagsField || !moduleId || allData.length === 0) return;
+    if (!tagsField || !moduleId || accessibleData.length === 0) return;
 
     const fetchTags = async () => {
       try {
         // Get all tags for records in this module
-        const recordIds = allData.map(r => r.id);
+        const recordIds = accessibleData.map(r => r.id);
         const { data: tagsData } = await supabase
           .from('record_tags')
           .select('record_id, tags(id, title, color)')
@@ -301,7 +335,7 @@ export const ModuleListRefine = () => {
     };
 
     fetchTags();
-  }, [moduleId, tagsField, allData.length]);
+  }, [moduleId, tagsField, accessibleData.length]);
 
   const searchTargetField = useMemo(() => {
     if (!moduleConfig) return null;

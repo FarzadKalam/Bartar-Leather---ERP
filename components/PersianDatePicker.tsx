@@ -89,15 +89,29 @@ const PersianDatePicker: React.FC<PersianDatePickerProps> = ({
     calendar: persian,
     locale: persian_fa,
     format,
+    portal: true,
+    zIndex: 10050,
     plugins:
       type === "DATETIME" || type === "TIME"
         ? [<TimePicker key="time" position="bottom" hideSeconds />]
         : [],
-    className,
-    inputClass: "w-full persian-number",
+    className: `rmdp-leather ${className || ''}`.trim(),
+    inputClass: "w-full persian-number rounded-lg border border-gray-300 px-3 py-2 focus:border-leather-500 focus:ring-1 focus:ring-leather-500",
     containerClassName: "w-full",
     disabled,
     placeholder,
+    mapDays: ({ date }: any) => {
+      if (date?.weekDay?.index === 6) {
+        return {
+          style: {
+            backgroundColor: '#c58f60',
+            color: 'white',
+            borderRadius: '6px',
+          },
+        };
+      }
+      return {};
+    },
   };
 
   if (type === "TIME") {

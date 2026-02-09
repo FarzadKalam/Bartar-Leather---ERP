@@ -16,6 +16,7 @@ interface DynamicSelectFieldProps {
   mode?: 'multiple' | 'tags';
   onOptionsUpdate?: () => void; // callback برای رفرش options
   getPopupContainer?: (trigger: HTMLElement) => HTMLElement;
+  dropdownStyle?: React.CSSProperties;
 }
 
 /**
@@ -34,7 +35,8 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   disabled = false,
   mode = undefined,
   onOptionsUpdate,
-  getPopupContainer = (trigger) => (trigger.parentNode as HTMLElement) || document.body
+  getPopupContainer = () => document.body,
+  dropdownStyle
 }) => {
   const { message: msg } = App.useApp();
   const [newOptionValue, setNewOptionValue] = useState('');
@@ -129,6 +131,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       loading={loading}
       optionFilterProp="label"
       getPopupContainer={getPopupContainer}
+      dropdownStyle={dropdownStyle}
       options={options}
       notFoundContent={loading ? "در حال بارگذاری..." : "موردی یافت نشد"}
       // رندر سفارشی برای هر آیتم با دکمه حذف

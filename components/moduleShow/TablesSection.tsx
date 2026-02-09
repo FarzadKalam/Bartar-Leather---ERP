@@ -1,9 +1,10 @@
-import React from 'react';
-import EditableTable from '../EditableTable';
+import React, { useEffect, useMemo, useState } from 'react';
+import EditableTable from '../EditableTable.tsx';
 import SummaryCard from '../SummaryCard';
 import ProductionStagesField from '../../components/ProductionStagesField';
 import { calculateSummary } from '../../utils/calculations';
 import { SummaryCalculationType, FieldType } from '../../types';
+import { supabase } from '../../supabaseClient';
 
 // 👇 اینترفیس اصلاح شد: حذف linkedBomData و ...
 interface TablesSectionProps {
@@ -11,6 +12,10 @@ interface TablesSectionProps {
   data: any; 
   relationOptions: Record<string, any[]>;
   dynamicOptions: Record<string, any[]>;
+  checkVisibility: (logic: any) => boolean;
+  canViewField?: (fieldKey: string) => boolean;
+  canEditModule?: boolean;
+  onDataUpdate?: (patch: Record<string, any>) => void;
 }
 
 const TablesSection: React.FC<TablesSectionProps> = ({
@@ -18,8 +23,45 @@ const TablesSection: React.FC<TablesSectionProps> = ({
   data,
   relationOptions,
   dynamicOptions,
+  checkVisibility,
+  canViewField,
+  canEditModule = true,
+  onDataUpdate,
 }) => {
   if (!module || !data) return null;
+
+  const [externalTables, setExternalTables] = useState<Record<string, any[]>>({});
+
+  const externalBlocks = useMemo(
+    () => module.blocks?.filter((b: any) => b.type === 'table' && b.externalDataConfig) || [],
+    [module.blocks]
+  );
+
+  useEffect(() => {
+    const loadExternal = async () => {
+      const updates: Record<string, any[]> = {};
+      for (const block of externalBlocks) {
+        const cfg = block.externalDataConfig;
+        if (!cfg?.targetModule || !cfg?.relationFieldKey) continue;
+        try {
+          const { data: rows } = await (supabase as any)
+            .from(cfg.targetModule)
+            .select(cfg.targetColumn || '*')
+            .eq(cfg.relationFieldKey, data.id)
+            .order('created_at', { ascending: true });
+          updates[block.id] = rows || [];
+        } catch (err) {
+          console.warn('External table load failed:', block.id, err);
+          updates[block.id] = [];
+        }
+      }
+      if (Object.keys(updates).length > 0) setExternalTables(updates);
+    };
+
+    if (externalBlocks.length > 0 && data?.id) {
+      loadExternal();
+    }
+  }, [externalBlocks, data?.id]);
 
   const getSummaryData = () => {
       const summaryBlock = module.blocks?.find((b: any) => b.summaryConfig);
@@ -34,7 +76,12 @@ const TablesSection: React.FC<TablesSectionProps> = ({
 
   const summaryData = getSummaryData();
   const summaryConfig = module.blocks?.find((b: any) => b.summaryConfig)?.summaryConfig || {};
-  const progressFields = module.fields?.filter((f: any) => f.type === FieldType.PROGRESS_STAGES) || [];
+  const isProductionOrder = module.id === 'production_orders';
+  const productionLocked = isProductionOrder && ['in_progress', 'completed'].includes(data?.status);
+  const progressFields = (module.fields || [])
+    .filter((f: any) => f.type === FieldType.PROGRESS_STAGES)
+    .filter((f: any) => (canViewField ? canViewField(f.key) !== false : true))
+    .filter((f: any) => (!f.logic || checkVisibility(f.logic)));
 
   return (
     <div className="tables-section space-y-6 md:space-y-8">
@@ -45,24 +92,29 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               <span className="w-1 h-6 bg-leather-500 rounded-full inline-block"></span>                {field.labels.fa}
             </h3>
             <ProductionStagesField 
-                recordId={data.id} 
-                readOnly={false}
-                compact={true}
+              recordId={data.id} 
+              readOnly={!canEditModule || productionLocked}
+              compact={true}
+              onQuantityChange={(qty) => onDataUpdate?.({ quantity: qty })}
             />
         </div>
       ))}
 
-      {module.blocks?.filter((b: any) => b.type === 'table').map((block: any) => (
+      {module.blocks
+        ?.filter((b: any) => b.type === 'table')
+        .filter((b: any) => (b.visibleIf ? checkVisibility(b.visibleIf) : true))
+          .map((block: any) => (
         <div key={block.id}>
            <EditableTable
               block={block}
-              initialData={data[block.id] || []}
-              mode="db"
+            initialData={block.externalDataConfig ? (externalTables[block.id] || []) : (data[block.id] || [])}
+            mode={block.externalDataConfig ? 'local' : 'db'}
               moduleId={module.id}
               recordId={data.id}
               relationOptions={relationOptions}
               dynamicOptions={dynamicOptions}
-              isMobile={typeof window !== 'undefined' && window.innerWidth < 768}
+              canEditModule={canEditModule && !(productionLocked && String(block.id).startsWith('items_'))}
+              canViewField={canViewField}
            />
         </div>
       ))}
@@ -71,7 +123,6 @@ const TablesSection: React.FC<TablesSectionProps> = ({
           <SummaryCard 
             type={summaryConfig.calculationType || SummaryCalculationType.SUM_ALL_ROWS} 
             data={summaryData} 
-            isMobile={typeof window !== 'undefined' && window.innerWidth < 768}
           />
       )}
     </div>

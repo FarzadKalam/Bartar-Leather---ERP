@@ -53,6 +53,15 @@ export const supplierModule: ModuleDefinition = {
       order: 0
     },
   ],
-  relatedTabs: [],
+  relatedTabs: [
+    {
+      id: 'supplier_products',
+      title: 'محصولات تامین شده',
+      icon: 'AppstoreOutlined',
+      relationType: 'fk',
+      targetModule: 'products',
+      foreignKey: 'related_supplier'
+    }
+  ],
   table: ''
 };

@@ -1,7 +1,15 @@
 import { RowCalculationType, SummaryCalculationType, BlockType } from '../types';
 
 export const calculateRow = (row: any, type: RowCalculationType = RowCalculationType.SIMPLE_MULTIPLY) => {
-    const qty = parseFloat(row.quantity) || parseFloat(row.usage) || parseFloat(row.qty) || parseFloat(row.stock) || 0;
+    const lengthVal = parseFloat(row.length);
+    const widthVal = parseFloat(row.width);
+    const areaUsage = Number.isFinite(lengthVal) && Number.isFinite(widthVal) ? lengthVal * widthVal : null;
+    const qty = parseFloat(row.quantity)
+        || parseFloat(row.usage)
+        || (areaUsage !== null ? areaUsage : 0)
+        || parseFloat(row.qty)
+        || parseFloat(row.stock)
+        || 0;
     const price = parseFloat(row.unit_price) || parseFloat(row.buy_price) || parseFloat(row.price) || 0;
     
     let baseTotal = qty * price;
@@ -13,16 +21,18 @@ export const calculateRow = (row: any, type: RowCalculationType = RowCalculation
         let discountInput = parseFloat(row.discount) || 0;
         let vatInput = parseFloat(row.vat) || 0;
 
-        // محاسبه تخفیف (اگر زیر 100 باشد درصد، وگرنه مبلغ)
-        // البته برای اطمینان می‌توانید فیلد جداگانه‌ای داشته باشید، ولی این روش هوشمند فعلا کار را راه می‌اندازد
-        let discountAmount = discountInput;
-        // اگر تخفیف درصد بود:
-        // if (discountInput <= 100 && discountInput > 0) discountAmount = baseTotal * (discountInput / 100);
-        
-        let afterDiscount = baseTotal - discountAmount;
+        const discountType = row.discount_type || 'amount';
+        const vatType = row.vat_type || 'percent';
 
-        // محاسبه مالیات (همیشه درصد از مبلغ بعد از تخفیف)
-        let vatAmount = afterDiscount * (vatInput / 100);
+        const discountAmount = discountType === 'percent'
+            ? baseTotal * (discountInput / 100)
+            : discountInput;
+
+        const afterDiscount = baseTotal - discountAmount;
+
+        const vatAmount = vatType === 'percent'
+            ? afterDiscount * (vatInput / 100)
+            : vatInput;
 
         return afterDiscount + vatAmount;
     }
@@ -47,6 +57,7 @@ export const calculateSummary = (data: any, blocks: any[], summaryConfig: any) =
         const payments = data[paymentBlock?.id || 'payments'] || [];
         
         const totalReceived = payments.reduce((sum: number, item: any) => {
+            if (item?.status !== 'received') return sum;
             return sum + (parseFloat(item.amount) || 0);
         }, 0);
 

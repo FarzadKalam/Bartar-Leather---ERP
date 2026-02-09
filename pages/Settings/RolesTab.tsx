@@ -124,6 +124,13 @@ const RolesTab: React.FC = () => {
       });
     }
 
+    if (!fieldMap.has('assignee_id')) {
+      fieldMap.set('assignee_id', {
+        key: 'assignee_id',
+        labels: { fa: 'مسئول' }
+      });
+    }
+
     return Array.from(fieldMap.values());
   };
 
