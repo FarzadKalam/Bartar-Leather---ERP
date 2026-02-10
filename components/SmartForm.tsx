@@ -326,7 +326,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       try {
         const { data, error } = await supabase
           .from('production_boms')
-          .select('items_leather, items_lining, items_fitting, items_accessory, items_labor')
+          .select('items_leather, items_lining, items_fitting, items_accessory, items_labor, product_category')
           .eq('id', bomId)
           .single();
         if (error) throw error;
@@ -336,7 +336,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
           items_lining: data?.items_lining || [],
           items_fitting: data?.items_fitting || [],
           items_accessory: data?.items_accessory || [],
-          items_labor: data?.items_labor || []
+          items_labor: data?.items_labor || [],
+          product_category: data?.product_category || null,
         };
 
         form.setFieldsValue(payload);
@@ -351,8 +352,20 @@ const SmartForm: React.FC<SmartFormProps> = ({
       }
     };
 
-    applyBom();
-  }, [module.id, watchedValues?.bom_id]);
+    if (initialValuesProp?.__skipBomConfirm === true && !lastAppliedBomId) {
+      applyBom();
+      return;
+    }
+
+    Modal.confirm({
+      title: 'کپی از شناسنامه تولید',
+      content: 'جداول سفارش تولید ریست شوند و مقادیر از روی BOM کپی شوند؟',
+      okText: 'بله، کپی کن',
+      cancelText: 'خیر',
+      onOk: applyBom,
+      onCancel: () => setLastAppliedBomId(bomId),
+    });
+  }, [module.id, watchedValues?.bom_id, lastAppliedBomId, initialValuesProp]);
 
   useEffect(() => {
     if (module.id !== 'products') return;
@@ -409,6 +422,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
       if (values?.__requireInventoryShelf !== undefined) {
         delete values.__requireInventoryShelf;
+      }
+      if (values?.__skipBomConfirm !== undefined) {
+        delete values.__skipBomConfirm;
       }
 
       if (module.id === 'products' && values.auto_name_enabled) {
@@ -602,14 +618,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-3 md:p-4 backdrop-blur-sm animate-fadeIn">
       <div className="bg-white dark:bg-[#1e1e1e] w-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
         
         {/* Header */}
-        <div className="flex justify-between items-center p-5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-white/5">
+        <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-white/5">
           <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
-              <span className="w-2 h-8 bg-leather-500 rounded-full inline-block"></span>
+            <h2 className="text-lg md:text-xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2">
+              <span className="w-2 h-7 md:h-8 bg-leather-500 rounded-full inline-block"></span>
               {title || (recordId ? `ویرایش ${module.titles.fa}` : `افزودن ${module.titles.fa} جدید`)}
             </h2>
             {formActionButtons.length > 0 && (
@@ -630,7 +646,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
           <Button shape="circle" icon={<CloseOutlined />} onClick={onCancel} className="border-none hover:bg-red-50 hover:text-red-500" />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar" style={{ position: 'relative', zIndex: 0 }}>
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar" style={{ position: 'relative', zIndex: 0 }}>
           {loading && !isBulkEdit ? (
             <div className="h-full flex items-center justify-center"><Spin size="large" /></div>
           ) : (
@@ -674,7 +690,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
               {/* Header Fields */}
               {headerFields.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 bg-gray-50 dark:bg-white/5 p-4 rounded-2xl border border-gray-100 dark:border-gray-800">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-5 bg-gray-50 dark:bg-white/5 p-3 md:p-4 rounded-2xl border border-gray-100 dark:border-gray-800">
                   {headerFields.map(field => {
                      if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
                      let options = field.options; 
@@ -693,6 +709,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                             options={options}
                             moduleId={module.id}
                             recordId={recordId}
+                            allValues={formData}
                           />
                         </div>
                      );
@@ -718,7 +735,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                         {block.icon && <i className={`mr-2 ${block.icon}`}></i>}
                         {block.titles.fa}
                       </Divider>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {blockFields.map(field => {
                           if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
                            let fieldValue = formData[field.key];
@@ -740,6 +757,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                }}
                                forceEditMode={true} options={options}
                                moduleId={module.id}
+                               allValues={formData}
                              />
                            );
                         })}
@@ -771,7 +789,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
                 if (block.type === BlockType.TABLE) {
                       return (
-                        <div key={block.id} className="mb-8 p-1 border border-dashed border-gray-300 rounded-3xl">
+                        <div key={block.id} className="mb-6 p-1 border border-dashed border-gray-300 rounded-3xl">
                             <Form.Item name={block.id} noStyle>
                                 <EditableTable
                                     block={block}
@@ -807,9 +825,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1e1e1e] flex justify-end gap-3">
-          <Button size="large" onClick={onCancel} className="rounded-xl">انصراف</Button>
-          <Button size="large" type="primary" onClick={() => form.submit()} loading={loading} disabled={!canEditModule} icon={<SaveOutlined />} className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/20">
+        <div className="p-3 md:p-4 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1e1e1e] flex justify-end gap-2">
+          <Button size="middle" onClick={onCancel} className="rounded-xl">انصراف</Button>
+          <Button size="middle" type="primary" onClick={() => form.submit()} loading={loading} disabled={!canEditModule} icon={<SaveOutlined />} className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/20">
             {recordId ? 'ذخیره تغییرات' : 'ثبت نهایی'}
           </Button>
         </div>

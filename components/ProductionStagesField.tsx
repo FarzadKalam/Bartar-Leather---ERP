@@ -16,9 +16,10 @@ interface ProductionStagesFieldProps {
   readOnly?: boolean;
   compact?: boolean;
   onQuantityChange?: (qty: number) => void;
+  orderStatus?: string | null;
 }
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, readOnly = false, compact = false, onQuantityChange }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, readOnly = false, compact = false, onQuantityChange, orderStatus }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -318,13 +319,15 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     <div className="w-full flex flex-col gap-4 select-none" dir="rtl">
       {lines.map((line) => {
         const lineTasks = tasksByLine.get(String(line.id)) || [];
+        const canEditQuantity = !readOnly && (!orderStatus || orderStatus === 'pending');
+        const showInlineQty = !compact || canEditQuantity;
         return (
           <div key={line.id} className="space-y-2">
               <div className="flex items-center gap-3 text-xs text-gray-600">
                 <span className="font-bold">
                   خط {toPersianNumber(line.line_no)}{compact ? `: ${toPersianNumber(line.quantity || 0)} عدد` : ''}
                 </span>
-                {!compact && (
+                {showInlineQty && (
                   <div className="flex items-center gap-2">
                     <span>تعداد تولید:</span>
                     <InputNumber
@@ -332,7 +335,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                       className="w-24"
                       value={line.quantity}
                       onChange={(val) => handleLineQuantityChange(line.id, Number(val) || 0)}
-                      disabled={readOnly}
+                      disabled={!canEditQuantity}
                     />
                   </div>
                 )}

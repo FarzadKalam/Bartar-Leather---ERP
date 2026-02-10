@@ -12,10 +12,27 @@ const UsersTab: React.FC = () => {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+    const [editingUser, setEditingUser] = useState<any | null>(null);
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+    useEffect(() => {
+        fetchData();
+        loadCurrentUser();
+    }, []);
+
+    const loadCurrentUser = async () => {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || null;
+        setCurrentUserId(userId);
+        if (!userId) return;
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('role, role_id')
+            .eq('id', userId)
+            .single();
+        setCurrentUserRole(profile?.role || null);
+    };
 
   const fetchData = async () => {
     setLoading(true);
@@ -47,21 +64,112 @@ const UsersTab: React.FC = () => {
       } catch(e) { message.error('خطا در آپلود عکس'); return false; }
   };
 
-  const handleAddUser = async (values: any) => {
-      setSubmitting(true);
-      const { error } = await supabase.from('profiles').insert([{
-          full_name: values.full_name,
-          email: values.email,
-          mobile_1: values.mobile,
-          role_id: values.role_id,
-          avatar_url: avatarUrl,
-          is_active: true
-      }]);
+    const canManageUsers = ['super_admin', 'admin', 'manager'].includes(String(currentUserRole || '').toLowerCase());
+    const canEditRecord = (record: any) => {
+        if (!canManageUsers) return false;
+        if (record?.role === 'super_admin' && String(currentUserRole || '').toLowerCase() !== 'super_admin') {
+            return false;
+        }
+        return true;
+    };
 
-      if (error) { message.error('خطا: ' + error.message); } 
-      else { message.success('کاربر اضافه شد'); setIsDrawerOpen(false); form.resetFields(); setAvatarUrl(null); fetchData(); }
-      setSubmitting(false);
-  };
+    const handleAddOrEditUser = async (values: any) => {
+        if (!canManageUsers) {
+            message.error('دسترسی کافی ندارید');
+            return;
+        }
+        setSubmitting(true);
+        try {
+            if (editingUser) {
+                const { error } = await supabase.from('profiles').update({
+                    full_name: values.full_name,
+                    email: values.email,
+                    mobile_1: values.mobile,
+                    role_id: values.role_id,
+                    role: values.role,
+                    avatar_url: avatarUrl ?? editingUser.avatar_url,
+                    is_active: values.is_active,
+                }).eq('id', editingUser.id);
+                if (error) throw error;
+
+                if (values.password && editingUser.id === currentUserId) {
+                    const { error: passError } = await supabase.auth.updateUser({ password: values.password });
+                    if (passError) throw passError;
+                }
+
+                message.success('کاربر بروزرسانی شد');
+            } else {
+                const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+                    email: values.email,
+                    password: values.password,
+                    options: {
+                        data: { full_name: values.full_name, avatar_url: avatarUrl || undefined }
+                    }
+                });
+                if (signUpError) throw signUpError;
+                const newUserId = signUpData.user?.id;
+                if (!newUserId) {
+                    throw new Error('ساخت کاربر در Auth ناموفق بود');
+                }
+
+                const { error } = await supabase.from('profiles').insert([{
+                    id: newUserId,
+                    full_name: values.full_name,
+                    email: values.email,
+                    mobile_1: values.mobile,
+                    role_id: values.role_id,
+                    role: values.role,
+                    avatar_url: avatarUrl,
+                    is_active: true
+                }]);
+
+                if (error) throw error;
+                message.success('کاربر اضافه شد');
+            }
+
+            setIsDrawerOpen(false);
+            setEditingUser(null);
+            form.resetFields();
+            setAvatarUrl(null);
+            fetchData();
+        } catch (error: any) {
+            message.error('خطا: ' + error.message);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const handleEdit = (record: any) => {
+        if (!canManageUsers) {
+            message.error('دسترسی کافی ندارید');
+            return;
+        }
+        setEditingUser(record);
+        setAvatarUrl(record.avatar_url || null);
+        form.setFieldsValue({
+            full_name: record.full_name,
+            email: record.email,
+            mobile: record.mobile_1,
+            role_id: record.role_id || null,
+            role: record.role || null,
+            is_active: record.is_active !== false,
+            password: ''
+        });
+        setIsDrawerOpen(true);
+    };
+
+    const handleResetPassword = async (email?: string | null) => {
+        if (!email) {
+            message.error('ایمیل کاربر ثبت نشده است');
+            return;
+        }
+        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        if (error) {
+            message.error('خطا در ارسال ایمیل: ' + error.message);
+        } else {
+            message.success('لینک بازیابی رمز به ایمیل ارسال شد');
+        }
+    };
 
   const columns = [
       {
@@ -84,39 +192,59 @@ const UsersTab: React.FC = () => {
           key: 'mobile',
           className: 'text-gray-600 dark:text-gray-400 font-mono',
       },
-      {
-          title: 'جایگاه سازمانی',
-          key: 'role',
-          render: (_: any, record: any) => (
-              <Select
-                value={record.role_id}
-                style={{ width: 180 }}
-                placeholder="انتخاب نقش"
-                onChange={(val) => handleRoleChange(record.id, val)}
-                options={roles.map(r => ({ label: r.title, value: r.id }))}
-                className="custom-select"
-              />
-          )
-      },
+            {
+                    title: 'جایگاه سازمانی',
+                    key: 'role',
+                    render: (_: any, record: any) => (
+                            <Select
+                                value={record.role_id}
+                                style={{ width: 180 }}
+                                placeholder="انتخاب نقش"
+                                onChange={(val) => handleRoleChange(record.id, val)}
+                                options={roles.map(r => ({ label: r.title, value: r.id }))}
+                                className="custom-select"
+                                disabled={!canEditRecord(record)}
+                            />
+                    )
+            },
       {
           title: 'وضعیت',
           key: 'status',
-          render: (_: any, record: any) => (
+                    render: (_: any, record: any) => (
               <Switch 
                 checked={record.is_active} 
                 checkedChildren="فعال" 
                 unCheckedChildren="غیرفعال"
                 onChange={(checked) => handleStatusChange(record.id, checked)}
                 className="bg-gray-300"
+                                disabled={!canEditRecord(record)}
               />
+          )
+      },
+      {
+          title: 'عملیات',
+          key: 'actions',
+          render: (_: any, record: any) => (
+              <div className="flex items-center gap-2">
+                  <Button size="small" onClick={() => handleEdit(record)} disabled={!canEditRecord(record)}>ویرایش</Button>
+                  <Button size="small" onClick={() => handleResetPassword(record.email)} disabled={!canEditRecord(record)}>تغییر رمز</Button>
+              </div>
           )
       }
   ];
 
   return (
     <div className="py-4">
-        <div className="flex justify-end mb-4">
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsDrawerOpen(true)} className="bg-leather-600 hover:!bg-leather-500 border-none h-10 px-6">کاربر جدید</Button>
+                <div className="flex justify-end mb-4">
+                        <Button
+                            type="primary"
+                            icon={<PlusOutlined />}
+                            onClick={() => { setEditingUser(null); form.resetFields(); setAvatarUrl(null); setIsDrawerOpen(true); }}
+                            className="bg-leather-600 hover:!bg-leather-500 border-none h-10 px-6"
+                            disabled={!canManageUsers}
+                        >
+                            کاربر جدید
+                        </Button>
         </div>
 
         <Table 
@@ -128,8 +256,8 @@ const UsersTab: React.FC = () => {
             className="custom-erp-table"
         />
 
-        <Drawer
-            title="افزودن کاربر جدید"
+                <Drawer
+                        title={editingUser ? 'ویرایش کاربر' : 'افزودن کاربر جدید'}
             width={500}
             onClose={() => setIsDrawerOpen(false)}
             open={isDrawerOpen}
@@ -137,7 +265,7 @@ const UsersTab: React.FC = () => {
             styles={{ body: { paddingBottom: 80 } }}
             className="dark:bg-[#141414]"
         >
-            <Form form={form} layout="vertical" onFinish={handleAddUser}>
+                        <Form form={form} layout="vertical" onFinish={handleAddOrEditUser}>
                 <div className="flex justify-center mb-6">
                     <div className="text-center">
                         <Avatar size={80} src={avatarUrl} icon={<UserOutlined />} className="mb-2 bg-gray-100" />
@@ -153,10 +281,38 @@ const UsersTab: React.FC = () => {
                 <Form.Item label="جایگاه سازمانی" name="role_id" rules={[{ required: true }]}>
                     <Select placeholder="انتخاب کنید" options={roles.map(r => ({ label: r.title, value: r.id }))} />
                 </Form.Item>
+                                <Form.Item label="نقش (متنی)" name="role" rules={[{ required: true }]}>
+                                        <Select
+                                            placeholder="انتخاب نقش"
+                                            options={[
+                                                { label: 'super_admin', value: 'super_admin' },
+                                                { label: 'admin', value: 'admin' },
+                                                { label: 'manager', value: 'manager' },
+                                                { label: 'viewer', value: 'viewer' },
+                                            ]}
+                                        />
+                                </Form.Item>
+                                {!editingUser && (
+                                    <Form.Item label="رمز عبور" name="password" rules={[{ required: true, min: 6 }]}>
+                                        <Input.Password placeholder="حداقل ۶ کاراکتر" />
+                                    </Form.Item>
+                                )}
+                                {editingUser && editingUser.id === currentUserId && (
+                                    <Form.Item label="رمز عبور جدید" name="password">
+                                        <Input.Password placeholder="در صورت نیاز تغییر دهید" />
+                                    </Form.Item>
+                                )}
+                                {editingUser && (
+                                    <Form.Item label="وضعیت" name="is_active" valuePropName="checked">
+                                        <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
+                                    </Form.Item>
+                                )}
                 
                 <div className="absolute bottom-0 left-0 right-0 p-4 bg-white dark:bg-[#1a1a1a] border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
                     <Button onClick={() => setIsDrawerOpen(false)}>انصراف</Button>
-                    <Button type="primary" htmlType="submit" loading={submitting} icon={<SaveOutlined />} className="bg-leather-600 border-none">ثبت کاربر</Button>
+                                        <Button type="primary" htmlType="submit" loading={submitting} icon={<SaveOutlined />} className="bg-leather-600 border-none">
+                                            {editingUser ? 'ذخیره تغییرات' : 'ثبت کاربر'}
+                                        </Button>
                 </div>
             </Form>
         </Drawer>

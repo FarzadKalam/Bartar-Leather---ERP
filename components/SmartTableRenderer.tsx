@@ -25,6 +25,7 @@ interface SmartTableRendererProps {
   pagination?: any;
   scrollX?: string | number;
   tableLayout?: 'auto' | 'fixed';
+  disableScroll?: boolean;
   dynamicOptions?: Record<string, any[]>;  // ✅ گزینه‌های dynamic برای نمایش برچسب‌های فارسی
   relationOptions?: Record<string, any[]>;  // ✅ گزینه‌های relation برای نمایش برچسب‌های فارسی
   allUsers?: any[];  // ✅ لیست کاربران
@@ -44,6 +45,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   pagination,
   scrollX,
   tableLayout,
+  disableScroll,
   dynamicOptions = {},  // ✅ اضافه شد
   relationOptions = {},   // ✅ اضافه شد
   allUsers = [],  // ✅ اضافه شد
@@ -472,7 +474,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
               showTotal: (total, range) => `${toPersianNumber(range[0])}-${toPersianNumber(range[1])} از ${toPersianNumber(total)}`
           }} 
           onChange={onChange}
-          scroll={{ x: scrollX ?? 'max-content', y: scrollHeight }}
+          scroll={disableScroll ? undefined : { x: scrollX ?? 'max-content', y: scrollHeight }}
           // 🔥 اتصال انتخاب گروهی
           rowSelection={rowSelection ? {
               type: 'checkbox',

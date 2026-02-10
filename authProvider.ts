@@ -43,10 +43,15 @@ export const authProvider: AuthBindings = {
     const { data } = await supabase.auth.getSession();
     const { session } = data;
 
-    if (session) {
+    const expiresAt = session?.expires_at ? session.expires_at * 1000 : 0;
+    if (session && (!expiresAt || expiresAt > Date.now())) {
       return {
         authenticated: true,
       };
+    }
+
+    if (session && expiresAt && expiresAt <= Date.now()) {
+      await supabase.auth.signOut();
     }
 
     return {

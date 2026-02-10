@@ -191,6 +191,19 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   };
 
   const renderInputContent = () => {
+    if (fieldType === FieldType.PROGRESS_STAGES) {
+      const status = (allValues as any)?.status;
+      const canEditStages = moduleId === 'production_orders' && (!status || status === 'pending');
+      return (
+        <ProductionStagesField
+          recordId={recordId}
+          readOnly={!canEditStages}
+          compact={compactMode}
+          orderStatus={moduleId === 'production_orders' ? (allValues as any)?.status : null}
+        />
+      );
+    }
+
     if (!forceEditMode) {
         if (fieldType === FieldType.CHECKBOX) {
             return value ? <Tag color="green">بله</Tag> : <Tag color="red">خیر</Tag>;
@@ -252,15 +265,6 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       case FieldType.LONG_TEXT:
         return <Input.TextArea {...commonProps} onChange={e => onChange(e.target.value)} rows={compactMode ? 1 : 4} />;
       
-      case FieldType.PROGRESS_STAGES:
-        return (
-          <ProductionStagesField 
-            recordId={recordId}
-            readOnly={!(moduleId === 'production_orders' && !compactMode)}
-            compact={compactMode} 
-          />
-        );
-
       case FieldType.NUMBER:
       case FieldType.PRICE:
       case FieldType.PERCENTAGE:

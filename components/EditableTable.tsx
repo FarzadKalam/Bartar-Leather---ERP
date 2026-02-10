@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Space, message, Empty, Typography, Spin, Select } from 'antd';
-import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, QrcodeOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
 import { calculateRow } from '../utils/calculations';
@@ -58,6 +58,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const isBomItemBlock = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'].includes(block?.id);
   const isInvoiceItems = moduleId === 'invoices' && block?.id === 'invoiceItems';
   const isInvoicePayments = moduleId === 'invoices' && block?.id === 'payments';
+  const isShelfInventoryBlock = block?.id === 'product_inventory' || block?.id === 'shelf_inventory';
 
   const [isEditing, setIsEditing] = useState(mode === 'local' && !isReadOnly);
   const [data, setData] = useState<any[]>(initialData || []);
@@ -69,6 +70,23 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const [shelfOptionsByRow, setShelfOptionsByRow] = useState<Record<string, { loading: boolean; options: { label: string; value: string }[] }>>({});
   const [localDynamicOptions, setLocalDynamicOptions] = useState<Record<string, any[]>>({});
   const [rowReloadVersion, setRowReloadVersion] = useState<Record<string, number>>({});
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    const empty = !Array.isArray(initialData) || initialData.length === 0;
+    if (isInvoiceItems || isShelfInventoryBlock) return false;
+    return empty;
+  });
+  const [userToggledCollapse, setUserToggledCollapse] = useState(false);
+
+  useEffect(() => {
+    if (userToggledCollapse) return;
+    const source = isEditing ? tempData : data;
+    const empty = !Array.isArray(source) || source.length === 0;
+    if (isInvoiceItems || isShelfInventoryBlock) {
+      setIsCollapsed(false);
+      return;
+    }
+    setIsCollapsed(empty);
+  }, [data, tempData, isEditing, isInvoiceItems, isShelfInventoryBlock, userToggledCollapse]);
 
   const productsModule = MODULES['products'];
   const editableAfterSelection = new Set(['buy_price', 'length', 'width', 'usage', 'waste_rate', 'main_unit']);
@@ -146,8 +164,21 @@ const EditableTable: React.FC<EditableTableProps> = ({
         ...item,
         key: item.key || item.id || `${Date.now()}_${index}`,
       }));
-      setData(dataWithKey);
-      if (mode === 'local') setTempData(dataWithKey);
+      const lockedData = isProductionOrder && isBomItemBlock
+        ? dataWithKey.map((row: any) => {
+            if (!row?.selected_product_id) return row;
+            const locked = new Set<string>(row?._lockedFields || []);
+            (block.tableColumns || []).forEach((col: any) => {
+              const key = col.key;
+              if (!editableAfterSelection.has(key)) {
+                locked.add(key);
+              }
+            });
+            return { ...row, _lockedFields: Array.from(locked) };
+          })
+        : dataWithKey;
+      setData(lockedData);
+      if (mode === 'local') setTempData(lockedData);
     }
   }, [initialData, mode, isProductInventory, isShelfInventory, populateSource?.recordId]);
 
@@ -383,6 +414,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   const startEdit = () => {
     if (isReadOnly) return;
+    setUserToggledCollapse(true);
+    setIsCollapsed(false);
     setIsEditing(true);
     const preparedData = data.map((row, i) => ({
       ...row,
@@ -559,6 +592,14 @@ const EditableTable: React.FC<EditableTableProps> = ({
     }));
   };
 
+  const ensureRowExpanded = (rowKey: string) => {
+    setExpandedRowKeys((prev) => {
+      const keyStr = String(rowKey);
+      if (prev.some((k) => String(k) === keyStr)) return prev;
+      return [...prev, rowKey];
+    });
+  };
+
   const loadProductsForRow = async (rowKey: string, rowData: any, options?: { resetPage?: boolean }) => {
     if (!productsModule) return;
     if (options?.resetPage) bumpRowReloadVersion(rowKey);
@@ -677,9 +718,17 @@ const EditableTable: React.FC<EditableTableProps> = ({
           title: 'محصول انتخابی',
           dataIndex: 'selected_product_name',
           key: 'selected_product_name',
-          width: 180,
-          render: (text: any, _record: any, index: number) => (
-            text ? (
+          width: 240,
+          render: (text: any, _record: any, index: number) => {
+            const rowKey = getRowKey(_record);
+            const productsState = expandedProducts[rowKey];
+            const productOptions = (productsState?.data || []).map((item: any) => ({
+              value: item.id,
+              label: item.system_code ? `${item.system_code} - ${item.name}` : item.name,
+            }));
+
+            if (text) {
+              return (
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium text-gray-700">{text}</span>
                 <Button
@@ -689,18 +738,97 @@ const EditableTable: React.FC<EditableTableProps> = ({
                   onClick={() => clearSelectedProduct(index)}
                 />
               </div>
-            ) : (
+              );
+            }
+
+            return (
               <div className="flex items-center gap-2">
-                <span className="text-gray-400">انتخاب نشده</span>
+                <Select
+                  placeholder="جستجو یا انتخاب محصول"
+                  value={null}
+                  showSearch
+                  options={productOptions}
+                  optionFilterProp="label"
+                  onDropdownVisibleChange={(open) => {
+                    if (!open) return;
+                    ensureRowExpanded(rowKey);
+                    loadProductsForRow(rowKey, _record, { resetPage: true });
+                  }}
+                  onChange={async (val) => {
+                    const selected = (productsState?.data || []).find((p: any) => String(p.id) === String(val));
+                    if (selected) {
+                      applySelectedProduct(index, rowKey, selected);
+                      return;
+                    }
+                    const { data: product } = await supabase
+                      .from('products')
+                      .select('*')
+                      .eq('id', val)
+                      .single();
+                    if (product) applySelectedProduct(index, rowKey, product);
+                  }}
+                  className="w-full"
+                  getPopupContainer={() => document.body}
+                  dropdownStyle={{ zIndex: 4000 }}
+                />
                 <QrScanPopover
                   label=""
                   buttonClassName="shrink-0"
-                  onScan={(scan) => handleQrScanForRow(index, getRowKey(_record), scan)}
+                  onScan={(scan) => handleQrScanForRow(index, rowKey, scan)}
                   buttonProps={{ type: 'text', size: 'small' }}
                 />
               </div>
-            )
-          ),
+            );
+          },
+        },
+        {
+          title: 'قفسه برداشت',
+          dataIndex: 'selected_shelf_id',
+          key: 'selected_shelf_id',
+          width: 220,
+          render: (_: any, record: any) => {
+            const rowKey = getRowKey(record);
+            const rowIndex = resolveRowIndex(rowKey);
+            const shelvesState = shelfOptionsByRow[rowKey];
+            const hasProduct = !!record?.selected_product_id;
+            return (
+              <div className="flex items-center gap-2">
+                <Select
+                  placeholder={hasProduct ? 'انتخاب قفسه' : 'ابتدا محصول را انتخاب کنید'}
+                  value={record?.selected_shelf_id || null}
+                  loading={shelvesState?.loading}
+                  options={shelvesState?.options || []}
+                  onChange={(val) => {
+                    if (rowIndex < 0) return;
+                    updateRow(rowIndex, 'selected_shelf_id', val || null);
+                  }}
+                  onDropdownVisibleChange={(open) => {
+                    if (!open || !hasProduct) return;
+                    if (!shelvesState?.loading && !(shelvesState?.options || []).length) {
+                      loadShelvesForRow(rowKey, record.selected_product_id);
+                    }
+                  }}
+                  disabled={!hasProduct || isReadOnly}
+                  allowClear
+                  className="w-full"
+                  status={hasProduct && !record?.selected_shelf_id ? 'error' : undefined}
+                  getPopupContainer={() => document.body}
+                  dropdownStyle={{ zIndex: 4000 }}
+                />
+                <QrScanPopover
+                  label=""
+                  buttonClassName="shrink-0"
+                  buttonProps={{ type: 'default', shape: 'circle', size: 'small' }}
+                  onScan={({ moduleId: scannedModule, recordId }) => {
+                    if (rowIndex < 0) return;
+                    if (scannedModule === 'shelves' && recordId) {
+                      updateRow(rowIndex, 'selected_shelf_id', recordId);
+                    }
+                  }}
+                />
+              </div>
+            );
+          },
         },
       ]
     : [];
@@ -720,7 +848,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
           options: col.options,
           relationConfig: col.relationConfig,
           dynamicOptionsCategory: col.dynamicOptionsCategory,
-          readonly: col.readonly || ((record as any)?._lockedFields || []).includes(col.key),
+          readonly: col.readonly
+            || ((record as any)?._lockedFields || []).includes(col.key)
+            || (isProductionOrder && isBomItemBlock && (record as any)?.selected_product_id && !editableAfterSelection.has(col.key)),
         };
 
         let options = col.options;
@@ -793,10 +923,22 @@ const EditableTable: React.FC<EditableTableProps> = ({
   return (
     <div className={`bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border ${isEditing ? 'border-leather-500' : 'border-gray-200 dark:border-gray-800'} transition-all font-medium`}>
       <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
-        <h3 className="font-bold text-lg text-gray-700 dark:text-white m-0 flex items-center gap-2">
-          <span className="w-1 h-6 bg-leather-500 rounded-full inline-block"></span>
-          {block.titles.fa}
-        </h3>
+        <div className="flex items-center gap-2 flex-row-reverse">
+          <Button
+            type="text"
+            size="small"
+            className="p-0"
+            onClick={() => {
+              setUserToggledCollapse(true);
+              setIsCollapsed((prev) => !prev);
+            }}
+            icon={<RightOutlined className={`transition-transform ${isCollapsed ? '' : 'rotate-90'}`} />}
+          />
+          <h3 className="font-bold text-base text-gray-700 dark:text-white m-0 flex items-center gap-2">
+            <span className="w-1 h-5 bg-leather-500 rounded-full inline-block"></span>
+            {block.titles.fa}
+          </h3>
+        </div>
         <Space>
           {mode === 'db' && !isEditing && !isReadOnly && <Button size="small" icon={<EditOutlined />} onClick={startEdit}>ویرایش لیست</Button>}
           {isEditing && mode !== 'local' && (
@@ -808,173 +950,150 @@ const EditableTable: React.FC<EditableTableProps> = ({
         </Space>
       </div>
 
-      <Table
-        dataSource={isEditing ? tempData : data}
-        columns={columns}
-        pagination={false}
-        size="middle"
-        rowKey={(record: any) => record.key || record.id || Math.random()}
-        locale={{ emptyText: <Empty description="لیست خالی است" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-        className="custom-erp-table font-medium editable-table-main"
-        tableLayout="fixed"
-        scroll={{ x: '100%' }}
-        expandable={isProductionOrder && isBomItemBlock ? {
-          expandedRowKeys,
-          onExpandedRowsChange: (keys) => setExpandedRowKeys(keys as React.Key[]),
-          onExpand: (expanded, record) => {
-            if (expanded) {
-              const rowKey = getRowKey(record);
-              loadProductsForRow(rowKey, record, { resetPage: true });
-              if (record?.selected_product_id) {
-                loadShelvesForRow(rowKey, record.selected_product_id);
+      {!isCollapsed && (
+        <Table
+          dataSource={isEditing ? tempData : data}
+          columns={columns}
+          pagination={false}
+          size="middle"
+          rowKey={(record: any) => record.key || record.id || Math.random()}
+          locale={{ emptyText: <Empty description="لیست خالی است" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+          className="custom-erp-table font-medium editable-table-main"
+          tableLayout="fixed"
+          scroll={{ x: '100%' }}
+          expandable={isProductionOrder && isBomItemBlock ? {
+            expandedRowKeys,
+            onExpandedRowsChange: (keys) => setExpandedRowKeys(keys as React.Key[]),
+            onExpand: (expanded, record) => {
+              if (expanded) {
+                const rowKey = getRowKey(record);
+                loadProductsForRow(rowKey, record, { resetPage: true });
+                if (record?.selected_product_id) {
+                  loadShelvesForRow(rowKey, record.selected_product_id);
+                }
               }
+            },
+            expandedRowRender: (record: any) => {
+              const rowKey = getRowKey(record);
+              const rowIndex = resolveRowIndex(rowKey);
+              const productsState = expandedProducts[rowKey];
+              const selectedProductId = record?.selected_product_id;
+
+              const filterColumns = (block.tableColumns || [])
+                .filter((col: any) => col.filterable)
+                .map((col: any) => col.key);
+              const productFieldKeys = (productsModule?.fields || []).map((f: any) => f.key) || [];
+              const specsColumns = filterColumns.filter((key: string) => productFieldKeys.includes(key));
+
+              const baseColumns = ['image_url', 'name', 'system_code'];
+              const tailColumns = ['stock', 'buy_price', 'sell_price'];
+              const orderedColumns = Array.from(new Set([...baseColumns, ...specsColumns, ...tailColumns]));
+              const resolvedColumns = orderedColumns.filter((key) => productFieldKeys.includes(key));
+              const fallbackColumns = resolvedColumns.length > 0 ? resolvedColumns : ['name'];
+
+              return (
+                <div className="bg-gray-50 dark:bg-[#121212] py-3 px-0 rounded-lg border border-gray-200 dark:border-gray-700">
+                  {productsState?.loading ? (
+                    <div className="py-6 flex items-center justify-center"><Spin /></div>
+                  ) : (
+                    <div className="smarttable-shell">
+                      <SmartTableRenderer
+                        key={`products-${rowKey}-${rowReloadVersion[rowKey] || 0}`}
+                        moduleConfig={productsModule}
+                        data={productsState?.data || []}
+                        loading={false}
+                        relationOptions={relationOptions}
+                        dynamicOptions={dynamicOptions}
+                        containerClassName="smarttable-shell-inner"
+                        tableLayout="auto"
+                        disableScroll={true}
+                        visibleColumns={fallbackColumns}
+                        pagination={{ pageSize: 5, position: ['bottomCenter'], size: 'small', showSizeChanger: false }}
+                        rowSelection={{
+                          type: 'radio',
+                          selectedRowKeys: selectedProductId ? [selectedProductId] : [],
+                          onChange: (_keys: any[], rows: any[]) => {
+                            const selected = rows?.[0];
+                            if (rowIndex < 0) return;
+                            applySelectedProduct(rowIndex, rowKey, selected);
+                          },
+                        }}
+                      />
+                    </div>
+                  )}
+
+                </div>
+              );
+            },
+          } : undefined}
+          footer={(isEditing || mode === 'local') && !isReadOnly ? () => (
+            <Button type="dashed" block icon={<PlusOutlined />} onClick={addRow}>افزودن ردیف جدید</Button>
+          ) : undefined}
+          summary={(pageData) => {
+            let cellIndex = 0;
+            const cells: React.ReactNode[] = [];
+
+            if (isProductionOrder && isBomItemBlock) {
+              cells.push(<Table.Summary.Cell index={cellIndex} key="expand-spacer" />);
+              cellIndex += 1;
             }
-          },
-          expandedRowRender: (record: any) => {
-            const rowKey = getRowKey(record);
-            const rowIndex = resolveRowIndex(rowKey);
-            const productsState = expandedProducts[rowKey];
-            const shelvesState = shelfOptionsByRow[rowKey];
-            const selectedProductId = record?.selected_product_id;
 
-            const filterColumns = (block.tableColumns || [])
-              .filter((col: any) => col.filterable)
-              .map((col: any) => col.key);
-            const productFieldKeys = (productsModule?.fields || []).map((f: any) => f.key) || [];
-            const specsColumns = filterColumns.filter((key: string) => productFieldKeys.includes(key));
+            columns.forEach((col: any, index: number) => {
+              if (col.key === 'actions') {
+                cells.push(<Table.Summary.Cell index={cellIndex} key={`actions_${index}`} />);
+                cellIndex += 1;
+                return;
+              }
 
-            const baseColumns = ['image_url', 'name', 'system_code'];
-            const tailColumns = ['stock', 'buy_price', 'sell_price'];
-            const orderedColumns = Array.from(new Set([...baseColumns, ...specsColumns, ...tailColumns]));
-            const resolvedColumns = orderedColumns.filter((key) => productFieldKeys.includes(key));
-            const fallbackColumns = resolvedColumns.length > 0 ? resolvedColumns : ['name'];
+              if (index === 0) {
+                cells.push(
+                  <Table.Summary.Cell index={cellIndex} key={`label_${index}`}>
+                    جمع:
+                  </Table.Summary.Cell>
+                );
+                cellIndex += 1;
+                return;
+              }
+
+              if (col.showTotal || ['total_price', 'amount', 'quantity', 'usage', 'stock'].includes(col.key)) {
+                let total = 0;
+                if (isInvoiceItems && (col.key === 'discount' || col.key === 'vat')) {
+                  total = pageData.reduce((prev: number, current: any) => {
+                    const amounts = getInvoiceAmounts(current);
+                    return prev + (col.key === 'discount' ? amounts.discountAmount : amounts.vatAmount);
+                  }, 0);
+                } else if (isInvoicePayments && col.key === 'amount') {
+                  total = pageData.reduce((prev: number, current: any) =>
+                    current?.status === 'received' ? prev + (parseFloat(current[col.key]) || 0) : prev,
+                  0);
+                } else {
+                  total = pageData.reduce((prev: number, current: any) => prev + (parseFloat(current[col.key]) || 0), 0);
+                }
+                cells.push(
+                  <Table.Summary.Cell index={cellIndex} key={`total_${index}`}>
+                    <Text type="success" className="persian-number">
+                      {toPersianNumber(total.toLocaleString('en-US'))}
+                    </Text>
+                  </Table.Summary.Cell>
+                );
+                cellIndex += 1;
+                return;
+              }
+
+              cells.push(<Table.Summary.Cell index={cellIndex} key={`empty_${index}`} />);
+              cellIndex += 1;
+            });
 
             return (
-              <div className="bg-gray-50 dark:bg-[#121212] py-3 px-0 rounded-lg border border-gray-200 dark:border-gray-700">
-                {productsState?.loading ? (
-                  <div className="py-6 flex items-center justify-center"><Spin /></div>
-                ) : (
-                  <div className="smarttable-shell">
-                    <SmartTableRenderer
-                      key={`products-${rowKey}-${rowReloadVersion[rowKey] || 0}`}
-                      moduleConfig={productsModule}
-                      data={productsState?.data || []}
-                      loading={false}
-                      relationOptions={relationOptions}
-                      dynamicOptions={dynamicOptions}
-                      containerClassName="smarttable-shell-inner"
-                      scrollX="100%"
-                      tableLayout="auto"
-                      visibleColumns={fallbackColumns}
-                      pagination={{ pageSize: 5, position: ['bottomCenter'], size: 'small', showSizeChanger: false }}
-                      rowSelection={{
-                        type: 'radio',
-                        selectedRowKeys: selectedProductId ? [selectedProductId] : [],
-                        onChange: (_keys: any[], rows: any[]) => {
-                          const selected = rows?.[0];
-                          if (rowIndex < 0) return;
-                          applySelectedProduct(rowIndex, rowKey, selected);
-                        },
-                      }}
-                    />
-                  </div>
-                )}
-
-                {selectedProductId && (
-                  <div className="mt-2 flex flex-col gap-2">
-                    <div className="text-xs text-gray-500">
-                      انتخاب قفسه برداشت <span className="text-red-500">*</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Select
-                        placeholder="قفسه موردنظر"
-                        value={record?.selected_shelf_id || null}
-                        loading={shelvesState?.loading}
-                        options={shelvesState?.options || []}
-                        onChange={(val) => {
-                          if (rowIndex < 0) return;
-                          updateRow(rowIndex, 'selected_shelf_id', val || null);
-                        }}
-                        className="w-full md:w-72"
-                        allowClear
-                        getPopupContainer={() => document.body}
-                        dropdownStyle={{ zIndex: 4000 }}
-                      />
-                      <Button icon={<QrcodeOutlined />} className="shrink-0" />
-                    </div>
-                  </div>
-                )}
-              </div>
+              <Table.Summary fixed>
+                <Table.Summary.Row className="bg-gray-50 dark:bg-gray-800 font-bold">
+                  {cells}
+                </Table.Summary.Row>
+              </Table.Summary>
             );
-          },
-        } : undefined}
-        footer={(isEditing || mode === 'local') && !isReadOnly ? () => (
-          <Button type="dashed" block icon={<PlusOutlined />} onClick={addRow}>افزودن ردیف جدید</Button>
-        ) : undefined}
-        summary={(pageData) => {
-          let cellIndex = 0;
-          const cells: React.ReactNode[] = [];
-
-          if (isProductionOrder && isBomItemBlock) {
-            cells.push(<Table.Summary.Cell index={cellIndex} key="expand-spacer" />);
-            cellIndex += 1;
-          }
-
-          columns.forEach((col: any, index: number) => {
-            if (col.key === 'actions') {
-              cells.push(<Table.Summary.Cell index={cellIndex} key={`actions_${index}`} />);
-              cellIndex += 1;
-              return;
-            }
-
-            if (index === 0) {
-              cells.push(
-                <Table.Summary.Cell index={cellIndex} key={`label_${index}`}>
-                  جمع:
-                </Table.Summary.Cell>
-              );
-              cellIndex += 1;
-              return;
-            }
-
-            if (col.showTotal || ['total_price', 'amount', 'quantity', 'usage', 'stock'].includes(col.key)) {
-              let total = 0;
-              if (isInvoiceItems && (col.key === 'discount' || col.key === 'vat')) {
-                total = pageData.reduce((prev: number, current: any) => {
-                  const amounts = getInvoiceAmounts(current);
-                  return prev + (col.key === 'discount' ? amounts.discountAmount : amounts.vatAmount);
-                }, 0);
-              } else if (isInvoicePayments && col.key === 'amount') {
-                total = pageData.reduce((prev: number, current: any) =>
-                  current?.status === 'received' ? prev + (parseFloat(current[col.key]) || 0) : prev,
-                0);
-              } else {
-                total = pageData.reduce((prev: number, current: any) => prev + (parseFloat(current[col.key]) || 0), 0);
-              }
-              cells.push(
-                <Table.Summary.Cell index={cellIndex} key={`total_${index}`}>
-                  <Text type="success" className="persian-number">
-                    {toPersianNumber(total.toLocaleString('en-US'))}
-                  </Text>
-                </Table.Summary.Cell>
-              );
-              cellIndex += 1;
-              return;
-            }
-
-            cells.push(<Table.Summary.Cell index={cellIndex} key={`empty_${index}`} />);
-            cellIndex += 1;
-          });
-
-          return (
-            <Table.Summary fixed>
-              <Table.Summary.Row className="bg-gray-50 dark:bg-gray-800 font-bold">
-                {cells}
-              </Table.Summary.Row>
-            </Table.Summary>
-          );
-        }}
-      />
+          }}
+        />
+      )}
       <style>{`
         .ant-table-expanded-row > td {
           padding-left: 0 !important;

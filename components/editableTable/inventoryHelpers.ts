@@ -18,18 +18,20 @@ export const updateProductStock = async (supabase: SupabaseClient, productId: st
 export const fetchShelfOptions = async (supabase: SupabaseClient, productId: string) => {
   const { data: rows, error } = await supabase
     .from('product_inventory')
-    .select('product_id, shelf_id, stock, shelves(shelf_number), warehouses(name)')
+    .select('product_id, shelf_id, stock, shelves(system_code, shelf_number, name, warehouses(name))')
     .eq('product_id', productId)
     .order('stock', { ascending: false });
   if (error) throw error;
 
   return (rows || []).map((row: any) => {
-    const shelfLabel = row?.shelves?.shelf_number || row.shelf_id;
-    const warehouseLabel = row?.warehouses?.name ? ` - ${row.warehouses.name}` : '';
+    const shelfNumber = row?.shelves?.shelf_number || row?.shelves?.name || row.shelf_id;
+    const systemCode = row?.shelves?.system_code || '';
+    const warehouseName = row?.shelves?.warehouses?.name || '';
+    const shelfLabel = [systemCode, shelfNumber, warehouseName].filter(Boolean).join(' - ');
     const stockLabel = typeof row.stock === 'number' ? row.stock : parseFloat(row.stock) || 0;
     return {
       value: row.shelf_id,
-      label: `${shelfLabel}${warehouseLabel} (موجودی: ${stockLabel})`,
+      label: `${shelfLabel} (موجودی: ${stockLabel})`,
     };
   });
 };

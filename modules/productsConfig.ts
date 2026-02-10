@@ -137,16 +137,16 @@ export const createBomTableColumns = (
   const includeDimensions = options?.includeDimensions === true;
   const categoryValue = options?.categoryValue;
   const filterKeyMap: Record<string, string> = {
-    leather_colors: 'general_color',
-    lining_color: 'general_color',
-    fitting_colors: 'general_color',
-    leather_color_1: 'general_color'
+    leather_colors: 'leather_colors',
+    lining_color: 'lining_color',
+    fitting_colors: 'fitting_colors',
+    leather_color_1: 'leather_colors'
   };
   
   return [
     { 
       key: 'parent_category',
-      title: 'محصول مادر',
+      title: 'مواد اولیه',
       type: FieldType.SELECT,
       options: MATERIAL_CATEGORY_OPTIONS,
       defaultValue: categoryValue,
@@ -318,7 +318,7 @@ const BLOCKS = {
     id: 'product_inventory',
     titles: { fa: 'موجودی', en: 'Inventory' },
     icon: 'DropboxOutlined',
-    order: 14,
+    order: 9,
     type: BlockType.FIELD_GROUP,
     rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
     tableColumns: createShelfInventoryTableColumns()
@@ -360,6 +360,7 @@ export const productsConfig: ModuleDefinition = {
         visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } 
       },
           
+      BLOCKS.product_inventory,
       { 
         ...BLOCKS.items_leather,
         visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
@@ -375,8 +376,7 @@ export const productsConfig: ModuleDefinition = {
       { 
         ...BLOCKS.items_accessory,
         visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
-      },
-      BLOCKS.product_inventory
+      }
     ], 
     relatedTabs: [
       {

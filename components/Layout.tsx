@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Layout as AntLayout, Menu, Button, Avatar, Dropdown, message, Modal } from 'antd';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Layout as AntLayout, Menu, Button, Avatar, Dropdown, message, Modal, Input, Spin } from 'antd';
+import type { InputRef } from 'antd';
 import { 
   DashboardOutlined, 
   SkinOutlined, 
@@ -17,12 +18,11 @@ import {
   FileTextOutlined,
   CheckSquareOutlined,
   GoldOutlined,
-  SunOutlined,
   ExclamationCircleOutlined,
-  MoonOutlined
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient'; // 👈 ایمپورت سوپابیس
+import { MODULES } from '../moduleRegistry';
 import QrScanPopover from './QrScanPopover';
 import NotificationsPopover from './NotificationsPopover';
 
@@ -34,11 +34,18 @@ interface LayoutProps {
   toggleTheme: () => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) => {
+const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
   const [collapsed, setCollapsed] = useState(true);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [currentUser, setCurrentUser] = useState<any>(null); // برای نمایش آواتار واقعی
+  const [currentUserProfile, setCurrentUserProfile] = useState<any>(null);
+  const [breadcrumb, setBreadcrumb] = useState<{ moduleTitle?: string; moduleId?: string; recordName?: string } | null>(null);
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<Array<{ moduleId: string; moduleTitle: string; items: any[] }>>([]);
+  const searchRef = useRef<InputRef>(null);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
   
   const navigate = useNavigate();
   const location = useLocation();
@@ -47,6 +54,14 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setCurrentUser(user);
+      if (user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .eq('id', user.id)
+          .maybeSingle();
+        setCurrentUserProfile(profile || null);
+      }
     };
     getUser();
 
@@ -123,14 +138,74 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
     
   ];
 
+  const searchableModules = useMemo(() => {
+    return Object.entries(MODULES).map(([id, config]) => {
+      const fieldKeys = (config.fields || []).map((f: any) => f.key);
+      const preferred = ['name', 'title', 'system_code', 'manual_code', 'business_name'];
+      const inferred = fieldKeys.filter((key: string) => /name|title|code/i.test(key));
+      const keys = Array.from(new Set([...preferred, ...inferred])).filter((key) => fieldKeys.includes(key));
+      return { id, title: config.titles?.fa || id, keys };
+    });
+  }, []);
+
+  useEffect(() => {
+    const term = globalSearch.trim();
+    if (!term) {
+      setSearchResults([]);
+      return;
+    }
+
+    const handle = setTimeout(async () => {
+      try {
+        setSearchLoading(true);
+        const results = await Promise.all(
+          searchableModules.map(async (mod) => {
+            if (!mod.keys.length) return { moduleId: mod.id, moduleTitle: mod.title, items: [] };
+            const orFilters = mod.keys
+              .map((key) => `${key}.ilike.%${term}%`)
+              .join(',');
+            const selectFields = Array.from(new Set(['id', ...mod.keys])).join(', ');
+            const { data } = await supabase
+              .from(mod.id)
+              .select(selectFields)
+              .or(orFilters)
+              .limit(8);
+            return { moduleId: mod.id, moduleTitle: mod.title, items: data || [] };
+          })
+        );
+        setSearchResults(results.filter((r) => r.items.length > 0));
+      } catch (err) {
+        console.warn('Global search failed', err);
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(handle);
+  }, [globalSearch, searchableModules]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!searchBoxRef.current) return;
+      if (searchBoxRef.current.contains(event.target as Node)) return;
+      setSearchResults([]);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { moduleTitle?: string; moduleId?: string; recordName?: string } | null;
+      setBreadcrumb(detail || null);
+    };
+    window.addEventListener('erp:breadcrumb', handler as EventListener);
+    return () => window.removeEventListener('erp:breadcrumb', handler as EventListener);
+  }, []);
+
   const userMenu = {
     items: [
-      {
-        key: 'theme',
-        label: isDarkMode ? 'حالت روشن' : 'حالت تیره',
-        icon: isDarkMode ? <SunOutlined /> : <MoonOutlined />,
-        onClick: toggleTheme,
-      },
       {
         key: 'profile',
         label: 'پروفایل کاربری',
@@ -240,11 +315,57 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
             backgroundColor: isDarkMode ? 'rgba(20, 20, 20, 0.8)' : 'rgba(255, 255, 255, 0.8)',
           }}
         >
-          <div className="flex items-center gap-4">          
-             <div className="flex items-center bg-gray-100 dark:bg-[#1a1a1a] rounded-xl px-3 py-1.5 border border-gray-200 dark:border-gray-800 w-40 sm:w-64 transition-colors">
+          <div className="relative flex items-center gap-4" ref={searchBoxRef}>          
+            <div className="flex items-center bg-gray-100 dark:bg-[#1a1a1a] rounded-xl px-3 py-1.5 border border-gray-200 dark:border-gray-800 w-48 sm:w-72 transition-colors">
               <SearchOutlined className="text-gray-400" />
-              <input type="text" placeholder="جستجو..." className="bg-transparent border-none outline-none text-xs text-gray-700 dark:text-gray-200 w-full mr-2 placeholder-gray-400" />
+              <Input
+                ref={searchRef}
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="جستجو در همه جا..."
+                className="bg-transparent border-none outline-none text-xs text-gray-700 dark:text-gray-200 w-full mr-2 placeholder-gray-400"
+                bordered={false}
+              />
             </div>
+
+            {(searchLoading || searchResults.length > 0) && globalSearch.trim() && (
+              <div className="absolute top-12 right-0 z-[1200] w-72 sm:w-[420px] max-h-[60vh] overflow-auto rounded-b-2xl rounded-t-none border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1a1a1a] shadow-2xl p-1.5">
+                {searchLoading && (
+                  <div className="flex items-center gap-2 text-xs text-gray-500 p-2">
+                    <Spin size="small" /> در حال جستجو...
+                  </div>
+                )}
+                {!searchLoading && searchResults.length === 0 && (
+                  <div className="text-xs text-gray-400 p-2">نتیجه‌ای یافت نشد</div>
+                )}
+                {!searchLoading && searchResults.map((group) => (
+                  <div key={group.moduleId} className="mb-0.5">
+                    <div className="text-[11px] text-gray-400 px-2 py-0.5">{group.moduleTitle}</div>
+                    <div className="h-[2px] bg-leather-500 rounded-full mx-2 mt-0.5 mb-0.5" />
+                    <div className="space-y-0.5">
+                      {group.items.map((item: any) => {
+                        const label = item.name || item.title || item.business_name || item.system_code || item.manual_code || item.id;
+                        const code = item.system_code || item.manual_code;
+                        return (
+                          <div
+                            key={item.id}
+                            className="px-2 py-0.5 rounded-lg text-xs text-leather-600 dark:text-leather-400 hover:underline hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer flex items-center justify-between"
+                            onClick={() => {
+                              navigate(`/${group.moduleId}/${item.id}`);
+                              setGlobalSearch('');
+                              setSearchResults([]);
+                            }}
+                          >
+                            <span className="truncate">{label}</span>
+                            {code && <span className="text-[10px] text-gray-400">{code}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2 md:gap-4">
             <QrScanPopover
@@ -267,15 +388,39 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode, toggleTheme }) =>
                    {/* استفاده از متادیتای کاربر لاگین شده برای آواتار */}
                    <Avatar 
                      size="small" 
-                     src={currentUser?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=a1"} 
+                     src={currentUserProfile?.avatar_url || currentUser?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=a1"} 
                      className="border border-leather-500 shadow-lg" 
                    >
-                     {currentUser?.email?.[0]?.toUpperCase()}
+                     {(currentUserProfile?.full_name || currentUser?.email || '').toString().trim()[0]?.toUpperCase()}
                    </Avatar>
                 </div>
             </Dropdown>
           </div>
         </Header>
+
+        {breadcrumb && breadcrumb.moduleTitle && (
+          <div className="sticky top-16 z-[900] bg-white/90 dark:bg-[#1a1a1a]/90 backdrop-blur border-b border-gray-200 dark:border-gray-800 px-2 md:px-4 py-2 mb-3">
+            <div className="flex items-center gap-1 text-xs md:text-sm text-gray-500 whitespace-nowrap overflow-x-auto no-scrollbar">
+              <button onClick={() => navigate('/')} className="flex items-center gap-1 hover:text-leather-600">
+                <HomeOutlined /> خانه
+              </button>
+              <span className="px-1 text-gray-300">/</span>
+              {breadcrumb.moduleId ? (
+                <button onClick={() => navigate(`/${breadcrumb.moduleId}`)} className="hover:text-leather-600">
+                  {breadcrumb.moduleTitle}
+                </button>
+              ) : (
+                <span>{breadcrumb.moduleTitle}</span>
+              )}
+              {breadcrumb.recordName && (
+                <>
+                  <span className="px-1 text-gray-700">/</span>
+                  <span className="text-gray-700 dark:text-gray-200 truncate max-w-[160px] md:max-w-[320px]">{String(breadcrumb.recordName).trim()}</span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         <Content className={`relative flex-1 ${isMobile && !isKeyboardVisible ? 'pb-20' : ''}`}>
           {children}

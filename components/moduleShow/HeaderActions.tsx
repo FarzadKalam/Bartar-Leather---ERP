@@ -1,6 +1,6 @@
 import React from 'react';
-import { Button, Breadcrumb, Tooltip, Popover, QRCode } from 'antd';
-import { ArrowRightOutlined, HomeOutlined, PrinterOutlined, ShareAltOutlined, QrcodeOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Button, Tooltip, Popover, QRCode } from 'antd';
+import { ArrowRightOutlined, PrinterOutlined, ShareAltOutlined, QrcodeOutlined, EditOutlined, DeleteOutlined, AppstoreOutlined, PlusOutlined, StarOutlined } from '@ant-design/icons';
 
 interface HeaderActionsProps {
   moduleTitle: string;
@@ -18,12 +18,8 @@ interface HeaderActionsProps {
 }
 
 const HeaderActions: React.FC<HeaderActionsProps> = ({
-  moduleTitle,
-  recordName,
   shareUrl,
   onBack,
-  onHome,
-  onModule,
   onPrint,
   onEdit,
   onDelete,
@@ -32,28 +28,18 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
   extraActions = [],
 }) => {
   return (
-    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-2 md:gap-4">
-      <div className="flex items-center gap-2 md:gap-4 w-full md:w-auto overflow-hidden">
-        <Button
-          icon={<ArrowRightOutlined />}
-          onClick={onBack}
-          shape="circle"
-          size="large"
-          className="border-none shadow-sm shrink-0"
-        />
-        <Breadcrumb
-          className="whitespace-nowrap overflow-x-auto no-scrollbar text-xs md:text-sm"
-          items={[
-            { title: <HomeOutlined />, onClick: onHome },
-            { title: moduleTitle, onClick: onModule },
-            { title: recordName},
-        ]}
-        />
-      </div>
-      <div className="flex gap-2 md:gap-3 w-full md:w-auto justify-end flex-wrap">
+    <div className="flex w-full justify-between items-center flex-wrap gap-2 mb-2 flex-row-reverse">
+      <div className="flex gap-2 flex-wrap">
         {extraActions.map(action => (
           <Button
             key={action.id}
+            icon={
+              action.id === 'auto_name'
+                ? <StarOutlined />
+                : action.variant === 'primary'
+                  ? <PlusOutlined />
+                  : <AppstoreOutlined />
+            }
             type={action.variant === 'primary' ? 'primary' : 'default'}
             onClick={action.onClick}
             size="middle"
@@ -67,47 +53,55 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
             icon={<PrinterOutlined />}
             onClick={onPrint}
             size="middle"
-            className="hover:text-leather-600 hover:border-leather-600 min-w-[40px]"
+            className="hover:text-leather-600 hover:border-leather-600"
           />
         </Tooltip>
         <Tooltip title="اشتراک گذاری">
           <Button 
             icon={<ShareAltOutlined />} 
             size="middle"
-            className="hover:text-leather-600 hover:border-leather-600 min-w-[40px]" 
+            className="hover:text-leather-600 hover:border-leather-600" 
           />
         </Tooltip>
         <Popover content={<QRCode value={shareUrl} bordered={false} />} trigger="click">
           <Button 
             icon={<QrcodeOutlined />} 
             size="middle"
-            className="hover:text-leather-600 hover:border-leather-600 px-3"
-          >
-            QR
-          </Button>
+            className="hover:text-leather-600 hover:border-leather-600"
+          />
         </Popover>
         {canEdit && (
-          <Button
-            icon={<EditOutlined />}
-            onClick={onEdit}
-            size="middle"
-            className="hover:text-leather-600 hover:border-leather-600 inline-flex"
-          >
-            ویرایش
-          </Button>
+          <Tooltip title="ویرایش">
+            <Button
+              icon={<EditOutlined />}
+              onClick={onEdit}
+              size="middle"
+              className="hover:text-leather-600 hover:border-leather-600"
+            />
+          </Tooltip>
         )}
         {canDelete && (
-          <Button
-            icon={<DeleteOutlined />}
-            danger
-            onClick={onDelete}
-            size="middle"
-            className="hover:text-leather-600 hover:border-leather-600 inline-flex"
-          >
-            حذف
-          </Button>
+          <Tooltip title="حذف">
+            <Button
+              icon={<DeleteOutlined />}
+              danger
+              onClick={onDelete}
+              size="middle"
+              className="hover:text-leather-600 hover:border-leather-600"
+            />
+          </Tooltip>
         )}
       </div>
+
+      <Tooltip title="بازگشت">
+        <Button
+          icon={<ArrowRightOutlined />}
+          onClick={onBack}
+          shape="circle"
+          size="middle"
+          className="border-none shadow-sm"
+        />
+      </Tooltip>
     </div>
   );
 };

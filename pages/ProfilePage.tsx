@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
-    Avatar, Button, Tag, Spin, Tabs, Descriptions, message
+        Avatar, Button, Tag, Spin, Tabs, Descriptions, message, Drawer, Form, Input, Select, Switch, Upload
 } from 'antd';
 import { 
-  UserOutlined, ArrowRightOutlined, CheckCircleOutlined, 
-  CloseCircleOutlined, IdcardOutlined, SafetyCertificateOutlined, EditOutlined 
+    UserOutlined, ArrowRightOutlined, CheckCircleOutlined, 
+    CloseCircleOutlined, IdcardOutlined, SafetyCertificateOutlined, EditOutlined, UploadOutlined
 } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import DateObject from 'react-date-object';
@@ -22,10 +22,36 @@ const ProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const [record, setRecord] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+    const [roles, setRoles] = useState<any[]>([]);
+    const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+    const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+    const [drawerMode, setDrawerMode] = useState<'edit' | 'create'>('edit');
+    const [form] = Form.useForm();
+    const [submitting, setSubmitting] = useState(false);
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     fetchProfile();
+        fetchRoles();
+        loadCurrentUserRole();
   }, [id]);
+
+    const fetchRoles = async () => {
+        const { data: rolesData } = await supabase.from('org_roles').select('*');
+        setRoles(rolesData || []);
+    };
+
+    const loadCurrentUserRole = async () => {
+        const { data: authData } = await supabase.auth.getUser();
+        const currentUserId = authData?.user?.id || null;
+        if (!currentUserId) return;
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('role, role_id')
+            .eq('id', currentUserId)
+            .single();
+        setCurrentUserRole(profile?.role || null);
+    };
 
   const fetchProfile = async () => {
     setLoading(true);
@@ -70,6 +96,144 @@ const ProfilePage: React.FC = () => {
     }
     setLoading(false);
   };
+
+    const canManageUsers = ['super_admin', 'admin', 'manager'].includes(String(currentUserRole || '').toLowerCase());
+
+    const canEditRecord = (currentRecord: any) => {
+        if (!canManageUsers) return false;
+        if (currentRecord?.role === 'super_admin' && String(currentUserRole || '').toLowerCase() !== 'super_admin') {
+            return false;
+        }
+        return true;
+    };
+
+    const handleOpenEdit = () => {
+        if (!record || !canEditRecord(record)) {
+            message.error('دسترسی کافی ندارید');
+            return;
+        }
+        setDrawerMode('edit');
+        setAvatarUrl(record.avatar_url || null);
+        form.setFieldsValue({
+            full_name: record.full_name,
+            email: record.email,
+            mobile: record.mobile_1,
+            role_id: record.role_id || null,
+            role: record.role || null,
+            is_active: record.is_active !== false,
+            password: ''
+        });
+        setIsDrawerOpen(true);
+    };
+
+    const handleOpenCreate = () => {
+        if (!canManageUsers) {
+            message.error('دسترسی کافی ندارید');
+            return;
+        }
+        setDrawerMode('create');
+        setAvatarUrl(null);
+        form.resetFields();
+        setIsDrawerOpen(true);
+    };
+
+    const handleAvatarUpload = async (file: File) => {
+        try {
+            const fileName = `avatar-${Date.now()}.${file.name.split('.').pop()}`;
+            const { error } = await supabase.storage.from('images').upload(fileName, file);
+            if (error) throw error;
+            const { data } = supabase.storage.from('images').getPublicUrl(fileName);
+            setAvatarUrl(data.publicUrl);
+            return false;
+        } catch {
+            message.error('خطا در آپلود عکس');
+            return false;
+        }
+    };
+
+    const handleResetPassword = async (email?: string | null) => {
+        if (!email) {
+            message.error('ایمیل کاربر ثبت نشده است');
+            return;
+        }
+        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        if (error) {
+            message.error('خطا در ارسال ایمیل: ' + error.message);
+        } else {
+            message.success('لینک بازیابی رمز به ایمیل ارسال شد');
+        }
+    };
+
+    const handleSendSms = () => {
+        message.info('ارسال پیامک نیازمند اتصال به سرویس پیامکی است.');
+    };
+
+    const handleSave = async (values: any) => {
+        if (!canManageUsers && drawerMode === 'create') {
+            message.error('دسترسی کافی ندارید');
+            return;
+        }
+        setSubmitting(true);
+        try {
+            if (drawerMode === 'edit' && record) {
+                const { error } = await supabase.from('profiles').update({
+                    full_name: values.full_name,
+                    email: values.email,
+                    mobile_1: values.mobile,
+                    role_id: values.role_id,
+                    role: values.role,
+                    avatar_url: avatarUrl ?? record.avatar_url,
+                    is_active: values.is_active,
+                }).eq('id', record.id);
+                if (error) throw error;
+
+                if (values.password) {
+                    const { data: authData } = await supabase.auth.getUser();
+                    const currentUserId = authData?.user?.id || null;
+                    if (currentUserId && currentUserId === record.id) {
+                        const { error: passError } = await supabase.auth.updateUser({ password: values.password });
+                        if (passError) throw passError;
+                    }
+                }
+                message.success('پروفایل بروزرسانی شد');
+                await fetchProfile();
+            }
+
+            if (drawerMode === 'create') {
+                const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+                    email: values.email,
+                    password: values.password,
+                    options: {
+                        data: { full_name: values.full_name, avatar_url: avatarUrl || undefined }
+                    }
+                });
+                if (signUpError) throw signUpError;
+                const newUserId = signUpData.user?.id;
+                if (!newUserId) throw new Error('ساخت کاربر در Auth ناموفق بود');
+
+                const { error } = await supabase.from('profiles').insert([{
+                    id: newUserId,
+                    full_name: values.full_name,
+                    email: values.email,
+                    mobile_1: values.mobile,
+                    role_id: values.role_id,
+                    role: values.role,
+                    avatar_url: avatarUrl,
+                    is_active: true
+                }]);
+                if (error) throw error;
+                message.success('کاربر ایجاد شد');
+            }
+
+            setIsDrawerOpen(false);
+            form.resetFields();
+            setAvatarUrl(null);
+        } catch (err: any) {
+            message.error('خطا: ' + err.message);
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
   // --- تابع رندر کننده هوشمند فیلدها ---
     const renderFieldValue = (field: ModuleField, value: any, allData: any) => {
@@ -123,9 +287,7 @@ const ProfilePage: React.FC = () => {
   if (loading) return <div className="flex h-screen items-center justify-center"><Spin size="large" /></div>;
   if (!record) return null;
 
-  // جدا کردن فیلدهای اصلی برای نمایش در کارت هدر
-    const mainFields = profilesModule.fields.filter((f: any) => ['full_name', 'job_title', 'is_active'].includes(f.key));
-  // بقیه فیلدها برای نمایش در تب جزئیات
+    // بقیه فیلدها برای نمایش در تب جزئیات
     const detailFields = profilesModule.fields.filter((f: any) => !['full_name', 'job_title', 'is_active'].includes(f.key));
 
   return (
@@ -170,8 +332,12 @@ const ProfilePage: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Button type="primary" icon={<EditOutlined />} className="bg-leather-500 rounded-xl">ویرایش</Button>
-                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300">تغییر رمز</Button>
+                        <Button type="primary" icon={<EditOutlined />} className="bg-leather-500 rounded-xl" onClick={handleOpenEdit} disabled={!canEditRecord(record)}>ویرایش</Button>
+                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={() => handleResetPassword(record.email)}>تغییر رمز</Button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 mt-3">
+                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={handleSendSms}>ارسال پیامک</Button>
+                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={handleOpenCreate} disabled={!canManageUsers}>ایجاد کاربر</Button>
                     </div>
                 </div>
             </div>
@@ -233,6 +399,67 @@ const ProfilePage: React.FC = () => {
         .dark .custom-descriptions .ant-descriptions-item-content { background-color: #1a1a1a; color: #ddd; border-color: #303030; }
         .dark .custom-descriptions .ant-descriptions-view { border-color: #303030; }
       `}</style>
+
+            <Drawer
+                title={drawerMode === 'edit' ? 'ویرایش پروفایل' : 'ایجاد کاربر'}
+                width={520}
+                onClose={() => setIsDrawerOpen(false)}
+                open={isDrawerOpen}
+                zIndex={99999}
+                styles={{ body: { paddingBottom: 80 } }}
+                className="dark:bg-[#141414]"
+            >
+                <Form form={form} layout="vertical" onFinish={handleSave}>
+                    <div className="flex justify-center mb-6">
+                        <div className="text-center">
+                            <Avatar size={80} src={avatarUrl} icon={<UserOutlined />} className="mb-2 bg-gray-100" />
+                            <Upload showUploadList={false} beforeUpload={handleAvatarUpload}>
+                                <Button size="small" icon={<UploadOutlined />}>آپلود عکس</Button>
+                            </Upload>
+                        </div>
+                    </div>
+
+                    <Form.Item label="نام و نام خانوادگی" name="full_name" rules={[{ required: true }]}><Input /></Form.Item>
+                    <Form.Item label="ایمیل" name="email" rules={[{ required: true, type: 'email' }]}><Input /></Form.Item>
+                    <Form.Item label="شماره موبایل" name="mobile" rules={[{ required: true }]}><Input /></Form.Item>
+                    <Form.Item label="جایگاه سازمانی" name="role_id" rules={[{ required: true }]}>
+                        <Select placeholder="انتخاب کنید" options={roles.map(r => ({ label: r.title, value: r.id }))} />
+                    </Form.Item>
+                    <Form.Item label="نقش (متنی)" name="role" rules={[{ required: true }]}>
+                        <Select
+                            placeholder="انتخاب نقش"
+                            options={[
+                                { label: 'super_admin', value: 'super_admin' },
+                                { label: 'admin', value: 'admin' },
+                                { label: 'manager', value: 'manager' },
+                                { label: 'viewer', value: 'viewer' },
+                            ]}
+                        />
+                    </Form.Item>
+                    {drawerMode === 'create' && (
+                        <Form.Item label="رمز عبور" name="password" rules={[{ required: true, min: 6 }]}>
+                            <Input.Password placeholder="حداقل ۶ کاراکتر" />
+                        </Form.Item>
+                    )}
+                    {drawerMode === 'edit' && (
+                        <Form.Item label="رمز عبور جدید" name="password">
+                            <Input.Password placeholder="در صورت نیاز تغییر دهید" />
+                        </Form.Item>
+                    )}
+                    {drawerMode === 'edit' && (
+                        <Form.Item label="وضعیت" name="is_active" valuePropName="checked">
+                            <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
+                        </Form.Item>
+                    )}
+
+                    <div className="absolute bottom-0 left-0 right-0 p-4 bg-white dark:bg-[#1a1a1a] border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
+                        <Button onClick={() => setIsDrawerOpen(false)}>انصراف</Button>
+                        <Button type="primary" htmlType="submit" loading={submitting} className="bg-leather-600 border-none">
+                            {drawerMode === 'edit' ? 'ذخیره تغییرات' : 'ثبت کاربر'}
+                        </Button>
+                    </div>
+                </Form>
+            </Drawer>
     </div>
   );
 };

@@ -69,11 +69,41 @@ const ModuleShow: React.FC = () => {
       if (moduleId !== 'production_orders' || !id) return null;
       const { data: lines } = await supabase
         .from('production_lines')
-        .select('quantity')
+        .select('quantity, qty, count')
         .eq('production_order_id', id);
-      const total = (lines || []).reduce((sum: number, row: any) => sum + (parseFloat(row.quantity) || 0), 0);
+      const total = (lines || []).reduce((sum: number, row: any) => {
+        const raw = row?.quantity ?? row?.qty ?? row?.count ?? 0;
+        return sum + (parseFloat(raw) || 0);
+      }, 0);
       return total;
     }, [moduleId, id]);
+
+  const getOrderQuantity = useCallback((override?: number | null) => {
+    const raw = override ?? data?.quantity ?? data?.production_qty ?? data?.production_quantity ?? data?.qty ?? data?.count ?? 0;
+    const parsed = parseFloat(raw as any);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [data]);
+
+  const buildConsumptionMoves = useCallback((order: any, quantity: number, productionShelfId: string) => {
+    const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
+    const moves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }> = [];
+    tables.forEach((table) => {
+      const rows = Array.isArray(order?.[table]) ? order[table] : [];
+      rows.forEach((row: any) => {
+        const usage = parseFloat(row?.usage ?? row?.quantity ?? row?.qty ?? row?.count ?? 0) || 0;
+        if (usage <= 0) return;
+        const productId = row?.selected_product_id || row?.product_id;
+        if (!productId) return;
+        moves.push({
+          product_id: productId,
+          from_shelf_id: productionShelfId,
+          to_shelf_id: productionShelfId,
+          quantity: usage * quantity,
+        });
+      });
+    });
+    return moves;
+  }, []);
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRoleId, setCurrentUserRoleId] = useState<string | null>(null);
@@ -170,6 +200,10 @@ const ModuleShow: React.FC = () => {
     fetchRecord();
   }, [fetchRecord]);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [id, moduleId]);
+
   const loadProductionShelves = useCallback(async () => {
     const { data: shelves } = await supabase
       .from('shelves')
@@ -213,10 +247,14 @@ const ModuleShow: React.FC = () => {
   const openProductionModal = async (type: 'start' | 'stop' | 'complete') => {
     setProductionModal(type);
     if (type === 'start') {
-      const qty = await fetchProductionQuantity();
-      if (typeof qty === 'number' && qty > 0) {
-        setProductionQuantityPreview(qty);
-        await finalizeStatusUpdate({ quantity: qty });
+      const qtyFromLines = await fetchProductionQuantity();
+      const fallbackQty = getOrderQuantity();
+      const resolvedQty = (typeof qtyFromLines === 'number' && qtyFromLines > 0) ? qtyFromLines : fallbackQty;
+      if (resolvedQty > 0) {
+        setProductionQuantityPreview(resolvedQty);
+        if (typeof qtyFromLines === 'number' && qtyFromLines > 0 && data?.quantity !== qtyFromLines) {
+          await finalizeStatusUpdate({ quantity: qtyFromLines });
+        }
       } else {
         setProductionQuantityPreview(null);
       }
@@ -411,6 +449,21 @@ const ModuleShow: React.FC = () => {
     }
   }, [data, moduleId, fetchOptions, fetchLinkedBom]);
 
+  useEffect(() => {
+    if (!moduleConfig) return;
+    const recordName = data?.name || data?.title || data?.system_code || id || '';
+    window.dispatchEvent(new CustomEvent('erp:breadcrumb', {
+      detail: {
+        moduleTitle: moduleConfig.titles?.fa || moduleId,
+        moduleId,
+        recordName,
+      }
+    }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('erp:breadcrumb', { detail: null }));
+    };
+  }, [moduleConfig, moduleId, data, id]);
+
     const handleAssigneeChange = useCallback(async (value: string) => {
       const [type, assignId] = value.split('_');
       try {
@@ -460,64 +513,73 @@ const ModuleShow: React.FC = () => {
       } catch (e: any) { msg.error('خطا: ' + e.message); }
     }, [data?.assignee_id, data?.assignee_type, data, id, moduleId, msg]);
 
-  // تابع برای کپی خودکار اقلام BOM به جداول مواد اولیه
+  // تابع برای کپی اقلام BOM به جداول مواد اولیه (با تایید کاربر)
     const handleRelatedBomChange = useCallback(async (bomId: string) => {
-      try {
-        const { data: bom, error: bomError } = await supabase
-          .from('production_boms')
-          .select('*')
-          .eq('id', bomId)
-          .single();
+      modal.confirm({
+        title: 'کپی از شناسنامه تولید',
+        content: 'جداول سفارش تولید ریست شوند و مقادیر از روی BOM کپی شوند؟',
+        okText: 'بله، کپی کن',
+        cancelText: 'خیر',
+        onOk: async () => {
+          try {
+            const { data: bom, error: bomError } = await supabase
+              .from('production_boms')
+              .select('*')
+              .eq('id', bomId)
+              .single();
 
-        if (bomError) throw bomError;
-          
-        const calculateBomTotal = () => {
-          let total = 0;
-          const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory', 'items_labor'];
-          tables.forEach(tableName => {
-            const rows = bom[tableName];
-            if (Array.isArray(rows)) {
-              rows.forEach(row => {
-                const rowTotal = (row.total_price || ((row.usage || 0) * (row.buy_price || 0)));
-                total += rowTotal;
+            if (bomError) throw bomError;
+              
+            const calculateBomTotal = () => {
+              let total = 0;
+              const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory', 'items_labor'];
+              tables.forEach(tableName => {
+                const rows = bom[tableName];
+                if (Array.isArray(rows)) {
+                  rows.forEach(row => {
+                    const rowTotal = (row.total_price || ((row.usage || 0) * (row.buy_price || 0)));
+                    total += rowTotal;
+                  });
+                }
               });
-            }
-          });
-          return total;
-        };
+              return total;
+            };
 
-        const bomTotal = calculateBomTotal();
+            const bomTotal = calculateBomTotal();
 
-        const updateData: any = {};
-        const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
-          
-        tables.forEach(tableName => {
-          if (bom[tableName]) {
-            updateData[tableName] = bom[tableName];
+            const updateData: any = {};
+            const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
+              
+            tables.forEach(tableName => {
+              if (bom[tableName]) {
+                updateData[tableName] = bom[tableName];
+              }
+            });
+
+            updateData['production_cost'] = bomTotal;
+            updateData['related_bom'] = bomId;
+            updateData['product_category'] = bom?.product_category ?? null;
+
+            const { error: updateError } = await supabase
+              .from(moduleId)
+              .update(updateData)
+              .eq('id', id);
+
+            if (updateError) throw updateError;
+
+            setData((prev: any) => ({ 
+              ...prev, 
+              ...updateData 
+            }));
+              
+            setLinkedBomData(bom);
+            msg.success('اقلام شناسنامه تولید بارگذاری شد و بهای تمام شده محاسبه شد');
+          } catch (e: any) {
+            msg.error('خطا در بارگذاری اقلام: ' + e.message);
           }
-        });
-
-        updateData['production_cost'] = bomTotal;
-        updateData['related_bom'] = bomId;
-
-        const { error: updateError } = await supabase
-          .from(moduleId)
-          .update(updateData)
-          .eq('id', id);
-
-        if (updateError) throw updateError;
-
-        setData((prev: any) => ({ 
-          ...prev, 
-          ...updateData 
-        }));
-          
-        setLinkedBomData(bom);
-        msg.success('اقلام شناسنامه تولید بارگذاری شد و بهای تمام شده محاسبه شد');
-      } catch (e: any) {
-        msg.error('خطا در بارگذاری اقلام: ' + e.message);
-      }
-    }, [id, moduleId, msg]);
+        }
+      });
+    }, [id, moduleId, msg, modal]);
 
   const handleDelete = () => {
     modal.confirm({ title: 'حذف رکورد', okType: 'danger', onOk: async () => { await supabase.from(moduleId).delete().eq('id', id); navigate(`/${moduleId}`); } });
@@ -658,6 +720,24 @@ const ModuleShow: React.FC = () => {
       msg.error('خطا در بروزرسانی تصویر: ' + e.message);
     }
   }, [canEditModule, data?.image_url, getFieldLabel, id, insertChangelog, moduleId, msg]);
+
+  const handleCreateOrderFromBom = useCallback(async (values: any) => {
+    try {
+      const { data: inserted, error } = await supabase
+        .from('production_orders')
+        .insert(values)
+        .select('id')
+        .single();
+      if (error) throw error;
+      setIsCreateOrderOpen(false);
+      msg.success('سفارش تولید ایجاد شد');
+      if (inserted?.id) {
+        navigate(`/production_orders/${inserted.id}`);
+      }
+    } catch (e: any) {
+      msg.error(e.message || 'خطا در ایجاد سفارش تولید');
+    }
+  }, [msg, navigate]);
 
   const saveEdit = async (key: string) => {
     if (!canEditModule) return;
@@ -914,7 +994,7 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
         return;
       }
-      const latestQty = productionQuantityPreview ?? (await fetchProductionQuantity()) ?? parseFloat(data?.quantity || 0);
+      const latestQty = getOrderQuantity(productionQuantityPreview ?? (await fetchProductionQuantity()));
       const { moves, missingProduct, missingShelf, quantity } = collectProductionMoves({ ...data, quantity: latestQty }, productionShelfId);
       if (!quantity || quantity <= 0) {
         msg.error(PRODUCTION_MESSAGES.requireQuantity);
@@ -976,7 +1056,7 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireOutputShelf);
         return;
       }
-      const latestQty = productionQuantityPreview ?? (await fetchProductionQuantity()) ?? parseFloat(data?.quantity || 0);
+      const latestQty = getOrderQuantity(productionQuantityPreview ?? (await fetchProductionQuantity()));
       const normalizedQty = Number.isFinite(latestQty) ? latestQty : 0;
       if (!normalizedQty || normalizedQty <= 0) {
         msg.error(PRODUCTION_MESSAGES.requireQuantity);
@@ -989,8 +1069,9 @@ const ModuleShow: React.FC = () => {
         return;
       }
       setStatusLoading(true);
-      if (moves.length) {
-        await consumeProductionMaterials(moves, productionShelfId);
+      const consumptionMoves = moves.length ? moves : buildConsumptionMoves(data, normalizedQty, productionShelfId);
+      if (consumptionMoves.length) {
+        await consumeProductionMaterials(consumptionMoves, productionShelfId);
       }
       await addFinishedGoods(outputProductId, outputShelfId, normalizedQty);
       await syncProductStock(outputProductId);
@@ -1010,7 +1091,7 @@ const ModuleShow: React.FC = () => {
   };
 
   const buildNewProductInitialValues = () => {
-    const quantity = parseFloat(data?.quantity || 0) || 0;
+    const quantity = getOrderQuantity(productionQuantityPreview);
     const inventoryRow = {
       shelf_id: null,
       stock: quantity,
@@ -1018,6 +1099,7 @@ const ModuleShow: React.FC = () => {
     };
     return {
       product_type: outputProductType || 'final',
+      product_category: data?.product_category || null,
       related_bom: data?.bom_id || null,
       items_leather: data?.items_leather || [],
       items_lining: data?.items_lining || [],
@@ -1030,7 +1112,7 @@ const ModuleShow: React.FC = () => {
   };
 
   const getProductionSummary = (quantityOverride?: number | null) => {
-    const quantity = typeof quantityOverride === 'number' ? quantityOverride : (parseFloat(data?.quantity || 0) || 0);
+    const quantity = getOrderQuantity(typeof quantityOverride === 'number' ? quantityOverride : null);
     const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
     const map = new Map<string, { name: string; qty: number }>();
     tables.forEach((table) => {
@@ -1087,7 +1169,33 @@ const ModuleShow: React.FC = () => {
 
       await syncProductStock(productId);
       setOutputProductId(productId);
-      msg.success('محصول جدید ایجاد شد');
+      const outputShelf = payload[0]?.shelf_id || null;
+      setOutputShelfId(outputShelf);
+
+      const latestQty = getOrderQuantity(productionQuantityPreview ?? (await fetchProductionQuantity()));
+      const normalizedQty = Number.isFinite(latestQty) ? latestQty : 0;
+      const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
+      const productionShelfId = data?.production_shelf_id;
+      if (!productionShelfId) {
+        msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
+        return;
+      }
+      if (!normalizedQty || normalizedQty <= 0) {
+        msg.error(PRODUCTION_MESSAGES.requireQuantity);
+        return;
+      }
+      const consumptionMoves = moves.length ? moves : buildConsumptionMoves(data, normalizedQty, productionShelfId);
+      if (consumptionMoves.length) {
+        await consumeProductionMaterials(consumptionMoves, productionShelfId);
+      }
+      await finalizeStatusUpdate({
+        status: 'completed',
+        production_output_product_id: productId,
+        production_output_shelf_id: outputShelf,
+        production_output_qty: normalizedQty,
+      });
+
+      msg.success('محصول جدید ایجاد شد و سفارش تکمیل شد');
       setIsCreateProductOpen(false);
     } catch (e: any) {
       msg.error(e.message || 'خطا در ایجاد محصول');
@@ -1116,6 +1224,29 @@ const ModuleShow: React.FC = () => {
     if (!canViewField(field.key)) return null;
     const isEditing = editingFields[field.key];
     const value = data[field.key];
+    const compactMode = field.type === FieldType.PROGRESS_STAGES ? false : true;
+
+    if (field.type === FieldType.PROGRESS_STAGES) {
+      let options = field.options;
+      if ((field as any).dynamicOptionsCategory) options = dynamicOptions[(field as any).dynamicOptionsCategory];
+      else if (field.type === FieldType.RELATION) options = relationOptions[field.key];
+
+      return (
+        <div className="w-full">
+          <SmartFieldRenderer
+            field={field}
+            value={value}
+            onChange={() => undefined}
+            forceEditMode={true}
+            compactMode={false}
+            options={options}
+            recordId={id}
+            moduleId={moduleId}
+            allValues={data}
+          />
+        </div>
+      );
+    }
     let baseValue = value ?? undefined;
 
     if (field.type === FieldType.MULTI_SELECT && typeof baseValue === 'string') {
@@ -1145,7 +1276,7 @@ const ModuleShow: React.FC = () => {
                 }
               }}
               forceEditMode={true}
-              compactMode={true}
+              compactMode={compactMode}
               options={options}
               onOptionsUpdate={fetchOptions}
               recordId={id}
@@ -1165,7 +1296,7 @@ const ModuleShow: React.FC = () => {
         value={baseValue}
         onChange={() => undefined}
         forceEditMode={false}
-        compactMode={true}
+        compactMode={compactMode}
         options={options}
         recordId={id}
         moduleId={moduleId}
@@ -1210,6 +1341,29 @@ const ModuleShow: React.FC = () => {
       onClick: () => handleHeaderAction('auto_name')
     });
   }
+  if (moduleId === 'production_orders') {
+    if (data?.status === 'in_progress') {
+      headerActions.push({
+        id: 'stop_production',
+        label: 'توقف تولید',
+        variant: 'default',
+        onClick: () => handleProductionStatusChange('pending')
+      });
+      headerActions.push({
+        id: 'complete_production',
+        label: 'تکمیل تولید',
+        variant: 'primary',
+        onClick: () => handleProductionStatusChange('completed')
+      });
+    } else if (data?.status === 'pending') {
+      headerActions.push({
+        id: 'start_production',
+        label: 'شروع تولید',
+        variant: 'primary',
+        onClick: () => handleProductionStatusChange('in_progress')
+      });
+    }
+  }
 
   const currentAssigneeId = data.assignee_id;
   const currentAssigneeType = data.assignee_type;
@@ -1224,7 +1378,7 @@ const ModuleShow: React.FC = () => {
       }
   }
   return (
-    <div className="p-4 md:p-6 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16">
+    <div className="p-4 pt-1 md:p-6 md:pt-1 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16">
       <div className="mb-4 md:mb-0">
         <RelatedSidebar
           moduleConfig={moduleConfig}
@@ -1311,8 +1465,9 @@ const ModuleShow: React.FC = () => {
           module={MODULES['production_orders']}
           visible={isCreateOrderOpen}
           title="ایجاد سفارش تولید"
-          initialValues={{ bom_id: id }}
+          initialValues={{ bom_id: id, product_category: data?.product_category || null, __skipBomConfirm: true }}
           onCancel={() => setIsCreateOrderOpen(false)}
+          onSave={handleCreateOrderFromBom}
         />
       )}
 
@@ -1397,11 +1552,12 @@ const ModuleShow: React.FC = () => {
             destroyOnClose
           >
             <div className="space-y-4">
-              <div className="text-sm text-gray-600 whitespace-pre-line">
-                {PRODUCTION_MESSAGES.completeNotice}
+              <div className="text-sm text-gray-700 whitespace-pre-line">
+                تعداد "{toPersianNumber(getOrderQuantity(productionQuantityPreview))}" عدد از محصول بر اساس شناسنامه تولید "{getFieldValueLabel('bom_id', data?.bom_id) || '-'}" تولید شد.
               </div>
-              <div className="flex flex-col gap-2">
-                <div className="text-xs text-gray-500">نوع محصول جدید</div>
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+                <div className="text-xs text-gray-500">نوع محصول تولید شده:</div>
                 <Select
                   placeholder="انتخاب نوع محصول"
                   value={outputProductType}
@@ -1414,52 +1570,67 @@ const ModuleShow: React.FC = () => {
                   getPopupContainer={() => document.body}
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <Select
-                  placeholder="انتخاب محصول"
-                  value={outputProductId}
-                  onChange={(val) => setOutputProductId(val)}
-                  options={outputProductOptions}
-                  showSearch
-                  optionFilterProp="label"
-                  className="w-full"
-                  getPopupContainer={() => document.body}
-                />
-                <QrScanPopover
-                  label=""
-                  buttonProps={{ type: 'default', shape: 'circle' }}
-                  onScan={({ moduleId: scannedModule, recordId }) => {
-                    if (scannedModule === 'products' && recordId) {
-                      setOutputProductId(recordId);
-                    }
-                  }}
-                />
+
+              <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+                <div className="text-xs text-gray-500">به موجودی یکی از محصولات فعلی اضافه کنید:</div>
+                <div className="flex items-center gap-2">
+                  <Select
+                    placeholder="انتخاب محصول"
+                    value={outputProductId}
+                    onChange={(val) => setOutputProductId(val)}
+                    options={outputProductOptions}
+                    showSearch
+                    optionFilterProp="label"
+                    className="w-full"
+                    getPopupContainer={() => document.body}
+                  />
+                  <QrScanPopover
+                    label=""
+                    buttonProps={{ type: 'default', shape: 'circle' }}
+                    onScan={({ moduleId: scannedModule, recordId }) => {
+                      if (scannedModule === 'products' && recordId) {
+                        setOutputProductId(recordId);
+                      }
+                    }}
+                  />
+                </div>
+                <div className="text-xs text-gray-500 mt-2">محصول تولید شده را کجا نگه داری میکنید؟</div>
+                <div className="flex items-center gap-2">
+                  <Select
+                    placeholder="انتخاب قفسه مقصد"
+                    value={outputShelfId}
+                    onChange={(val) => setOutputShelfId(val)}
+                    options={outputShelfOptions}
+                    showSearch
+                    optionFilterProp="label"
+                    className="w-full"
+                    getPopupContainer={() => document.body}
+                  />
+                  <QrScanPopover
+                    label=""
+                    buttonProps={{ type: 'default', shape: 'circle' }}
+                    onScan={({ moduleId: scannedModule, recordId }) => {
+                      if (scannedModule === 'shelves' && recordId) {
+                        setOutputShelfId(recordId);
+                      }
+                    }}
+                  />
+                </div>
               </div>
-              <div className="flex justify-end">
-                <Button onClick={() => setIsCreateProductOpen(true)} type="dashed">
-                  ایجاد محصول جدید
+
+              <div className="text-center text-xs text-gray-400">------- یا --------</div>
+
+              <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3 flex items-center justify-between">
+                <div className="text-xs text-gray-500">محصول جدید بسازید:</div>
+                <Button
+                  onClick={() => {
+                    setProductionModal(null);
+                    setIsCreateProductOpen(true);
+                  }}
+                  type="dashed"
+                >
+                  تعریف محصول جدید
                 </Button>
-              </div>
-              <div className="flex items-center gap-2">
-                <Select
-                  placeholder="انتخاب قفسه مقصد"
-                  value={outputShelfId}
-                  onChange={(val) => setOutputShelfId(val)}
-                  options={outputShelfOptions}
-                  showSearch
-                  optionFilterProp="label"
-                  className="w-full"
-                  getPopupContainer={() => document.body}
-                />
-                <QrScanPopover
-                  label=""
-                  buttonProps={{ type: 'default', shape: 'circle' }}
-                  onScan={({ moduleId: scannedModule, recordId }) => {
-                    if (scannedModule === 'shelves' && recordId) {
-                      setOutputShelfId(recordId);
-                    }
-                  }}
-                />
               </div>
             </div>
           </Modal>

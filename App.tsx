@@ -29,6 +29,19 @@ function App() {
     document.body.style.fontFamily = 'Vazirmatn, sans-serif';
   }, []);
 
+  useEffect(() => {
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      const eventName = String(event);
+      if (eventName === 'SIGNED_OUT' || eventName === 'TOKEN_REFRESH_FAILED') {
+        window.location.replace('/login');
+      }
+    });
+
+    return () => {
+      subscription?.subscription?.unsubscribe();
+    };
+  }, []);
+
   const resources = Object.values(MODULES).map((mod) => ({
     name: mod.id, 
     list: `/${mod.id}`,
