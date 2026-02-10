@@ -6,6 +6,9 @@ interface InvoiceCardProps {
   toPersianNumber: (str: string) => string;
   safeJalaliFormat: (date: any, format: string) => string;
   relationOptions?: Record<string, any[]>;
+  templateId?: string; // invoice_sales_official | invoice_sales_simple
+  customer?: any;
+  seller?: any;
 }
 
 export const InvoiceCard: React.FC<InvoiceCardProps> = ({
@@ -14,6 +17,9 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
   toPersianNumber,
   safeJalaliFormat,
   relationOptions = {},
+  templateId = 'invoice_sales_official',
+  customer,
+  seller,
 }) => {
   if (!data) return null;
 
@@ -25,6 +31,26 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
     return match?.name || match?.label || '';
   };
   const customerLabel = getRelationLabel('customer_id', data.customer_id) || data.customer_name || data.customer_id || '-';
+  
+  const buyer = customer || data.customer || {};
+  const buyerFullName = buyer.full_name || `${buyer.first_name || ''} ${buyer.last_name || ''}`.trim() || customerLabel;
+  const buyerBusiness = buyer.business_name || buyer.company || buyer.organization;
+  const buyerPhone = buyer.mobile_1 || buyer.phone || buyer.mobile || data.customer_phone;
+  const buyerAddress = buyer.address || data.customer_address;
+  const buyerCity = buyer.city;
+  const buyerProvince = buyer.province;
+
+  const sellerInfo = seller || data.company_settings || {};
+  const sellerName = sellerInfo.company_name || sellerInfo.name || 'فروشنده';
+  const sellerMobile = sellerInfo.mobile;
+  const sellerPhone = sellerInfo.phone;
+  const sellerAddress = sellerInfo.address;
+  const sellerNationalId = sellerInfo.national_id;
+  const sellerWebsite = sellerInfo.website;
+  const sellerEmail = sellerInfo.email;
+  const sellerCeoName = sellerInfo.ceo_name;
+  const sellerContactSummary = [sellerMobile, sellerPhone].filter(Boolean).join(' - ');
+
   const getInvoiceItemProductLabel = (item: any) => {
     if (!item) return '-';
     return (
@@ -76,7 +102,7 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
         </div>
       </div>
 
-      {/* اطلاعات مشتری و فاکتور - 2 ستون */}
+      {/* اطلاعات مشتری/فروشنده و فاکتور - 2 ستون */}
       <div 
         style={{ 
           display: 'grid', 
@@ -106,9 +132,33 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
               <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ fontWeight: 'bold', width: '30%', padding: isMobilePrint ? '1px' : '2px' }}>نام:</td>
                 <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
-                  {customerLabel}
+                  {buyerFullName || customerLabel}
                 </td>
               </tr>
+              {(buyerBusiness || buyerPhone) && (
+                <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>کسب‌وکار:</td>
+                  <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                    {buyerBusiness || '-'}
+                  </td>
+                </tr>
+              )}
+              {(buyerPhone || buyerAddress) && (
+                <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>تماس:</td>
+                  <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                    {buyerPhone || '-'}
+                  </td>
+                </tr>
+              )}
+              {(buyerAddress || buyerCity || buyerProvince) && templateId === 'invoice_sales_official' && (
+                <tr>
+                  <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>آدرس:</td>
+                  <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                    {[buyerProvince, buyerCity, buyerAddress].filter(Boolean).join('، ') || '-'}
+                  </td>
+                </tr>
+              )}
               <tr>
                 <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>تاریخ:</td>
                 <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
@@ -119,7 +169,7 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
           </table>
         </div>
 
-        {/* سمت چپ: اطلاعات فاکتور */}
+        {/* سمت چپ: اطلاعات فاکتور / فروشنده */}
         <div style={{ textAlign: 'right' }}>
           <div style={{ 
             fontWeight: 'bold', 
@@ -127,7 +177,7 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
             marginBottom: isMobilePrint ? '2px' : '3px',
             fontSize: isMobilePrint ? '7px' : '8px'
           }}>
-            اطلاعات
+            {templateId === 'invoice_sales_official' ? 'فروشنده' : 'اطلاعات'}
           </div>
           <table style={{ 
             width: '100%', 
@@ -147,6 +197,80 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
                   {data.status || '-'}
                 </td>
               </tr>
+              {templateId === 'invoice_sales_official' && (
+                <>
+                  <tr style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>نام فروشنده:</td>
+                    <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                      {sellerName}
+                    </td>
+                  </tr>
+                  {sellerCeoName && (
+                    <tr>
+                      <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>مدیرعامل:</td>
+                      <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                        {sellerCeoName}
+                      </td>
+                    </tr>
+                  )}
+                  {sellerNationalId && (
+                    <tr>
+                      <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>شناسه/کد اقتصادی:</td>
+                      <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                        {sellerNationalId}
+                      </td>
+                    </tr>
+                  )}
+                  {sellerMobile && (
+                    <tr>
+                      <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>همراه:</td>
+                      <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                        {sellerMobile}
+                      </td>
+                    </tr>
+                  )}
+                  {sellerPhone && (
+                    <tr>
+                      <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>تلفن:</td>
+                      <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                        {sellerPhone}
+                      </td>
+                    </tr>
+                  )}
+                  {sellerEmail && (
+                    <tr>
+                      <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>ایمیل:</td>
+                      <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                        {sellerEmail}
+                      </td>
+                    </tr>
+                  )}
+                  {sellerAddress && (
+                    <tr>
+                      <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>آدرس:</td>
+                      <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                        {sellerAddress}
+                      </td>
+                    </tr>
+                  )}
+                  {sellerWebsite && (
+                    <tr>
+                      <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>وب‌سایت:</td>
+                      <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                        {sellerWebsite}
+                      </td>
+                    </tr>
+                  )}
+                </>
+              )}
+              {templateId === 'invoice_sales_simple' && (
+                <tr>
+                  <td style={{ fontWeight: 'bold', padding: isMobilePrint ? '1px' : '2px' }}>فروشنده:</td>
+                  <td style={{ paddingRight: isMobilePrint ? '2px' : '4px', padding: isMobilePrint ? '1px' : '2px' }}>
+                    {[sellerName, sellerContactSummary || sellerPhone].filter(Boolean).join(' - ') || sellerName}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -115,6 +115,7 @@ CREATE TABLE public.customers (
   province text,
   city text,
   address text,
+  notes text,
   rating int4 DEFAULT 5,
   created_at timestamptz DEFAULT now()
 );
@@ -258,6 +259,7 @@ ADD COLUMN IF NOT EXISTS production_output_qty numeric;
 
 -- اضافه کردن فیلد تصویر به محصولات و مشتریان
 ALTER TABLE public.products ADD COLUMN image_url text;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS notes text;
 ALTER TABLE public.customers ADD COLUMN image_url text;
 
 -- اضافه کردن فیلد موقعیت مکانی (لینک نقشه یا مختصات)
@@ -624,10 +626,12 @@ DROP POLICY IF EXISTS "Assignee access customers" ON public.customers;
 DROP POLICY IF EXISTS "Assignee update customers" ON public.customers;
 DROP POLICY IF EXISTS "Assignee delete customers" ON public.customers;
 DROP POLICY IF EXISTS "Authenticated insert customers" ON public.customers;
+DROP POLICY IF EXISTS "Public insert customers" ON public.customers;
 CREATE POLICY "Assignee access customers" ON public.customers FOR SELECT USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
 CREATE POLICY "Assignee update customers" ON public.customers FOR UPDATE USING (public.has_assignee_access(assignee_id, assignee_type, created_by)) WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
 CREATE POLICY "Assignee delete customers" ON public.customers FOR DELETE USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
 CREATE POLICY "Authenticated insert customers" ON public.customers FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Public insert customers" ON public.customers FOR INSERT WITH CHECK (true);
 
 ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Assignee access suppliers" ON public.suppliers;

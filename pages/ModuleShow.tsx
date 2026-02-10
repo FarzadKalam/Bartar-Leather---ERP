@@ -1423,6 +1423,15 @@ const ModuleShow: React.FC = () => {
         checkVisibility={checkVisibility}
       />
 
+      {moduleId === 'customers' && (
+        <div className="mb-6 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="mb-2 text-sm font-bold text-gray-700">توضیحات</div>
+          <div className="text-sm text-gray-700 whitespace-pre-wrap break-words">
+            {data?.notes || '-'}
+          </div>
+        </div>
+      )}
+
       <FieldGroupsTabs
         fieldGroups={fieldGroups}
         moduleConfig={moduleConfig}

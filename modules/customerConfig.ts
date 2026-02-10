@@ -41,6 +41,7 @@ export const customerModule: ModuleDefinition = {
     { key: 'province', labels: { fa: 'استان', en: 'Province' }, type: FieldType.SELECT, blockId: 'contact_info', dynamicOptionsCategory: 'provinces' },
     { key: 'city', labels: { fa: 'شهر', en: 'City' }, type: FieldType.SELECT, blockId: 'contact_info', dynamicOptionsCategory: 'cities' },
     { key: 'address', labels: { fa: 'آدرس پستی', en: 'Address' }, type: FieldType.LONG_TEXT, blockId: 'contact_info' },
+    { key: 'notes', labels: { fa: 'توضیحات', en: 'Notes' }, type: FieldType.LONG_TEXT, blockId: 'contact_info', isTableColumn: true },
     { key: 'location', labels: { fa: 'لوکیشن', en: 'Location' }, type: FieldType.TEXT, blockId: 'contact_info' },
     { key: 'instagram_id', labels: { fa: 'آیدی اینستاگرام', en: 'Instagram' }, type: FieldType.TEXT, blockId: 'contact_info' },
     { key: 'telegram_id', labels: { fa: 'آیدی تلگرام', en: 'Telegram' }, type: FieldType.TEXT, blockId: 'contact_info' },

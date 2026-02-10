@@ -23,6 +23,7 @@ import "./App.css";
 import { ModuleCreate } from "./pages/ModuleCreate";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import InquiryForm from "./pages/InquiryForm";
 
 function App() {
   useEffect(() => {
@@ -30,10 +31,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const publicPaths = ["/inquiry"];
+
     const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
       const eventName = String(event);
-      if (eventName === 'SIGNED_OUT' || eventName === 'TOKEN_REFRESH_FAILED') {
-        window.location.replace('/login');
+      const pathname = window.location.pathname;
+      const isPublic = publicPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+
+      if ((eventName === "SIGNED_OUT" || eventName === "TOKEN_REFRESH_FAILED") && !isPublic) {
+        window.location.replace("/login");
       }
     });
 
@@ -81,6 +87,7 @@ function App() {
           >
             <Routes>
               <Route path="/login" element={<Login />} />
+              <Route path="/inquiry/*" element={<InquiryForm />} />
 
               <Route
                 element={

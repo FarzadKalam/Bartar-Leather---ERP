@@ -4,6 +4,7 @@ import { InvoiceCard } from './templates/invoice-card';
 import { ProductLabel } from './templates/product-label';
 import { ProductionPassport } from './templates/production-passport';
 import { toPersianNumber, formatPersianPrice, safeJalaliFormat } from '../../utils/persianNumberFormatter';
+import { supabase } from '../../supabaseClient';
 
 interface UsePrintManagerProps {
   moduleId: string;
@@ -26,6 +27,8 @@ export const usePrintManager = ({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [printMode, setPrintMode] = useState(false);
   const [selectedPrintFields, setSelectedPrintFields] = useState<Record<string, string[]>>({});
+  const [sellerInfo, setSellerInfo] = useState<any>(null);
+  const [customerInfo, setCustomerInfo] = useState<any>(null);
 
   // لیست قالب‌های موجود برای این ماژول
   const printTemplates = useMemo<PrintTemplate[]>(() => {
@@ -45,9 +48,14 @@ export const usePrintManager = ({
     else if (moduleId === 'invoices') {
       templates = [
         { 
-          id: 'invoice_sales', 
-          title: 'فاکتور فروش', 
-          description: 'فاکتور رسمی برای فروش' 
+          id: 'invoice_sales_official', 
+          title: 'فاکتور فروش (رسمی)', 
+          description: 'نمایش کامل مشخصات خریدار و فروشنده' 
+        },
+        { 
+          id: 'invoice_sales_simple', 
+          title: 'فاکتور فروش (غیررسمی)', 
+          description: 'فقط نام و شماره فروشنده' 
         }
       ];
     }
@@ -159,13 +167,17 @@ export const usePrintManager = ({
     });
 
     switch (selectedTemplateId) {
-      case 'invoice_sales':
+      case 'invoice_sales_official':
+      case 'invoice_sales_simple':
         return React.createElement(InvoiceCard, {
           data,
           formatPersianPrice,
           toPersianNumber,
           safeJalaliFormat,
           relationOptions,
+          templateId: selectedTemplateId,
+          customer: customerInfo,
+          seller: sellerInfo,
         });
       
       case 'product_label':
@@ -187,7 +199,47 @@ export const usePrintManager = ({
         });
     }
     return null;
-  }, [selectedTemplateId, data, printableFields, selectedPrintFields, activeTemplate, moduleConfig, printQrValue, formatPrintValue]);
+  }, [selectedTemplateId, data, printableFields, selectedPrintFields, activeTemplate, moduleConfig, printQrValue, formatPrintValue, sellerInfo, customerInfo, relationOptions]);
+
+  // بارگذاری اطلاعات فروشنده/مشتری برای فاکتور
+  useEffect(() => {
+    if (moduleId !== 'invoices') return;
+
+    let isMounted = true;
+
+    const load = async () => {
+      try {
+        const [{ data: companyData, error: companyError }, { data: customerData, error: customerError }] = await Promise.all([
+          supabase.from('company_settings').select('*').limit(1).maybeSingle(),
+          data?.customer_id
+            ? supabase.from('customers').select('*').eq('id', data.customer_id).maybeSingle()
+            : Promise.resolve({ data: null, error: null })
+        ]);
+
+        if (!isMounted) return;
+
+        if (companyError) {
+          console.error('Load company settings failed', companyError.message);
+        } else {
+          setSellerInfo(companyData || null);
+        }
+
+        if (customerError) {
+          console.error('Load customer failed', customerError.message);
+        } else {
+          setCustomerInfo(customerData || null);
+        }
+      } catch (err) {
+        console.error('Load print data failed', err);
+      }
+    };
+
+    load();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [moduleId, data?.customer_id]);
 
   return {
     // States
