@@ -12,6 +12,7 @@ import QrScanPopover from './QrScanPopover';
 import { buildProductFilters, runProductsQuery } from './editableTable/productionOrderHelpers';
 
 const { Text } = Typography;
+type ResponsiveBreakpoint = 'xxl' | 'xl' | 'lg' | 'md' | 'sm' | 'xs';
 
 interface GridTableProps {
   block: BlockDefinition;
@@ -816,7 +817,7 @@ const ProductsPreview: React.FC<{
     title: field.labels?.fa || field.key,
     dataIndex: field.key,
     key: field.key,
-    responsive: ['md'],
+    responsive: ['md'] as ResponsiveBreakpoint[],
     render: (val: any) => renderSpecValue(field, val)
   }));
 
@@ -835,11 +836,11 @@ const ProductsPreview: React.FC<{
       }}
       columns={[
         { title: 'نام محصول', dataIndex: 'name', key: 'name', ellipsis: true },
-        { title: 'کد سیستمی', dataIndex: 'system_code', key: 'system_code', responsive: ['sm'] },
+        { title: 'کد سیستمی', dataIndex: 'system_code', key: 'system_code', responsive: ['sm'] as ResponsiveBreakpoint[] },
         ...specColumns,
-        { title: 'موجودی', dataIndex: 'stock', key: 'stock', responsive: ['md'], render: (val: any) => toPersianNumber(val ?? 0) },
-        { title: 'قیمت خرید', dataIndex: 'buy_price', key: 'buy_price', responsive: ['md'], render: (val: any) => formatPersianPrice(val ?? 0, true) },
-        { title: 'قیمت فروش', dataIndex: 'sell_price', key: 'sell_price', responsive: ['md'], render: (val: any) => formatPersianPrice(val ?? 0, true) },
+        { title: 'موجودی', dataIndex: 'stock', key: 'stock', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => toPersianNumber(val ?? 0) },
+        { title: 'قیمت خرید', dataIndex: 'buy_price', key: 'buy_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
+        { title: 'قیمت فروش', dataIndex: 'sell_price', key: 'sell_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
       ]}
       scroll={{ x: 'max-content' }}
     />

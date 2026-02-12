@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { App, Button, Form, Input } from "antd";
 import { supabase } from "../supabaseClient";
 
@@ -6,8 +6,6 @@ const InquiryForm = () => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
   const { message } = App.useApp();
-  const currentAppUrl = useMemo(() => window.location.origin, []);
-
   const handleSubmit = async (values: {
     full_name: string;
     business_name?: string;
@@ -65,7 +63,7 @@ const InquiryForm = () => {
               <div className="space-y-3">
                 <div className="inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1 text-[11px] font-semibold text-amber-900 shadow-sm">
                   <span className="h-2 w-2 rounded-full bg-amber-500" />
-                  Mehrbanoo Leather Studio
+                  Mehrbanoo Leather Company
                 </div>
                 <div>
                   <div className="text-3xl md:text-4xl font-black text-amber-900 leading-tight">تولیدی چرم مهربانو</div>
@@ -80,7 +78,7 @@ const InquiryForm = () => {
                 </div>
                 <div className="space-y-3 text-sm text-stone-700">
                   <a
-                    href="https://bartarleather.com/"
+                    href="https://mehrbaanoo.com//"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-3 rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-2 shadow-[0_8px_18px_rgba(197,143,96,0.12)] transition hover:-translate-y-[1px]"
@@ -88,22 +86,9 @@ const InquiryForm = () => {
                     <span className="h-8 w-8 rounded-xl bg-amber-600 text-white flex items-center justify-center text-[11px] font-black">W</span>
                     <div className="flex-1 overflow-hidden">
                       <div className="font-semibold text-amber-900">وب‌سایت رسمی</div>
-                      <div className="truncate text-[12px] text-amber-800/80">bartarleather.com</div>
+                      <div className="truncate text-[12px] text-amber-800/80">www.mehrbaanoo.com/</div>
                     </div>
                     <span className="text-[11px] text-amber-800">مشاهده</span>
-                  </a>
-                  <a
-                    href={currentAppUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50 px-3 py-2 shadow-sm transition hover:-translate-y-[1px]"
-                  >
-                    <span className="h-8 w-8 rounded-xl bg-stone-800 text-white flex items-center justify-center text-[11px] font-black">APP</span>
-                    <div className="flex-1 overflow-hidden">
-                      <div className="font-semibold text-stone-900">لینک سامانه</div>
-                      <div className="truncate text-[12px] text-stone-600">{currentAppUrl.replace(/^https?:\/\//, "")}</div>
-                    </div>
-                    <span className="text-[11px] text-stone-700">باز کردن</span>
                   </a>
                   <a
                     href="https://www.instagram.com/bartarleather/"

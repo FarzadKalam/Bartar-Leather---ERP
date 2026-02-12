@@ -23,7 +23,7 @@ interface ProductionStagesFieldProps {
   showWageSummary?: boolean;
 }
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, onQuantityChange, orderStatus, draftStages = [], showWageSummary = false }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, onQuantityChange, orderStatus, draftStages = [], onDraftStagesChange, showWageSummary = false }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -36,7 +36,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [draftLocal, setDraftLocal] = useState<any[]>(Array.isArray(draftStages) ? draftStages : []);
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [draftForm] = Form.useForm();
-  const [draftToCreate, setDraftToCreate] = useState<any | null>(null);
+  const [, setDraftToCreate] = useState<any | null>(null);
   const [editingDraft, setEditingDraft] = useState<any | null>(null);
   const isBom = moduleId === 'production_boms';
 
