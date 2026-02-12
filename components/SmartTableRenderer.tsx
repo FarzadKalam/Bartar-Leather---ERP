@@ -316,8 +316,11 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
                <div style={{ minWidth: 200 }}>
                  <ProductionStagesField 
                     recordId={record.id} 
+                    moduleId={moduleConfig?.id}
                     readOnly={true} 
-                    compact={true} 
+                    compact={true}
+                    draftStages={record?.production_stages_draft || []}
+                    showWageSummary={false}
                  />
                </div>
              );

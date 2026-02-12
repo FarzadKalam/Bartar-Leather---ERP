@@ -8,6 +8,7 @@ import { tasksModule } from './modules/tasksConfig';
 import { invoicesConfig } from './modules/invoicesConfig';
 import { warehousesConfig } from './modules/warehousesConfig';
 import { shelvesConfig } from './modules/shelvesConfig';
+import { calculationFormulasModule } from './modules/calculationFormulasConfig';
 
 export const MODULES: Record<string, ModuleDefinition> = {
   products: productsConfig,
@@ -20,4 +21,5 @@ export const MODULES: Record<string, ModuleDefinition> = {
   suppliers: supplierModule,
   invoices: invoicesConfig,
   tasks: tasksModule,
+  calculation_formulas: calculationFormulasModule,
 };

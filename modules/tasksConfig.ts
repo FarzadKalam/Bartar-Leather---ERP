@@ -26,6 +26,7 @@ export const tasksModule: ModuleDefinition = {
     { key: 'estimated_hours', labels: { fa: 'ساعات تخمینی', en: 'Estimated Hours' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 3, nature: FieldNature.STANDARD },
     { key: 'spent_hours', labels: { fa: 'ساعات صرف شده', en: 'Spent Hours' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 4, readonly: true, nature: FieldNature.SYSTEM },
     { key: 'start_time', labels: { fa: 'زمان آغاز', en: 'Start Time' }, type: FieldType.TIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 5, nature: FieldNature.STANDARD, isTableColumn: true },
+    { key: 'wage', labels: { fa: 'دستمزد', en: 'Wage' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'general', order: 7, nature: FieldNature.STANDARD },
     
 
     // --- ارتباطات ---

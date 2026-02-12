@@ -54,6 +54,7 @@ const ModuleShow: React.FC = () => {
   const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
+  const [autoSyncedBomId, setAutoSyncedBomId] = useState<string | null>(null);
   const [productionModal, setProductionModal] = useState<'start' | 'stop' | 'complete' | null>(null);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
   const [productionShelfId, setProductionShelfId] = useState<string | null>(null);
@@ -369,6 +370,14 @@ const ModuleShow: React.FC = () => {
         if (data) dynOpts[cat] = data.filter(i => i.value !== null);
       }
     }
+    try {
+      const { data: formulas } = await supabase.from('calculation_formulas').select('id, name');
+      if (formulas) {
+        dynOpts['calculation_formulas'] = formulas.map((f: any) => ({ label: f.name, value: f.id }));
+      }
+    } catch (err) {
+      console.warn('Could not load calculation formulas', err);
+    }
     setDynamicOptions(dynOpts);
 
         const relFields: any[] = [...moduleConfig.fields.filter(f => f.type === FieldType.RELATION)];
@@ -448,6 +457,40 @@ const ModuleShow: React.FC = () => {
       }
     }
   }, [data, moduleId, fetchOptions, fetchLinkedBom]);
+
+  useEffect(() => {
+    if (moduleId !== 'production_orders' || !data?.bom_id) return;
+    if (autoSyncedBomId === data.bom_id) return;
+
+    const isEmptyArray = (val: any) => !Array.isArray(val) || val.length === 0;
+    const shouldSync = isEmptyArray(data?.grid_materials) || isEmptyArray(data?.production_stages_draft);
+    if (!shouldSync) return;
+
+    const syncFromBom = async () => {
+      try {
+        const { data: bom, error } = await supabase
+          .from('production_boms')
+          .select('grid_materials, production_stages_draft, product_category')
+          .eq('id', data.bom_id)
+          .single();
+        if (error) throw error;
+
+        const patch: any = {
+          grid_materials: bom?.grid_materials || [],
+          production_stages_draft: bom?.production_stages_draft || [],
+          product_category: bom?.product_category ?? data?.product_category ?? null,
+        };
+
+        await supabase.from('production_orders').update(patch).eq('id', data.id);
+        setData((prev: any) => ({ ...prev, ...patch }));
+        setAutoSyncedBomId(data.bom_id);
+      } catch (err) {
+        console.warn('Auto sync from BOM failed', err);
+      }
+    };
+
+    syncFromBom();
+  }, [moduleId, data, autoSyncedBomId]);
 
   useEffect(() => {
     if (!moduleConfig) return;
@@ -530,35 +573,15 @@ const ModuleShow: React.FC = () => {
 
             if (bomError) throw bomError;
               
-            const calculateBomTotal = () => {
-              let total = 0;
-              const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory', 'items_labor'];
-              tables.forEach(tableName => {
-                const rows = bom[tableName];
-                if (Array.isArray(rows)) {
-                  rows.forEach(row => {
-                    const rowTotal = (row.total_price || ((row.usage || 0) * (row.buy_price || 0)));
-                    total += rowTotal;
-                  });
-                }
-              });
-              return total;
-            };
-
-            const bomTotal = calculateBomTotal();
-
             const updateData: any = {};
-            const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
-              
-            tables.forEach(tableName => {
-              if (bom[tableName]) {
-                updateData[tableName] = bom[tableName];
-              }
-            });
-
-            updateData['production_cost'] = bomTotal;
+            if (bom.grid_materials) {
+              updateData['grid_materials'] = bom.grid_materials;
+            }
             updateData['related_bom'] = bomId;
             updateData['product_category'] = bom?.product_category ?? null;
+            if (bom.production_stages_draft) {
+              updateData['production_stages_draft'] = bom.production_stages_draft;
+            }
 
             const { error: updateError } = await supabase
               .from(moduleId)
@@ -729,6 +752,22 @@ const ModuleShow: React.FC = () => {
         .select('id')
         .single();
       if (error) throw error;
+      if (inserted?.id) {
+        const postPayload: any = {};
+        if (values?.grid_materials !== undefined) postPayload.grid_materials = values.grid_materials;
+        if (values?.production_stages_draft !== undefined) postPayload.production_stages_draft = values.production_stages_draft;
+        if (Object.keys(postPayload).length > 0) {
+          await supabase.from('production_orders').update(postPayload).eq('id', inserted.id);
+        }
+        const hasDraftStages = Array.isArray(values?.production_stages_draft) && values.production_stages_draft.length > 0;
+        if (hasDraftStages) {
+          await supabase.from('production_lines').insert({
+            production_order_id: inserted.id,
+            line_no: 1,
+            quantity: 0,
+          });
+        }
+      }
       setIsCreateOrderOpen(false);
       msg.success('سفارش تولید ایجاد شد');
       if (inserted?.id) {
@@ -1271,7 +1310,7 @@ const ModuleShow: React.FC = () => {
               value={tempValue}
               onChange={(val) => {
                 setTempValues(prev => ({ ...prev, [field.key]: val }));
-                if (field.key === 'related_bom' && val) {
+                if ((field.key === 'related_bom' || (moduleId === 'production_orders' && field.key === 'bom_id')) && val) {
                   setTimeout(() => handleRelatedBomChange(val), 100);
                 }
               }}
@@ -1474,7 +1513,13 @@ const ModuleShow: React.FC = () => {
           module={MODULES['production_orders']}
           visible={isCreateOrderOpen}
           title="ایجاد سفارش تولید"
-          initialValues={{ bom_id: id, product_category: data?.product_category || null, __skipBomConfirm: true }}
+          initialValues={{
+            bom_id: id,
+            product_category: data?.product_category || null,
+            grid_materials: data?.grid_materials || [],
+            production_stages_draft: data?.production_stages_draft || [],
+            __skipBomConfirm: true,
+          }}
           onCancel={() => setIsCreateOrderOpen(false)}
           onSave={handleCreateOrderFromBom}
         />

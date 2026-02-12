@@ -1,47 +1,18 @@
-import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, FieldNature, RowCalculationType } from '../types';
-import { BOM_TABLE_BLOCKS } from './productsConfig';
+import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, FieldNature } from '../types';
 
-// تعریف بلاک‌های جدول BOM با قابلیت محاسباتی
-const BOM_BLOCKS = {
-  leather: {
-    ...BOM_TABLE_BLOCKS.items_leather,
-    titles: { fa: 'بخش چرم', en: 'Leather Section' },
-    order: 1,
-    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
+const GRID_MATERIALS_BLOCK = {
+  id: 'grid_materials',
+  titles: { fa: 'مواد اولیه', en: 'Materials' },
+  type: BlockType.GRID_TABLE,
+  order: 1,
+  gridConfig: {
+    categories: [
+      { value: 'leather', label: 'چرم', specBlockId: 'leatherSpec' },
+      { value: 'lining', label: 'آستر', specBlockId: 'liningSpec' },
+      { value: 'accessory', label: 'خرجکار', specBlockId: 'kharjkarSpec' },
+      { value: 'fitting', label: 'یراق', specBlockId: 'yaraghSpec' },
+    ],
   },
-  lining: {
-    ...BOM_TABLE_BLOCKS.items_lining,
-    titles: { fa: 'بخش آستر', en: 'Lining Section' },
-    order: 2,
-    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
-  },
-  fitting: {
-    ...BOM_TABLE_BLOCKS.items_fitting,
-    titles: { fa: 'بخش یراق', en: 'Fittings Section' },
-    order: 3,
-    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
-  },
-  accessory: {
-    ...BOM_TABLE_BLOCKS.items_accessory,
-    titles: { fa: 'بخش خرجکار', en: 'Accessories Section' },
-    order: 4,
-    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
-  },
-  labor: {
-    id: 'items_labor',
-    titles: { fa: 'هزینه‌های دستمزد', en: 'Labor Costs' },
-    type: BlockType.TABLE,
-    order: 5,
-    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
-    tableColumns: [
-      { key: 'title', title: 'عنوان عملیات', type: FieldType.TEXT },
-      { key: 'time', title: 'زمان (دقیقه)', type: FieldType.NUMBER },
-      { key: 'usage', title: 'تعداد/ضریب', type: FieldType.NUMBER, defaultValue: 1 },
-      { key: 'unit', title: 'واحد', type: FieldType.TEXT, defaultValue: '' },
-      { key: 'buy_price', title: 'نرخ دستمزد', type: FieldType.PRICE },
-      { key: 'total_price', title: 'جمع هزینه', type: FieldType.PRICE, readonly: true }
-    ]
-  }
 };
 
 export const productionBomModule: ModuleDefinition = {
@@ -51,8 +22,8 @@ export const productionBomModule: ModuleDefinition = {
   supportedViewModes: [ViewMode.LIST],
   defaultViewMode: ViewMode.LIST,
   fields: [
-    { key: 'name', labels: { fa: 'عنوان مدل', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 1, isKey: true, validation: { required: true } },
-    { key: 'system_code', labels: { fa: 'کد سیستمی', en: 'Sys Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, readonly: true },
+    { key: 'name', labels: { fa: 'عنوان مدل', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 1, isKey: true, validation: { required: true }, isTableColumn: true },
+    { key: 'system_code', labels: { fa: 'کد سیستمی', en: 'Sys Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, readonly: true, isTableColumn: true },
     { key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4, options: [{ label: 'فعال', value: 'active', color: 'green' }, { label: 'بایگانی', value: 'archived', color: 'gray' }], defaultValue: 'active' },
     { 
       key: 'product_category', 
@@ -63,14 +34,36 @@ export const productionBomModule: ModuleDefinition = {
       dynamicOptionsCategory: 'product_categories',
       nature: FieldNature.STANDARD, 
       validation: { required: false },
+      isTableColumn: true,
     },  
+    { 
+      key: 'production_stages', 
+      labels: { fa: 'مراحل تولید', en: 'Stages' }, 
+      type: FieldType.PROGRESS_STAGES,
+      location: FieldLocation.BLOCK, 
+      order: 9,  
+      isTableColumn: true,
+      nature: FieldNature.STANDARD 
+    },
+    {
+      key: 'production_stages_draft',
+      labels: { fa: 'پیش‌نویس مراحل تولید', en: 'Draft Stages' },
+      type: FieldType.JSON,
+      location: FieldLocation.BLOCK,
+      order: 19,
+      nature: FieldNature.STANDARD,
+    },
+    {
+      key: 'grid_materials',
+      labels: { fa: 'مواد اولیه', en: 'Materials' },
+      type: FieldType.JSON,
+      location: FieldLocation.BLOCK,
+      order: 20,
+      nature: FieldNature.STANDARD,
+    },
   ],
   blocks: [
-    BOM_BLOCKS.leather,
-    BOM_BLOCKS.lining,
-    BOM_BLOCKS.fitting,
-    BOM_BLOCKS.accessory,
-    BOM_BLOCKS.labor
+    GRID_MATERIALS_BLOCK
   ],
   relatedTabs: [],
   table: 'production_boms',
@@ -92,7 +85,7 @@ export const productionOrderModule: ModuleDefinition = {
     { 
       key: 'product_category', 
       labels: { fa: 'دسته بندی محصول', en: 'Product Category' }, 
-      type: FieldType.SELECT, 
+      type: FieldType.STATUS, 
       location: FieldLocation.HEADER, 
       order: 2.5, 
       dynamicOptionsCategory: 'product_categories',
@@ -105,21 +98,32 @@ export const productionOrderModule: ModuleDefinition = {
     { 
       key: 'production_stages', 
       labels: { fa: 'مراحل تولید', en: 'Stages' }, 
-      type: FieldType.PROGRESS_STAGES, // 👈 استفاده از تایپ جدید
+      type: FieldType.PROGRESS_STAGES,
       location: FieldLocation.BLOCK, 
-      blockId: 'baseInfo', // یا هر بلاک دیگری
       order: 10,  
-      isTableColumn: true, // نمایش در لیست
+      isTableColumn: true,
       nature: FieldNature.STANDARD 
-    }
+    },
+    
+    {
+      key: 'production_stages_draft',
+      labels: { fa: 'پیش‌نویس مراحل تولید', en: 'Draft Stages' },
+      type: FieldType.JSON,
+      location: FieldLocation.BLOCK,
+      order: 19,
+      nature: FieldNature.STANDARD,
+    },
+    {
+      key: 'grid_materials',
+      labels: { fa: 'مواد اولیه', en: 'Materials' },
+      type: FieldType.JSON,
+      location: FieldLocation.BLOCK,
+      order: 20,
+      nature: FieldNature.STANDARD,
+    },
   ],
   blocks: [
-    // نمایش اقلام BOM مرتبط
-    BOM_BLOCKS.leather,
-    BOM_BLOCKS.lining,
-    BOM_BLOCKS.fitting,
-    BOM_BLOCKS.accessory,
-    BOM_BLOCKS.labor
+    GRID_MATERIALS_BLOCK
   ],
   
   relatedTabs: [],

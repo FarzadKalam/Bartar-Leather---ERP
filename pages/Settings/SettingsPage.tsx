@@ -1,9 +1,10 @@
 import React from 'react';
 import { Tabs } from 'antd';
-import { BankOutlined, UsergroupAddOutlined, ClusterOutlined } from '@ant-design/icons';
+import { BankOutlined, UsergroupAddOutlined, ClusterOutlined, FunctionOutlined } from '@ant-design/icons';
 import CompanyTab from './CompanyTab';
 import UsersTab from './UsersTab';
 import RolesTab from './RolesTab';
+import ModuleListRefine from '../ModuleList_Refine';
 
 const SettingsPage: React.FC = () => {
   const items = [
@@ -21,6 +22,11 @@ const SettingsPage: React.FC = () => {
       key: 'roles',
       label: <span className="flex items-center gap-2 text-base"><ClusterOutlined /> چارت سازمانی</span>,
       children: <RolesTab />,
+    },
+    {
+      key: 'formulas',
+      label: <span className="flex items-center gap-2 text-base"><FunctionOutlined /> فرمول‌های محاسباتی</span>,
+      children: <ModuleListRefineWrapper moduleId="calculation_formulas" />,
     },
   ];
 
@@ -45,3 +51,7 @@ const SettingsPage: React.FC = () => {
 };
 
 export default SettingsPage;
+
+const ModuleListRefineWrapper: React.FC<{ moduleId: string }> = ({ moduleId }) => {
+  return <ModuleListRefine moduleIdOverride={moduleId} />;
+};

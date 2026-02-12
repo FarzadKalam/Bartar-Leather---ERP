@@ -32,7 +32,28 @@ const fieldsArray: any[] = [
     logic: { visibleIf: { field: 'product_type', operator: LogicOperator.EQUALS, value: 'raw' } } 
   },
   {
-    key: 'main_unit', labels: { fa: 'واحد اصلی', en: 'Main Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/5 , dynamicOptionsCategory: 'main_unit',
+    key: 'main_unit', labels: { fa: 'واحد اصلی', en: 'Main Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/5,
+    options: [
+      { label: 'عدد', value: 'عدد' },
+      { label: 'بسته', value: 'بسته' },
+      { label: 'فوت مربع', value: 'فوت مربع' },
+      { label: 'سانتیمتر مربع', value: 'سانتیمتر مربع' },
+      { label: 'میلیمتر مربع', value: 'میلیمتر مربع' },
+      { label: 'متر مربع', value: 'متر مربع' },
+    ],
+    nature: FieldNature.PREDEFINED,
+    isKey: false
+  },
+  {
+    key: 'sub_unit', labels: { fa: 'واحد فرعی', en: 'Sub Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/4,
+    options: [
+      { label: 'فوت مربع', value: 'فوت مربع' },
+      { label: 'سانتیمتر مربع', value: 'سانتیمتر مربع' },
+      { label: 'میلیمتر مربع', value: 'میلیمتر مربع' },
+      { label: 'متر مربع', value: 'متر مربع' },
+      { label: 'عدد', value: 'عدد' },
+      { label: 'بسته', value: 'بسته' },
+    ],
     nature: FieldNature.PREDEFINED,
     isKey: false
   },
@@ -75,6 +96,7 @@ const fieldsArray: any[] = [
 
   // --- سایر فیلدها ---
   { key: 'stock', labels: { fa: 'موجودی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5, nature: FieldNature.PREDEFINED, readonly: true, description: 'محاسبه خودکار از موجودی قفسه‌ها' },
+  { key: 'sub_stock', labels: { fa: 'موجودی (واحد فرعی)', en: 'Sub Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5.1, nature: FieldNature.PREDEFINED, readonly: true },
   { key: 'waste_rate', labels: { fa: 'نرخ پرت', en: 'waste_rate' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7, nature: FieldNature.PREDEFINED },
   { key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 8, nature: FieldNature.PREDEFINED, isTableColumn: true },
   { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 9, nature: FieldNature.PREDEFINED, isTableColumn: true },

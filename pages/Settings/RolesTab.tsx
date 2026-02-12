@@ -105,7 +105,7 @@ const RolesTab: React.FC = () => {
     });
 
     module.blocks?.forEach((block: any) => {
-      if (block.type !== BlockType.TABLE) return;
+      if (block.type !== BlockType.TABLE && block.type !== BlockType.GRID_TABLE) return;
       block.tableColumns?.forEach((col: any) => {
         if (!fieldMap.has(col.key)) {
           fieldMap.set(col.key, {
@@ -116,7 +116,7 @@ const RolesTab: React.FC = () => {
       });
     });
 
-    const hasTableBlocks = module.blocks?.some((block: any) => block.type === BlockType.TABLE);
+    const hasTableBlocks = module.blocks?.some((block: any) => block.type === BlockType.TABLE || block.type === BlockType.GRID_TABLE);
     if (hasTableBlocks && !fieldMap.has('grand_total')) {
       fieldMap.set('grand_total', {
         key: 'grand_total',

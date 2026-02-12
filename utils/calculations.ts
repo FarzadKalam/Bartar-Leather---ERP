@@ -79,6 +79,20 @@ export const calculateSummary = (data: any, blocks: any[], summaryConfig: any) =
                 });
             }
         }
+
+        if (block.type === BlockType.GRID_TABLE) {
+            const grids = data[block.id] || [];
+            if (Array.isArray(grids)) {
+                grids.forEach((grid: any) => {
+                    const pieces = grid?.pieces || [];
+                    if (Array.isArray(pieces)) {
+                        pieces.forEach((piece: any) => {
+                            grandTotal += parseFloat(piece?.total_cost) || parseFloat(piece?.cost_per_item) || 0;
+                        });
+                    }
+                });
+            }
+        }
     });
 
     return { total: grandTotal };

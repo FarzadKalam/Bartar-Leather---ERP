@@ -16,12 +16,13 @@ import ViewWrapper from "../components/moduleList/ViewWrapper";
 import GridView from "../components/moduleList/GridView";
 import RenderCardItem from "../components/moduleList/RenderCardItem";
 
-export const ModuleListRefine = () => {
+export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ moduleIdOverride }) => {
   const { moduleId } = useParams();
+  const resolvedModuleId = moduleIdOverride || moduleId;
   const navigate = useNavigate();
   const { modal, message: msg } = App.useApp();
   
-  const moduleConfig = moduleId ? MODULES[moduleId] : null;
+  const moduleConfig = resolvedModuleId ? MODULES[resolvedModuleId] : null;
 
   // ✅ Use default view mode from module config, fallback to LIST
   const [viewMode, setViewMode] = useState<ViewMode>(moduleConfig?.defaultViewMode || ViewMode.LIST);
@@ -46,10 +47,10 @@ export const ModuleListRefine = () => {
   const [currentUserRoleId, setCurrentUserRoleId] = useState<string | null>(null);
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
-    resource: moduleId,
+    resource: resolvedModuleId,
     sorters: { initial: [{ field: "created_at", order: "desc" }] },
     pagination: { pageSize: 100 }, 
-    queryOptions: { enabled: !!moduleId },
+    queryOptions: { enabled: !!resolvedModuleId },
     syncWithLocation: false,
   });
 
@@ -79,10 +80,10 @@ export const ModuleListRefine = () => {
     setEditRecordId(null);
     setIsBulkEditOpen(false);
     setIsBulkEditMode(false);
-  }, [moduleId, moduleConfig?.defaultViewMode]);
+  }, [resolvedModuleId, moduleConfig?.defaultViewMode]);
 
   const fetchPermissions = useCallback(async () => {
-    if (!moduleId) return;
+    if (!resolvedModuleId) return;
     try {
       const { data: authData } = await supabase.auth.getUser();
       const user = authData?.user;
@@ -102,7 +103,7 @@ export const ModuleListRefine = () => {
         .eq('id', profile.role_id)
         .single();
 
-      const modulePerms = role?.permissions?.[moduleId] || {};
+      const modulePerms = role?.permissions?.[resolvedModuleId] || {};
       setModulePermissions({
         view: modulePerms.view,
         edit: modulePerms.edit,
@@ -112,7 +113,7 @@ export const ModuleListRefine = () => {
     } catch (err) {
       console.warn('Could not fetch permissions:', err);
     }
-  }, [moduleId]);
+  }, [resolvedModuleId]);
 
   useEffect(() => {
     fetchPermissions();
@@ -156,7 +157,7 @@ export const ModuleListRefine = () => {
   const imageField = moduleConfig?.fields.find(f => f.type === FieldType.IMAGE)?.key;
   const tagsField = moduleConfig?.fields.find(f => f.type === FieldType.TAGS)?.key;
   const statusField = moduleConfig?.fields.find(f => f.type === FieldType.STATUS)?.key;
-  const categoryField = moduleId === 'tasks'
+  const categoryField = resolvedModuleId === 'tasks'
     ? 'related_to_module'
     : moduleConfig?.fields.find(f => f.key === 'category' || f.key === 'product_category')?.key;
 
@@ -206,7 +207,7 @@ export const ModuleListRefine = () => {
 
         const dynFields: any[] = [...moduleConfig.fields.filter((f) => (f as any).dynamicOptionsCategory)];
         moduleConfig.blocks?.forEach((b) => {
-          if (b.type === BlockType.TABLE && b.tableColumns) {
+          if ((b.type === BlockType.TABLE || b.type === BlockType.GRID_TABLE) && b.tableColumns) {
             b.tableColumns.forEach((c) => {
               if (
                 (c.type === FieldType.SELECT || c.type === FieldType.MULTI_SELECT) &&
@@ -242,6 +243,16 @@ export const ModuleListRefine = () => {
           const data = dynResults[idx]?.data || [];
           dynOpts[cat] = data.filter((i: any) => i.value !== null);
         });
+        try {
+          const { data: formulas } = await supabase
+            .from('calculation_formulas')
+            .select('id, name');
+          if (formulas) {
+            dynOpts['calculation_formulas'] = formulas.map((f: any) => ({ label: f.name, value: f.id }));
+          }
+        } catch (err) {
+          console.warn('Could not load calculation formulas', err);
+        }
         setDynamicOptions(dynOpts);
 
         const relFields: any[] = [...moduleConfig.fields.filter((f) => f.type === FieldType.RELATION || f.type === FieldType.USER)];
@@ -305,7 +316,7 @@ export const ModuleListRefine = () => {
 
   // ✅ Fetch tags for all records
   useEffect(() => {
-    if (!tagsField || !moduleId || accessibleData.length === 0) return;
+    if (!tagsField || !resolvedModuleId || accessibleData.length === 0) return;
 
     const fetchTags = async () => {
       try {
@@ -335,7 +346,7 @@ export const ModuleListRefine = () => {
     };
 
     fetchTags();
-  }, [moduleId, tagsField, accessibleData.length]);
+  }, [resolvedModuleId, tagsField, accessibleData.length]);
 
   const searchTargetField = useMemo(() => {
     if (!moduleConfig) return null;
@@ -423,7 +434,7 @@ export const ModuleListRefine = () => {
       cancelText: 'خیر',
       onOk: () => {
         deleteMany(
-          { resource: moduleId!, ids: selectedRowKeys as string[] },
+          { resource: resolvedModuleId!, ids: selectedRowKeys as string[] },
           { onSuccess: () => { setSelectedRowKeys([]); msg.success('حذف شد'); tableQueryResult.refetch(); } }
         );
       }
@@ -454,7 +465,7 @@ export const ModuleListRefine = () => {
       let completed = 0;
       selectedRowKeys.forEach(id => {
           updateRecord(
-            { resource: moduleId!, id: id as string, values: changes },
+            { resource: resolvedModuleId!, id: id as string, values: changes },
             { onSuccess: () => {
                   completed++;
                   if (completed === selectedRowKeys.length) {
@@ -483,13 +494,13 @@ export const ModuleListRefine = () => {
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement("a");
       link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `${moduleId}_export_${new Date().getTime()}.csv`);
+      link.setAttribute("download", `${resolvedModuleId}_export_${new Date().getTime()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
   };
 
-  if (!moduleId || !moduleConfig) return null;
+  if (!resolvedModuleId || !moduleConfig) return null;
   if (!canViewModule) {
     return (
       <div className="p-6">
@@ -519,7 +530,7 @@ export const ModuleListRefine = () => {
             <Button
                 type="primary"
                 icon={<PlusOutlined />}
-                onClick={() => navigate(`/${moduleId}/create`)}
+              onClick={() => navigate(`/${resolvedModuleId}/create`)}
                 className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/30 shrink-0"
             >
                 افزودن
@@ -550,14 +561,14 @@ export const ModuleListRefine = () => {
         />
         </div>
 
-       <div className="mb-4">
-            <ViewManager 
-                moduleId={moduleId} 
-                currentView={currentView} 
-                onViewChange={handleViewChange} 
-                onRefresh={() => tableQueryResult.refetch()}
-            />
-       </div>
+         <div className="mb-4">
+          <ViewManager 
+            moduleId={resolvedModuleId} 
+            currentView={currentView} 
+            onViewChange={handleViewChange} 
+            onRefresh={() => tableQueryResult.refetch()}
+          />
+         </div>
 
          <ViewWrapper isFullscreen={isFullscreen}>
          <div className="flex-1 overflow-hidden relative rounded-[2rem]">
@@ -583,7 +594,7 @@ export const ModuleListRefine = () => {
                     pagination={tableProps.pagination}
                     rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
                     onRow={(record: any) => ({ 
-                      onClick: () => navigate(`/${moduleId}/${record.id}`), 
+                      onClick: () => navigate(`/${resolvedModuleId}/${record.id}`), 
                       style: { cursor: 'pointer' } 
                     })}
                     dynamicOptions={dynamicOptions}
@@ -598,7 +609,7 @@ export const ModuleListRefine = () => {
                 <div className="h-full overflow-y-auto p-1 custom-scrollbar flex flex-col">
                             <GridView
                               data={gridData}
-                              moduleId={moduleId}
+                              moduleId={resolvedModuleId}
                               moduleConfig={moduleConfig}
                               imageField={imageField}
                               tagsField={tagsField}
@@ -646,7 +657,7 @@ export const ModuleListRefine = () => {
                             <RenderCardItem 
                               key={item.id} 
                               item={item} 
-                              moduleId={moduleId}
+                              moduleId={resolvedModuleId}
                               moduleConfig={moduleConfig}
                               imageField={imageField}
                               tagsField={tagsField}
@@ -668,7 +679,7 @@ export const ModuleListRefine = () => {
                           icon={<PlusOutlined />} 
                           className="mt-2 text-xs text-gray-500 hover:text-leather-600 hover:border-leather-400"
                           onClick={() => {
-                            navigate(`/${moduleId}/create`, { 
+                            navigate(`/${resolvedModuleId}/create`, { 
                               state: { initialValues: { [kanbanGroupBy]: col.value } } 
                             });
                           }}

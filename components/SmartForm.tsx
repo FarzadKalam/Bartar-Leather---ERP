@@ -5,10 +5,13 @@ import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import EditableTable from './EditableTable.tsx';
+import GridTable from './GridTable';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType } from '../types';
+import { convertArea } from '../utils/unitConversions';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
+import ProductionStagesField from './ProductionStagesField';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -71,6 +74,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
         // --- حالت ایجاد رکورد جدید ---
         form.resetFields();
         setFormData({}); // اول خالی کن
+        setLastAppliedBomId(null);
 
         // 1. استخراج مقادیر پیش‌فرض از کانفیگ
         const defaults: Record<string, any> = {};
@@ -235,6 +239,19 @@ const SmartForm: React.FC<SmartFormProps> = ({
             }));
         }
     }
+    try {
+      const { data: formulas } = await supabase
+        .from('calculation_formulas')
+        .select('id, name');
+      if (formulas) {
+        newOptions['calculation_formulas'] = formulas.map((f: any) => ({
+          label: f.name,
+          value: f.id,
+        }));
+      }
+    } catch (err) {
+      console.warn('Could not load calculation formulas', err);
+    }
     setDynamicOptions(newOptions);
   };
 
@@ -326,18 +343,15 @@ const SmartForm: React.FC<SmartFormProps> = ({
       try {
         const { data, error } = await supabase
           .from('production_boms')
-          .select('items_leather, items_lining, items_fitting, items_accessory, items_labor, product_category')
+          .select('grid_materials, product_category, production_stages_draft')
           .eq('id', bomId)
           .single();
         if (error) throw error;
 
         const payload = {
-          items_leather: data?.items_leather || [],
-          items_lining: data?.items_lining || [],
-          items_fitting: data?.items_fitting || [],
-          items_accessory: data?.items_accessory || [],
-          items_labor: data?.items_labor || [],
+          grid_materials: data?.grid_materials || [],
           product_category: data?.product_category || null,
+          production_stages_draft: data?.production_stages_draft || [],
         };
 
         form.setFieldsValue(payload);
@@ -377,6 +391,20 @@ const SmartForm: React.FC<SmartFormProps> = ({
     setFormData((prev: any) => ({ ...prev, name: nextName }));
   }, [module.id, watchedValues, relationOptions, dynamicOptions]);
 
+  useEffect(() => {
+    if (module.id !== 'products') return;
+    const currentValues = watchedValues || formData;
+    const mainUnit = currentValues?.main_unit;
+    const subUnit = currentValues?.sub_unit;
+    const stock = parseFloat(currentValues?.stock) || 0;
+    if (!mainUnit || !subUnit) return;
+    const subStock = convertArea(stock, mainUnit, subUnit);
+    if (Number.isFinite(subStock)) {
+      form.setFieldValue('sub_stock', subStock);
+      setFormData((prev: any) => ({ ...prev, sub_stock: subStock }));
+    }
+  }, [module.id, watchedValues, formData, form]);
+
   // --- تابع کمکی: دریافت دیتای خلاصه (Summary) ---
   const getSummaryData = (currentData: any) => {
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
@@ -394,6 +422,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const handleFinish = async (values: any) => {
     setLoading(true);
     try {
+      if (module.id === 'production_orders' && !recordId) {
+        values = { ...formData, ...values };
+      }
       const assigneeCombo = values?.assignee_combo ?? formData?.assignee_combo;
       if (assigneeCombo) {
         const { assignee_id, assignee_type } = parseAssigneeCombo(assigneeCombo);
@@ -438,6 +469,19 @@ const SmartForm: React.FC<SmartFormProps> = ({
       }
       if (module.id === 'shelves') {
         delete values.shelf_inventory;
+      }
+      if (module.id === 'production_orders') {
+        if (values.grid_materials === undefined) {
+          values.grid_materials = formData?.grid_materials || [];
+        }
+        if (values.production_stages_draft === undefined) {
+          values.production_stages_draft = formData?.production_stages_draft || [];
+        }
+      }
+      if (module.id === 'production_boms') {
+        if (values.production_stages_draft === undefined) {
+          values.production_stages_draft = formData?.production_stages_draft || [];
+        }
       }
       const summaryData = getSummaryData(formData);
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
@@ -501,6 +545,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
           if (error) throw error;
 
           if (inserted?.id) {
+            if (module.id === 'production_orders') {
+              const postPayload: any = {};
+              if (values?.grid_materials !== undefined) postPayload.grid_materials = values.grid_materials;
+              if (values?.production_stages_draft !== undefined) postPayload.production_stages_draft = values.production_stages_draft;
+              if (Object.keys(postPayload).length > 0) {
+                await supabase.from(module.table).update(postPayload).eq('id', inserted.id);
+              }
+            }
             try {
               const { error } = await supabase.from('changelogs').insert([
                 {
@@ -717,9 +769,31 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 </div>
               )}
 
+              {(module.id === 'production_orders' || module.id === 'production_boms') && !(!recordId && module.id === 'production_orders') && (
+                <div className="mb-6 bg-white dark:bg-[#1e1e1e] p-4 md:p-6 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
+                  <h3 className="text-sm md:text-lg font-bold mb-4 text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                    <span className="w-1 h-6 bg-leather-500 rounded-full inline-block"></span>
+                    مراحل تولید
+                  </h3>
+                  <ProductionStagesField
+                    recordId={recordId}
+                    moduleId={module.id}
+                    readOnly={!canEditModule}
+                    compact={true}
+                    orderStatus={module.id === 'production_orders' ? (currentValues as any)?.status : null}
+                    draftStages={(currentValues as any)?.production_stages_draft || []}
+                    showWageSummary={module.id === 'production_orders'}
+                  />
+                </div>
+              )}
+
               {/* Blocks */}
               {sortedBlocks.map(block => {
                 if (block.visibleIf && !checkVisibility(block.visibleIf, currentValues)) return null;
+
+                if (module.id === 'production_orders' && !recordId && block.type === BlockType.GRID_TABLE) {
+                  return null;
+                }
 
                 if (block.type === BlockType.FIELD_GROUP || block.type === BlockType.DEFAULT) {
                   const blockFields = module.fields
@@ -783,6 +857,30 @@ const SmartForm: React.FC<SmartFormProps> = ({
                           </Form.Item>
                         </div>
                       )}
+                    </div>
+                  );
+                }
+
+                if (block.type === BlockType.GRID_TABLE) {
+                  return (
+                    <div key={block.id} className="mb-6 p-1 border border-dashed border-gray-300 rounded-3xl">
+                      <Form.Item name={block.id} noStyle>
+                        <GridTable
+                          block={block}
+                          initialData={formData[block.id] || []}
+                          mode="local"
+                          moduleId={module.id}
+                          relationOptions={relationOptions}
+                          dynamicOptions={dynamicOptions}
+                          canEditModule={canEditModule}
+                          canViewField={canViewField}
+                          onChange={(newData: any[]) => {
+                            const newFormData = { ...formData, [block.id]: newData };
+                            setFormData(newFormData);
+                            form.setFieldValue(block.id, newData);
+                          }}
+                        />
+                      </Form.Item>
                     </div>
                   );
                 }

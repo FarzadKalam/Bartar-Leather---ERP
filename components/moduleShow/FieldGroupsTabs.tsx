@@ -1,6 +1,7 @@
 import React from 'react';
 import { Tabs } from 'antd';
 import EditableTable from '../EditableTable';
+import { FieldType } from '../../types';
 
 interface FieldGroupsTabsProps {
   fieldGroups: any[];
@@ -41,6 +42,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6 md:gap-4">
                 {moduleConfig.fields
                   .filter((f: any) => f.blockId === block.id)
+                  .filter((f: any) => f.type !== FieldType.PROGRESS_STAGES)
                   .filter((f: any) => (canViewField ? canViewField(f.key) !== false : true))
                   .map((f: any) => (!f.logic || checkVisibility(f.logic)) && (
                     <div key={f.key} className="flex flex-col gap-1">

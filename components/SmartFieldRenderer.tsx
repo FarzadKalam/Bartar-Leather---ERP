@@ -193,13 +193,18 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const renderInputContent = () => {
     if (fieldType === FieldType.PROGRESS_STAGES) {
       const status = (allValues as any)?.status;
-      const canEditStages = moduleId === 'production_orders' && (!status || status === 'pending');
+      const isOrder = moduleId === 'production_orders';
+      const isBom = moduleId === 'production_boms';
+      const canEditStages = isOrder && (!status || status === 'pending');
       return (
         <ProductionStagesField
           recordId={recordId}
-          readOnly={!canEditStages}
+          moduleId={moduleId}
+          readOnly={isBom ? false : !canEditStages}
           compact={compactMode}
-          orderStatus={moduleId === 'production_orders' ? (allValues as any)?.status : null}
+          orderStatus={isOrder ? (allValues as any)?.status : null}
+          draftStages={(allValues as any)?.production_stages_draft || []}
+          showWageSummary={isOrder}
         />
       );
     }

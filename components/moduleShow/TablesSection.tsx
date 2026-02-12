@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import EditableTable from '../EditableTable.tsx';
+import GridTable from '../GridTable';
 import SummaryCard from '../SummaryCard';
 import ProductionStagesField from '../../components/ProductionStagesField';
 import { calculateSummary } from '../../utils/calculations';
@@ -93,29 +94,47 @@ const TablesSection: React.FC<TablesSectionProps> = ({
             </h3>
             <ProductionStagesField 
               recordId={data.id} 
+              moduleId={module.id}
               readOnly={!canEditModule || productionLocked}
               compact={true}
               onQuantityChange={(qty) => onDataUpdate?.({ quantity: qty })}
+              draftStages={data?.production_stages_draft || []}
+              showWageSummary={module.id === 'production_orders'}
             />
         </div>
       ))}
 
       {module.blocks
-        ?.filter((b: any) => b.type === 'table')
+        ?.filter((b: any) => b.type === 'table' || b.type === 'grid_table')
         .filter((b: any) => (b.visibleIf ? checkVisibility(b.visibleIf) : true))
           .map((block: any) => (
         <div key={block.id}>
-           <EditableTable
+          {block.type === 'grid_table' ? (
+            <GridTable
               block={block}
-            initialData={block.externalDataConfig ? (externalTables[block.id] || []) : (data[block.id] || [])}
-            mode={block.externalDataConfig ? 'local' : 'db'}
+              initialData={data[block.id] || []}
+              mode="db"
               moduleId={module.id}
               recordId={data.id}
               relationOptions={relationOptions}
               dynamicOptions={dynamicOptions}
               canEditModule={canEditModule && !(productionLocked && String(block.id).startsWith('items_'))}
               canViewField={canViewField}
-           />
+              orderQuantity={module.id === 'production_orders' ? (data?.quantity || 0) : 0}
+            />
+          ) : (
+            <EditableTable
+              block={block}
+              initialData={block.externalDataConfig ? (externalTables[block.id] || []) : (data[block.id] || [])}
+              mode={block.externalDataConfig ? 'local' : 'db'}
+              moduleId={module.id}
+              recordId={data.id}
+              relationOptions={relationOptions}
+              dynamicOptions={dynamicOptions}
+              canEditModule={canEditModule && !(productionLocked && String(block.id).startsWith('items_'))}
+              canViewField={canViewField}
+            />
+          )}
         </div>
       ))}
 

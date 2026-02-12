@@ -82,7 +82,8 @@ export enum FieldLocation {
 export enum BlockType {
   DEFAULT = 'default',
   FIELD_GROUP = 'field_group',
-  TABLE = 'table'
+  TABLE = 'table',
+  GRID_TABLE = 'grid_table'
 }
 
 export enum UserRole {
@@ -182,6 +183,9 @@ export interface BlockDefinition {
   icon?: string;
   visibleIf?: any;
   readonly?: boolean;
+  gridConfig?: {
+    categories: Array<{ value: string; label: string; specBlockId: string }>;
+  };
   tableColumns?: {
     key: string;
     title: string;

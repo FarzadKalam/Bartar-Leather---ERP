@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined } from '@ant-design/icons';
+import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
@@ -13,13 +13,17 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
+  moduleId?: string;
   readOnly?: boolean;
   compact?: boolean;
   onQuantityChange?: (qty: number) => void;
   orderStatus?: string | null;
+  draftStages?: any[];
+  onDraftStagesChange?: (stages: any[]) => void;
+  showWageSummary?: boolean;
 }
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, readOnly = false, compact = false, onQuantityChange, orderStatus }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, onQuantityChange, orderStatus, draftStages = [], showWageSummary = false }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -29,12 +33,22 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
   const [lineForm] = Form.useForm();
   const [taskForm] = Form.useForm();
+  const [draftLocal, setDraftLocal] = useState<any[]>(Array.isArray(draftStages) ? draftStages : []);
+  const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
+  const [draftForm] = Form.useForm();
+  const [draftToCreate, setDraftToCreate] = useState<any | null>(null);
+  const [editingDraft, setEditingDraft] = useState<any | null>(null);
+  const isBom = moduleId === 'production_boms';
 
   const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
 
   useEffect(() => {
     onQuantityChangeRef.current = onQuantityChange;
   }, [onQuantityChange]);
+
+  useEffect(() => {
+    setDraftLocal(Array.isArray(draftStages) ? draftStages : []);
+  }, [draftStages]);
 
   const fetchAssignees = async () => {
     try {
@@ -47,7 +61,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   };
 
   const fetchLines = async () => {
-    if (!recordId) return;
+    if (!recordId || isBom) return;
     try {
       const { data, error } = await supabase
         .from('production_lines')
@@ -62,7 +76,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   };
 
   const fetchTasks = async () => {
-    if (!recordId) return;
+    if (!recordId || isBom) return;
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -88,10 +102,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     fetchLines();
     fetchTasks();
     if (isTaskModalOpen) fetchAssignees();
-  }, [recordId, isTaskModalOpen]);
+  }, [recordId, isTaskModalOpen, isBom]);
 
   const syncOrderQuantity = useCallback(async (nextLines: any[]) => {
-    if (!recordId) return;
+    if (!recordId || isBom) return;
     const nextTotal = nextLines.reduce((sum, line) => sum + (parseFloat(line.quantity) || 0), 0);
     onQuantityChangeRef.current?.(nextTotal);
     const { error } = await supabase
@@ -104,9 +118,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   }, [recordId]);
 
   useEffect(() => {
-    if (!recordId) return;
+    if (!recordId || isBom) return;
     syncOrderQuantity(lines);
-  }, [lines, recordId, syncOrderQuantity]);
+  }, [lines, recordId, syncOrderQuantity, isBom]);
 
   const tasksByLine = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -123,7 +137,18 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const handleAddLine = async (values: any) => {
     if (!recordId) return;
     try {
-      const nextNo = values.line_no || ((lines[lines.length - 1]?.line_no || 0) + 1);
+      let nextNo = values.line_no;
+      if (!nextNo) {
+        const { data: maxRow, error: maxError } = await supabase
+          .from('production_lines')
+          .select('line_no')
+          .eq('production_order_id', recordId)
+          .order('line_no', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (maxError) throw maxError;
+        nextNo = (Number(maxRow?.line_no) || 0) + 1;
+      }
       const payload = {
         production_order_id: recordId,
         line_no: nextNo,
@@ -148,6 +173,18 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     } catch (err: any) {
       message.error(`خطا: ${err.message}`);
     }
+  };
+
+  const openTaskModal = (lineId: string, draftStage?: any) => {
+    setActiveLineId(lineId);
+    setDraftToCreate(draftStage || null);
+    const initial = {
+      name: draftStage?.name || '',
+      sort_order: draftStage?.sort_order || ((tasks.length + 1) * 10),
+      wage: draftStage?.wage || 0,
+    };
+    taskForm.setFieldsValue(initial);
+    setIsTaskModalOpen(true);
   };
 
   const handleAddTask = async (values: any) => {
@@ -179,6 +216,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         assignee_role_id: assigneeType === 'role' ? assigneeId : null,
         assignee_type: assigneeType,
         due_date: values.due_date || null,
+        wage: values.wage || null,
         sort_order: values.sort_order || ((tasks.length + 1) * 10),
         created_by: user?.id,
       };
@@ -190,6 +228,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       setIsTaskModalOpen(false);
       taskForm.resetFields();
       setActiveLineId(null);
+      setDraftToCreate(null);
       fetchTasks();
     } catch (error: any) {
       message.error(`خطا: ${error.message}`);
@@ -286,6 +325,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             {task.assignee_type === 'role' ? <TeamOutlined className="text-amber-700" /> : <UserOutlined className="text-amber-700" />}
             <span>مسئول: {getAssigneeLabel(task)}</span>
           </div>
+          {task.wage !== undefined && task.wage !== null && (
+            <div className="flex items-center gap-2">
+              <span className="text-amber-700">💰</span>
+              <span>دستمزد: {toPersianNumber(Number(task.wage || 0).toLocaleString('en-US'))} تومان</span>
+            </div>
+          )}
           {task.due_date && (
             <div className="flex items-center gap-2">
               <ClockCircleOutlined className="text-amber-700" />
@@ -305,22 +350,221 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     </div>
   );
 
-  if (!recordId && !readOnly) {
-    return (
-      <div className="text-gray-400 text-xs py-2 bg-gray-50 rounded px-2 text-center border border-dashed">
-        برای تعریف مراحل، ابتدا سفارش را ثبت کنید.
-      </div>
-    );
-  }
+  const draftList = Array.isArray(draftLocal) ? draftLocal : [];
+  const totalWage = lines.reduce((sum, line) => {
+    const lineTasks = tasksByLine.get(String(line.id)) || [];
+    const lineWage = lineTasks.reduce((acc, t) => acc + (parseFloat(t.wage) || 0), 0);
+    const qty = parseFloat(line.quantity) || 0;
+    return sum + (lineWage * qty);
+  }, 0);
 
-  if (loading && tasks.length === 0) return <div className="flex justify-center p-2"><Spin size="small" /></div>;
+  const saveDraftStages = async (nextStages: any[]) => {
+    setDraftLocal(nextStages);
+    if (onDraftStagesChange) onDraftStagesChange(nextStages);
+    if (moduleId === 'production_boms' && recordId) {
+      await supabase.from('production_boms').update({ production_stages_draft: nextStages }).eq('id', recordId);
+    }
+  };
+
+  const handleAddDraftStage = async (values: any) => {
+    let next = [...draftLocal];
+    if (editingDraft?.id) {
+      next = next.map((stage: any) =>
+        stage.id === editingDraft.id
+          ? { ...stage, name: values.name, sort_order: values.sort_order || stage.sort_order }
+          : stage
+      );
+    } else {
+      next.push({
+        id: Date.now(),
+        name: values.name,
+        sort_order: values.sort_order || ((draftLocal.length + 1) * 10),
+      });
+    }
+    await saveDraftStages(next);
+    setIsDraftModalOpen(false);
+    setEditingDraft(null);
+    draftForm.resetFields();
+  };
+
+  const handleRemoveDraftStage = async (id: any) => {
+    const next = draftLocal.filter((s: any) => s.id !== id);
+    await saveDraftStages(next);
+  };
+
+  useEffect(() => {
+    if (!isDraftModalOpen) return;
+    if (editingDraft) {
+      draftForm.setFieldsValue({
+        name: editingDraft.name,
+        sort_order: editingDraft.sort_order,
+      });
+    } else {
+      draftForm.resetFields();
+    }
+  }, [isDraftModalOpen, editingDraft, draftForm]);
+
+  const normalizeStageName = (val: any) => String(val || '').trim().toLowerCase();
+  const draftSegments = draftList.map((stage: any) => ({
+    ...stage,
+    type: 'draft',
+    label: stage.name || stage.title || 'مرحله',
+  }));
+
+  const getLineSegments = (lineTasks: any[]) => {
+    const normalizedTasks = (lineTasks || []).map((task: any) => ({
+      ...task,
+      type: 'task',
+      _normalizedName: normalizeStageName(task.name || task.title),
+    }));
+
+    const lineDrafts = draftSegments.filter((draft: any) => {
+      const normalizedDraft = normalizeStageName(draft.label);
+      const matched = normalizedTasks.some((t: any) => t._normalizedName && t._normalizedName === normalizedDraft);
+      return !matched;
+    });
+
+    const merged = [...normalizedTasks, ...lineDrafts].sort((a: any, b: any) => {
+      const aOrder = Number(a.sort_order ?? 0);
+      const bOrder = Number(b.sort_order ?? 0);
+      return aOrder - bOrder;
+    });
+
+    return merged;
+  };
+
+  const handleCopyLine = async (line: any) => {
+    if (!recordId || !line?.id) return;
+    try {
+      setLoading(true);
+      const { data: maxRow, error: maxError } = await supabase
+        .from('production_lines')
+        .select('line_no')
+        .eq('production_order_id', recordId)
+        .order('line_no', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (maxError) throw maxError;
+      const nextLineNo = (Number(maxRow?.line_no) || 0) + 1;
+
+      const { data: newLine, error: lineError } = await supabase
+        .from('production_lines')
+        .insert({
+          production_order_id: recordId,
+          line_no: nextLineNo,
+          quantity: line.quantity || 0,
+        })
+        .select('id')
+        .single();
+      if (lineError) throw lineError;
+
+      const sourceTasks = tasksByLine.get(String(line.id)) || [];
+      if (newLine?.id && sourceTasks.length > 0) {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || null;
+        const payload = sourceTasks.map((task: any) => ({
+          name: task.name || task.title,
+          status: 'todo',
+          related_production_order: recordId,
+          related_to_module: 'production_orders',
+          production_line_id: newLine.id,
+          assignee_id: task.assignee_id ?? null,
+          assignee_role_id: task.assignee_role_id ?? null,
+          assignee_type: task.assignee_type ?? null,
+          due_date: task.due_date ?? null,
+          wage: task.wage ?? null,
+          sort_order: task.sort_order ?? null,
+          created_by: userId,
+        }));
+        const { error: taskError } = await supabase.from('tasks').insert(payload);
+        if (taskError) throw taskError;
+      }
+
+      message.success('خط تولید کپی شد');
+      fetchLines();
+      fetchTasks();
+    } catch (error: any) {
+      message.error(`خطا در کپی خط: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="w-full flex flex-col gap-4 select-none" dir="rtl">
-      {lines.map((line) => {
+      {!recordId && !readOnly && (!draftStages || draftStages.length === 0) && (
+        <div className="text-gray-400 text-xs py-2 bg-gray-50 rounded px-2 text-center border border-dashed">
+          برای تعریف مراحل، ابتدا سفارش را ثبت کنید.
+        </div>
+      )}
+
+      {loading && tasks.length === 0 && (
+        <div className="flex justify-center p-2"><Spin size="small" /></div>
+      )}
+
+      {isBom && (
+        <div className="space-y-2">
+          <div className="text-xs text-gray-500">مراحل پیش‌نویس (BOM)</div>
+          <div className={`flex-1 flex bg-gray-100 rounded-lg overflow-hidden border border-gray-200 ${compact ? 'h-5' : 'h-9'}`}>
+            {draftSegments.length > 0 ? (
+              draftSegments.map((stage: any, index: number) => (
+                <Popover
+                  key={stage.id || index}
+                  content={
+                    <div className="space-y-2 text-xs">
+                      <div className="font-bold text-gray-700">{stage.label}</div>
+                      <div>ترتیب: {toPersianNumber(stage.sort_order || '-')}</div>
+                      {!readOnly && (
+                        <div className="flex gap-2">
+                          <Button size="small" onClick={() => { setEditingDraft(stage); setIsDraftModalOpen(true); }}>ویرایش</Button>
+                          <Button size="small" danger onClick={() => handleRemoveDraftStage(stage.id)}>حذف</Button>
+                        </div>
+                      )}
+                    </div>
+                  }
+                  trigger="click"
+                  overlayStyle={{ zIndex: 10000 }}
+                >
+                  <div
+                    className={`relative flex items-center justify-center cursor-pointer transition-all group ${index !== 0 ? 'border-r border-white/30' : ''}`}
+                    style={{ flex: 1, border: '1px dashed #d1d5db', backgroundColor: 'transparent' }}
+                  >
+                    <span className={`text-gray-600 font-medium truncate w-full text-center ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
+                      {stage.label}
+                    </span>
+                  </div>
+                </Popover>
+              ))
+            ) : (
+              <div className="w-full flex items-center justify-center text-gray-400 text-xs bg-gray-50 h-full">
+                {compact ? <span className="opacity-50">-</span> : 'بدون مرحله پیش‌نویس'}
+              </div>
+            )}
+          </div>
+
+          {!readOnly && (
+            <div className="flex justify-start">
+              <Tooltip title="افزودن مرحله پیش‌نویس">
+                <Button
+                  type="dashed"
+                  icon={<PlusOutlined />}
+                  size={compact ? 'small' : 'middle'}
+                  onClick={() => { setEditingDraft(null); setIsDraftModalOpen(true); }}
+                  className="border-amber-300 text-amber-700 hover:!border-amber-600 hover:!text-amber-600 hover:!bg-amber-50"
+                >
+                  افزودن مرحله
+                </Button>
+              </Tooltip>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isBom && lines.map((line) => {
         const lineTasks = tasksByLine.get(String(line.id)) || [];
         const canEditQuantity = !readOnly && (!orderStatus || orderStatus === 'pending');
         const showInlineQty = !compact || canEditQuantity;
+        const lineSegments = getLineSegments(lineTasks);
         return (
           <div key={line.id} className="space-y-2">
               <div className="flex items-center gap-3 text-xs text-gray-600">
@@ -339,6 +583,17 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                     />
                   </div>
                 )}
+                {!readOnly && (
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => handleCopyLine(line)}
+                    className="text-amber-700 hover:!text-amber-600"
+                  >
+                    کپی خط
+                  </Button>
+                )}
               </div>
 
             <div className="w-full flex items-center gap-2">
@@ -350,8 +605,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                     icon={<PlusOutlined />}
                     size={compact ? 'small' : 'middle'}
                     onClick={() => {
-                      setActiveLineId(line.id);
-                      setIsTaskModalOpen(true);
+                      openTaskModal(line.id);
                     }}
                     className="flex-shrink-0 border-amber-300 text-amber-700 hover:!border-amber-600 hover:!text-amber-600 hover:!bg-amber-50"
                   />
@@ -359,49 +613,83 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               )}
 
               <div className={`flex-1 flex bg-gray-100 rounded-lg overflow-hidden border border-gray-200 ${compact ? 'h-5' : 'h-9'}`}>
-                {lineTasks.map((task, index) => (
-                  <Popover
-                    key={task.id}
-                    content={renderPopupContent(task)}
-                    trigger={compact ? 'hover' : 'click'}
-                    overlayStyle={{ zIndex: 10000 }}
-                    title={null}
-                  >
-                    <div
-                      className={`relative flex items-center justify-center cursor-pointer transition-all hover:brightness-110 group ${index !== 0 ? 'border-r border-white/30' : ''}`}
-                      style={{ flex: 1, backgroundColor: getStatusColor(task.status) }}
+                {lineSegments.map((segment: any, index: number) => (
+                  segment.type === 'task' ? (
+                    <Popover
+                      key={segment.id}
+                      content={renderPopupContent(segment)}
+                      trigger={compact ? 'hover' : 'click'}
+                      overlayStyle={{ zIndex: 10000 }}
+                      title={null}
                     >
-                      <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
-                        <span className={`text-white font-medium truncate w-full text-center drop-shadow-md ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
-                          {task.title || task.name}
-                        </span>
-                        {!compact && task.sort_order && (
-                          <span className="text-[8px] text-white/90 absolute bottom-0.5 right-1 bg-black/10 px-1 rounded-sm">
-                            {toPersianNumber(task.sort_order)}
+                      <div
+                        className={`relative flex items-center justify-center cursor-pointer transition-all hover:brightness-110 group ${index !== 0 ? 'border-r border-white/30' : ''}`}
+                        style={{ flex: 1, backgroundColor: getStatusColor(segment.status) }}
+                      >
+                        <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
+                          <span className={`text-white font-medium truncate w-full text-center drop-shadow-md ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
+                            {segment.title || segment.name}
                           </span>
-                        )}
+                          {!compact && segment.sort_order && (
+                            <span className="text-[8px] text-white/90 absolute bottom-0.5 right-1 bg-black/10 px-1 rounded-sm">
+                              {toPersianNumber(segment.sort_order)}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </Popover>
+                    </Popover>
+                  ) : (
+                    <Popover
+                      key={`draft-${segment.id}-${index}`}
+                      content={
+                        <div className="space-y-2 text-xs">
+                          <div className="font-bold text-gray-700">{segment.label}</div>
+                          <div>ترتیب: {toPersianNumber(segment.sort_order || '-')}</div>
+                          {!readOnly && (
+                            <Button size="small" type="primary" onClick={() => openTaskModal(line.id, segment)}>ایجاد وظیفه</Button>
+                          )}
+                        </div>
+                      }
+                      trigger={compact ? 'hover' : 'click'}
+                      overlayStyle={{ zIndex: 10000 }}
+                      title={null}
+                    >
+                      <div
+                        className={`relative flex items-center justify-center cursor-pointer transition-all group ${index !== 0 ? 'border-r border-white/30' : ''}`}
+                        style={{ flex: 1, border: '1px dashed #d1d5db', backgroundColor: 'transparent' }}
+                      >
+                        <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
+                          <span className={`text-gray-600 font-medium truncate w-full text-center ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
+                            {segment.label}
+                          </span>
+                        </div>
+                      </div>
+                    </Popover>
+                  )
                 ))}
-                {lineTasks.length === 0 && (
+                {lineSegments.length === 0 && (
                   <div className="w-full flex items-center justify-center text-gray-400 text-xs bg-gray-50 h-full">
                     {compact ? <span className="opacity-50">-</span> : 'بدون مرحله تولید'}
                   </div>
                 )}
               </div>
             </div>
+            {showWageSummary && (
+              <div className="text-xs text-gray-500">
+                دستمزد این خط: {toPersianNumber(((lineTasks.reduce((acc, t) => acc + (parseFloat(t.wage) || 0), 0)) * (parseFloat(line.quantity) || 0)).toLocaleString('en-US'))} تومان
+              </div>
+            )}
           </div>
         );
       })}
 
-      {lines.length === 0 && (
+      {!isBom && lines.length === 0 && (
         <div className="w-full flex items-center justify-center text-gray-400 text-xs bg-gray-50 h-10 rounded">
           بدون خط تولید
         </div>
       )}
 
-      {!readOnly && (
+      {!readOnly && !isBom && (
         <div className="flex justify-start">
           <Tooltip title="افزودن خط تولید جدید">
             <Button
@@ -414,6 +702,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               افزودن خط
             </Button>
           </Tooltip>
+        </div>
+      )}
+
+      {showWageSummary && (
+        <div className="text-sm font-bold text-gray-700">
+          جمع دستمزد تولید: {toPersianNumber(totalWage.toLocaleString('en-US'))} تومان
         </div>
       )}
 
@@ -471,6 +765,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               </Form.Item>
             </div>
 
+            <div className="col-span-6">
+              <Form.Item name="wage" label="دستمزد">
+                <InputNumber className="w-full" min={0} />
+              </Form.Item>
+            </div>
+
             <div className="col-span-12">
               <Form.Item name="assignee_combo" label="مسئول انجام">
                 <Select placeholder="انتخاب کنید..." allowClear showSearch optionFilterProp="label">
@@ -508,6 +808,39 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           <div className="flex justify-end gap-2 mt-4 border-t pt-4">
             <Button onClick={() => setIsTaskModalOpen(false)} className="rounded-lg">انصراف</Button>
             <Button type="primary" htmlType="submit" loading={loading} className="rounded-lg bg-amber-700 hover:!bg-amber-600 border-none shadow-md">
+              ثبت مرحله
+            </Button>
+          </div>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={<div className="flex items-center gap-2 text-amber-800"><div className="bg-amber-50 p-1 rounded text-amber-600"><PlusOutlined /></div> افزودن مرحله پیش‌نویس</div>}
+        open={isDraftModalOpen}
+        onCancel={() => setIsDraftModalOpen(false)}
+        footer={null}
+        zIndex={10001}
+        width={420}
+        centered
+        destroyOnClose
+      >
+        <Form form={draftForm} onFinish={handleAddDraftStage} layout="vertical" className="pt-2">
+          <div className="grid grid-cols-12 gap-3">
+            <div className="col-span-9">
+              <Form.Item name="name" label="عنوان مرحله" rules={[{ required: true, message: 'الزامی' }]}> 
+                <Input placeholder="مثلا: برشکاری..." />
+              </Form.Item>
+            </div>
+            <div className="col-span-3">
+              <Form.Item name="sort_order" label="ترتیب" initialValue={(draftLocal.length + 1) * 10}>
+                <InputNumber className="w-full" min={1} />
+              </Form.Item>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4 border-t pt-4">
+            <Button onClick={() => setIsDraftModalOpen(false)} className="rounded-lg">انصراف</Button>
+            <Button type="primary" htmlType="submit" className="rounded-lg bg-amber-700 hover:!bg-amber-600 border-none shadow-md">
               ثبت مرحله
             </Button>
           </div>
