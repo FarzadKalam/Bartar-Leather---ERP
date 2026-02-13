@@ -165,7 +165,7 @@ const ModuleShow: React.FC = () => {
     };
   }, [productMetaMap]);
 
-  const buildStartMaterialsDraft = useCallback((order: any, quantity: number) => {
+  const buildStartMaterialsDraft = useCallback((order: any, quantity: number): StartMaterialGroup[] => {
     const rows = Array.isArray(order?.grid_materials) ? order.grid_materials : [];
     const normalizedOrderQty = quantity > 0 ? quantity : 1;
     return rows
@@ -173,7 +173,7 @@ const ModuleShow: React.FC = () => {
         const categoryValue = String(row?.header?.category || '');
         const categoryLabel = categoryLabelMap.get(categoryValue) || categoryValue || 'بدون دسته‌بندی';
         const rowPieces = Array.isArray(row?.pieces) && row.pieces.length > 0 ? row.pieces : [row];
-        const pieces = rowPieces
+        const pieces: StartMaterialPiece[] = rowPieces
           .map((piece: any, pieceIndex: number) => {
             const totalUsageRaw = toNumber(piece?.total_usage);
             const perItemUsageRaw = toNumber(piece?.final_usage);
@@ -197,9 +197,9 @@ const ModuleShow: React.FC = () => {
             } as StartMaterialPiece;
           });
 
-        const totalPerItemUsage = pieces.reduce((sum, piece) => sum + piece.perItemUsage, 0);
-        const totalUsage = pieces.reduce((sum, piece) => sum + piece.totalUsage, 0);
-        const totalDeliveredQty = pieces.reduce((sum, piece) => sum + piece.deliveredQty, 0);
+        const totalPerItemUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0);
+        const totalUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0);
+        const totalDeliveredQty = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.deliveredQty, 0);
         const { selectedProductId, selectedProductName, selectedProductCode } = getRowSelectedProduct(row);
         const sourceShelfId =
           row?.selected_shelf_id ||
@@ -558,7 +558,7 @@ const ModuleShow: React.FC = () => {
         setProductionQuantityPreview(null);
       }
       const baseGroups = buildStartMaterialsDraft(modalRecord, resolvedQty);
-      const selectedProductIds = Array.from(
+      const selectedProductIds: string[] = Array.from(
         new Set(
           baseGroups
             .map((group) => group.selectedProductId)
@@ -580,7 +580,7 @@ const ModuleShow: React.FC = () => {
       }
       const draft = readStartDraft();
       const draftGroups = Array.isArray(draft?.groups) ? draft.groups : [];
-      const mergedGroups = baseGroups.map((group: StartMaterialGroup) => {
+      const mergedGroups: StartMaterialGroup[] = baseGroups.map((group: StartMaterialGroup) => {
         const selectedMeta = group.selectedProductId
           ? (fetchedProductMeta.get(group.selectedProductId) || productMetaMap.get(group.selectedProductId))
           : null;
@@ -592,7 +592,7 @@ const ModuleShow: React.FC = () => {
         };
         if (!savedGroup) return baseWithMeta;
         const savedPieces = Array.isArray(savedGroup?.pieces) ? savedGroup.pieces : [];
-        const pieceMap = new Map(savedPieces.map((piece: any) => [piece?.key, piece]));
+        const pieceMap = new Map<string, any>(savedPieces.map((piece: any) => [String(piece?.key || ''), piece]));
         const pieces = baseWithMeta.pieces.map((piece) => {
           const savedPiece = pieceMap.get(piece.key);
           if (!savedPiece) return piece;
@@ -601,9 +601,9 @@ const ModuleShow: React.FC = () => {
             deliveredQty: Math.max(0, toNumber(savedPiece.deliveredQty)),
           };
         });
-        const totalPerItemUsage = pieces.reduce((sum, piece) => sum + piece.perItemUsage, 0);
-        const totalUsage = pieces.reduce((sum, piece) => sum + piece.totalUsage, 0);
-        const totalDeliveredQty = pieces.reduce((sum, piece) => sum + piece.deliveredQty, 0);
+        const totalPerItemUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0);
+        const totalUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0);
+        const totalDeliveredQty = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.deliveredQty, 0);
         const savedName = typeof savedGroup?.selectedProductName === 'string' && savedGroup.selectedProductName.trim() && savedGroup.selectedProductName !== '-'
           ? savedGroup.selectedProductName
           : null;
