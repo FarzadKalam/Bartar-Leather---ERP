@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Table, Button, Select, message, Switch, Avatar, Drawer, Form, Input, Upload } from 'antd';
 import { UserOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../supabaseClient';
+
+type ResponsiveBreakpoint = 'xxl' | 'xl' | 'lg' | 'md' | 'sm' | 'xs';
 
 const UsersTab: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -15,6 +18,17 @@ const UsersTab: React.FC = () => {
     const [editingUser, setEditingUser] = useState<any | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+    const authSignUpClient = useMemo(
+        () =>
+            createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY, {
+                auth: {
+                    persistSession: false,
+                    autoRefreshToken: false,
+                    detectSessionInUrl: false,
+                },
+            }),
+        []
+    );
 
     useEffect(() => {
         fetchData();
@@ -78,6 +92,10 @@ const UsersTab: React.FC = () => {
             message.error('دسترسی کافی ندارید');
             return;
         }
+        if (!editingUser && values.password !== values.password_confirm) {
+            message.error('رمز عبور و تکرار آن یکسان نیست');
+            return;
+        }
         setSubmitting(true);
         try {
             if (editingUser) {
@@ -99,7 +117,7 @@ const UsersTab: React.FC = () => {
 
                 message.success('کاربر بروزرسانی شد');
             } else {
-                const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+                const { data: signUpData, error: signUpError } = await authSignUpClient.auth.signUp({
                     email: values.email,
                     password: values.password,
                     options: {
@@ -163,7 +181,9 @@ const UsersTab: React.FC = () => {
             message.error('ایمیل کاربر ثبت نشده است');
             return;
         }
-        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/login`,
+        });
         if (error) {
             message.error('خطا در ارسال ایمیل: ' + error.message);
         } else {
@@ -191,6 +211,7 @@ const UsersTab: React.FC = () => {
           dataIndex: 'mobile_1',
           key: 'mobile',
           className: 'text-gray-600 dark:text-gray-400 font-mono',
+          responsive: ['md'] as ResponsiveBreakpoint[],
       },
             {
                     title: 'جایگاه سازمانی',
@@ -198,7 +219,7 @@ const UsersTab: React.FC = () => {
                     render: (_: any, record: any) => (
                             <Select
                                 value={record.role_id}
-                                style={{ width: 180 }}
+                                style={{ width: '100%', minWidth: 140 }}
                                 placeholder="انتخاب نقش"
                                 onChange={(val) => handleRoleChange(record.id, val)}
                                 options={roles.map(r => ({ label: r.title, value: r.id }))}
@@ -210,6 +231,7 @@ const UsersTab: React.FC = () => {
       {
           title: 'وضعیت',
           key: 'status',
+          width: 110,
                     render: (_: any, record: any) => (
               <Switch 
                 checked={record.is_active} 
@@ -224,10 +246,11 @@ const UsersTab: React.FC = () => {
       {
           title: 'عملیات',
           key: 'actions',
+          width: 190,
           render: (_: any, record: any) => (
               <div className="flex items-center gap-2">
                   <Button size="small" onClick={() => handleEdit(record)} disabled={!canEditRecord(record)}>ویرایش</Button>
-                  <Button size="small" onClick={() => handleResetPassword(record.email)} disabled={!canEditRecord(record)}>تغییر رمز</Button>
+                  <Button size="small" onClick={() => handleResetPassword(record.email)} disabled={!canEditRecord(record)}>ارسال لینک تغییر رمز</Button>
               </div>
           )
       }
@@ -247,14 +270,17 @@ const UsersTab: React.FC = () => {
                         </Button>
         </div>
 
-        <Table 
-            dataSource={users} 
-            columns={columns} 
-            rowKey="id" 
-            loading={loading}
-            pagination={{ pageSize: 10 }}
-            className="custom-erp-table"
-        />
+        <div className="overflow-x-auto">
+            <Table
+                dataSource={users}
+                columns={columns}
+                rowKey="id"
+                loading={loading}
+                pagination={{ pageSize: 10 }}
+                className="custom-erp-table min-w-[760px]"
+                scroll={{ x: 'max-content' }}
+            />
+        </div>
 
                 <Drawer
                         title={editingUser ? 'ویرایش کاربر' : 'افزودن کاربر جدید'}
@@ -295,6 +321,26 @@ const UsersTab: React.FC = () => {
                                 {!editingUser && (
                                     <Form.Item label="رمز عبور" name="password" rules={[{ required: true, min: 6 }]}>
                                         <Input.Password placeholder="حداقل ۶ کاراکتر" />
+                                    </Form.Item>
+                                )}
+                                {!editingUser && (
+                                    <Form.Item
+                                        label="تکرار رمز عبور"
+                                        name="password_confirm"
+                                        dependencies={['password']}
+                                        rules={[
+                                            { required: true, message: 'تکرار رمز عبور الزامی است' },
+                                            ({ getFieldValue }) => ({
+                                                validator(_, value) {
+                                                    if (!value || getFieldValue('password') === value) {
+                                                        return Promise.resolve();
+                                                    }
+                                                    return Promise.reject(new Error('با رمز عبور یکسان نیست'));
+                                                },
+                                            }),
+                                        ]}
+                                    >
+                                        <Input.Password placeholder="تکرار رمز عبور" />
                                     </Form.Item>
                                 )}
                                 {editingUser && editingUser.id === currentUserId && (

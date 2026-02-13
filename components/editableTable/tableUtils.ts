@@ -38,38 +38,50 @@ export const normalizeFilterValue = (
     return val;
   };
 
-  const resolveDynamicValues = (val: any) => {
+  const resolveDynamicLabel = (val: any) => {
     const opts = col?.dynamicOptionsCategory
       ? (dynamicOptions[col.dynamicOptionsCategory] || localDynamicOptions[col.dynamicOptionsCategory] || [])
       : [];
-    if (!opts.length || typeof val !== 'string') return [val];
+    if (!opts.length) return val;
 
+    if (val && typeof val === 'object') {
+      if ('label' in val && (val as any).label) return (val as any).label;
+      if ('value' in val) {
+        const byObjValue = opts.find((o: any) => o.value === (val as any).value);
+        if (byObjValue?.label) return byObjValue.label;
+      }
+    }
+
+    if (typeof val !== 'string') return val;
     const byValue = opts.find((o: any) => o.value === val);
-    const label = byValue?.label || val;
-    const valuesByLabel = opts.filter((o: any) => o.label === label).map((o: any) => o.value);
-    const combined = [val, ...valuesByLabel];
-    if (byValue?.label) combined.push(byValue.label);
-    return combined.filter((v) => v !== undefined && v !== null && v !== '').filter((v, i, arr) => arr.indexOf(v) === i);
+    if (byValue?.label) return byValue.label;
+    const byLabel = opts.find((o: any) => o.label === val);
+    if (byLabel?.label) return byLabel.label;
+    return val;
   };
 
   if (Array.isArray(normalizedRaw)) {
     const mapped = normalizedRaw
-      .flatMap((v) => {
+      .map((v) => {
         const single = normalizeSingle(v);
-        if (col?.dynamicOptionsCategory && typeof single === 'string') {
-          return resolveDynamicValues(single);
+        if (col?.dynamicOptionsCategory) {
+          return resolveDynamicLabel(v ?? single);
         }
-        return [single];
+        return single;
       })
       .filter((v) => v !== undefined && v !== null && v !== '');
-    return mapped.length > 0 ? Array.from(new Set(mapped)) : null;
+    return mapped.length > 0 ? Array.from(new Set(mapped.map((v) => (typeof v === 'string' ? v.trim() : v)))) : null;
+  }
+
+  if (col?.dynamicOptionsCategory) {
+    const label = resolveDynamicLabel(normalizedRaw);
+    if (typeof label === 'string') {
+      const trimmed = label.trim();
+      return trimmed ? trimmed : null;
+    }
+    return label ?? null;
   }
 
   const single = normalizeSingle(normalizedRaw);
-  if (col?.dynamicOptionsCategory && typeof single === 'string') {
-    const values = resolveDynamicValues(single);
-    return values.length > 0 ? values : null;
-  }
-
   return single;
 };

@@ -21,6 +21,7 @@ import ProductImagesManager from '../ProductImagesManager';
 
 interface HeroSectionProps {
   data: any;
+  recordTitle?: string;
   moduleId: string;
   moduleConfig: any;
   currentTags: any[];
@@ -40,6 +41,7 @@ interface HeroSectionProps {
 
 const HeroSection: React.FC<HeroSectionProps> = ({
   data,
+  recordTitle,
   moduleId,
   moduleConfig,
   currentTags,
@@ -117,7 +119,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           <div>
             <div className="flex flex-wrap items-start justify-between gap-4 mb-4 mt-2">
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-2xl md:text-3xl font-black m-0 text-gray-800 dark:text-white">{data.name}</h1>
+                <h1 className="text-2xl md:text-3xl font-black m-0 text-gray-800 dark:text-white">{recordTitle || data.name || data.system_code || "-"}</h1>
                 {(data.system_code || data.custom_code) && (
                   <Tag className="font-mono dir-ltr bg-gray-100 dark:bg-white/10 border-none text-gray-500 px-2 py-1">
                     {data.system_code || data.custom_code}

@@ -52,31 +52,36 @@ const Toolbar: React.FC<ToolbarProps> = ({
         </Tooltip>
       </div>
 
-      <div className="flex items-center gap-2">
-        <Segmented
-          options={[
-            { label: "جدول", value: ViewMode.LIST, icon: <TableOutlined /> },
-            { label: "گرید", value: ViewMode.GRID, icon: <AppstoreOutlined /> },
-            ...(kanbanEnabled ? [{ label: "کانبان", value: ViewMode.KANBAN, icon: <ColumnWidthOutlined /> }] : []),
-          ]}
-          value={viewMode}
-          onChange={(val) => setViewMode(val as ViewMode)}
-        />
+      <div className="flex w-full md:w-auto flex-col md:flex-row md:items-center gap-2">
+        <div className="flex items-center gap-2">
+          <Segmented
+            options={[
+              { label: "جدول", value: ViewMode.LIST, icon: <TableOutlined /> },
+              { label: "گرید", value: ViewMode.GRID, icon: <AppstoreOutlined /> },
+              ...(kanbanEnabled ? [{ label: "کانبان", value: ViewMode.KANBAN, icon: <ColumnWidthOutlined /> }] : []),
+            ]}
+            value={viewMode}
+            onChange={(val) => setViewMode(val as ViewMode)}
+          />
+
+          <Tooltip title={isFullscreen ? "خروج از تمام صفحه" : "تمام صفحه"}>
+            <Button
+              icon={isFullscreen ? <CompressOutlined /> : <ExpandOutlined />}
+              onClick={toggleFullscreen}
+            />
+          </Tooltip>
+        </div>
 
         {viewMode === ViewMode.KANBAN && kanbanEnabled && (
-          <Segmented
-            options={kanbanGroupOptions}
-            value={kanbanGroupBy || kanbanGroupOptions?.[0]?.value}
-            onChange={(val) => onKanbanGroupChange(val as string)}
-          />
+          <div className="max-w-full overflow-x-auto no-scrollbar">
+            <Segmented
+              className="min-w-max"
+              options={kanbanGroupOptions}
+              value={kanbanGroupBy || kanbanGroupOptions?.[0]?.value}
+              onChange={(val) => onKanbanGroupChange(val as string)}
+            />
+          </div>
         )}
-
-        <Tooltip title={isFullscreen ? "خروج از تمام صفحه" : "تمام صفحه"}>
-          <Button
-            icon={isFullscreen ? <CompressOutlined /> : <ExpandOutlined />}
-            onClick={toggleFullscreen}
-          />
-        </Tooltip>
       </div>
     </div>
   );

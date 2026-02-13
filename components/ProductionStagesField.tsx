@@ -16,6 +16,7 @@ interface ProductionStagesFieldProps {
   moduleId?: string;
   readOnly?: boolean;
   compact?: boolean;
+  lazyLoad?: boolean;
   onQuantityChange?: (qty: number) => void;
   orderStatus?: string | null;
   draftStages?: any[];
@@ -23,7 +24,7 @@ interface ProductionStagesFieldProps {
   showWageSummary?: boolean;
 }
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, onQuantityChange, orderStatus, draftStages = [], onDraftStagesChange, showWageSummary = false }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onQuantityChange, orderStatus, draftStages = [], onDraftStagesChange, showWageSummary = false }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -38,6 +39,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [draftForm] = Form.useForm();
   const [, setDraftToCreate] = useState<any | null>(null);
   const [editingDraft, setEditingDraft] = useState<any | null>(null);
+  const [isReadyToLoad, setIsReadyToLoad] = useState(!lazyLoad);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const isBom = moduleId === 'production_boms';
 
   const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
@@ -49,6 +52,32 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   useEffect(() => {
     setDraftLocal(Array.isArray(draftStages) ? draftStages : []);
   }, [draftStages]);
+
+  useEffect(() => {
+    if (!lazyLoad) {
+      setIsReadyToLoad(true);
+      return;
+    }
+    setIsReadyToLoad(false);
+  }, [lazyLoad, recordId, moduleId]);
+
+  useEffect(() => {
+    if (!lazyLoad || isReadyToLoad) return;
+    const target = containerRef.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting) {
+          setIsReadyToLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '120px' }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [lazyLoad, isReadyToLoad]);
 
   const fetchAssignees = async () => {
     try {
@@ -99,10 +128,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   };
 
   useEffect(() => {
+    if (!isReadyToLoad) return;
     fetchLines();
     fetchTasks();
     if (isTaskModalOpen) fetchAssignees();
-  }, [recordId, isTaskModalOpen, isBom]);
+  }, [recordId, isTaskModalOpen, isBom, isReadyToLoad]);
 
   const syncOrderQuantity = useCallback(async (nextLines: any[]) => {
     if (!recordId || isBom) return;
@@ -490,14 +520,18 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     }
   };
 
-  return (
-    <div className="w-full flex flex-col gap-4 select-none" dir="rtl">
-      {!recordId && !readOnly && (!draftStages || draftStages.length === 0) && (
-        <div className="text-gray-400 text-xs py-2 bg-gray-50 rounded px-2 text-center border border-dashed">
-          برای تعریف مراحل، ابتدا سفارش را ثبت کنید.
+  if (!isReadyToLoad && readOnly && compact && !isBom) {
+    return (
+      <div ref={containerRef} className="w-full select-none" dir="rtl">
+        <div className="w-full h-5 rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-gray-400 text-[10px]">
+          ...
         </div>
-      )}
+      </div>
+    );
+  }
 
+  return (
+    <div ref={containerRef} className="w-full flex flex-col gap-4 select-none" dir="rtl">
       {loading && tasks.length === 0 && (
         <div className="flex justify-center p-2"><Spin size="small" /></div>
       )}

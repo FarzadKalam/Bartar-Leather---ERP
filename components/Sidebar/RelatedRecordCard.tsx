@@ -3,6 +3,7 @@ import { Tag, Tooltip } from 'antd';
 import { Link } from 'react-router-dom';
 import { ModuleDefinition, ModuleField, FieldType } from '../../types';
 import { formatPersianPrice, safeJalaliFormat, toPersianNumber } from '../../utils/persianNumberFormatter';
+import { getRecordTitle } from '../../utils/recordTitle';
 
 interface RelatedRecordCardProps {
   moduleId: string;
@@ -12,8 +13,7 @@ interface RelatedRecordCardProps {
 }
 
 const getPrimaryTitle = (item: any, moduleConfig?: ModuleDefinition) => {
-  const keyField = moduleConfig?.fields?.find(f => f.isKey)?.key;
-  return item?.name || item?.title || (keyField ? item?.[keyField] : null) || item?.system_code || item?.id;
+  return getRecordTitle(item, moduleConfig, { fallback: '-' });
 };
 
 const getDisplayFields = (moduleConfig?: ModuleDefinition): ModuleField[] => {

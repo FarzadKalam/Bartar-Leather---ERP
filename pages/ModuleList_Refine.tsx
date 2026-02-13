@@ -5,7 +5,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { MODULES } from "../moduleRegistry";
 import SmartTableRenderer from "../components/SmartTableRenderer";
 import { BlockType, FieldType, SavedView, ViewMode } from "../types";
-import { App, Badge, Button, Empty, Spin } from "antd";
+import { App, Badge, Button, Empty, Skeleton } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import ViewManager from "../components/ViewManager";
 import SmartForm from "../components/SmartForm";
@@ -15,6 +15,58 @@ import BulkActionsBar from "../components/moduleList/BulkActionsBar";
 import ViewWrapper from "../components/moduleList/ViewWrapper";
 import GridView from "../components/moduleList/GridView";
 import RenderCardItem from "../components/moduleList/RenderCardItem";
+
+const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
+  if (viewMode === ViewMode.GRID) {
+    return (
+      <div className="h-full overflow-y-auto p-1 custom-scrollbar">
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+          {Array.from({ length: 8 }).map((_, idx) => (
+            <div
+              key={idx}
+              className="bg-white dark:bg-[#1e1e1e] rounded-xl border border-gray-200 dark:border-gray-700 p-3"
+            >
+              <Skeleton active avatar={{ shape: "square", size: 44 }} paragraph={{ rows: 2 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (viewMode === ViewMode.KANBAN) {
+    return (
+      <div className="flex gap-4 h-full overflow-x-auto pb-4 px-2">
+        {Array.from({ length: 3 }).map((_, colIdx) => (
+          <div
+            key={colIdx}
+            className="min-w-[280px] w-[280px] flex flex-col bg-gray-100/50 dark:bg-white/5 rounded-2xl p-2 border border-gray-200 dark:border-gray-800 h-full"
+          >
+            <div className="p-2 mb-2">
+              <Skeleton.Input active size="small" style={{ width: 120 }} />
+            </div>
+            <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-2 custom-scrollbar pb-2">
+              {Array.from({ length: 3 }).map((__, cardIdx) => (
+                <div
+                  key={cardIdx}
+                  className="bg-white dark:bg-[#1e1e1e] rounded-xl border border-gray-200 dark:border-gray-700 p-3"
+                >
+                  <Skeleton active title={{ width: "65%" }} paragraph={{ rows: 2 }} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 h-full overflow-hidden p-4">
+      <Skeleton active title={{ width: "20%" }} paragraph={{ rows: 10 }} />
+    </div>
+  );
+};
 
 export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ moduleIdOverride }) => {
   const { moduleId } = useParams();
@@ -49,7 +101,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: resolvedModuleId,
     sorters: { initial: [{ field: "created_at", order: "desc" }] },
-    pagination: { pageSize: 100 }, 
+    pagination: { pageSize: 10 }, 
     queryOptions: { enabled: !!resolvedModuleId },
     syncWithLocation: false,
   });
@@ -58,7 +110,21 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const { mutate: updateRecord } = useUpdate();
 
   const loading = tableQueryResult.isLoading;
+  const isRefreshing = tableQueryResult.isFetching && !loading;
   const allData = tableQueryResult.data?.data || [];
+  const [readyModuleId, setReadyModuleId] = useState<string | null>(null);
+  const showContentSkeleton = readyModuleId !== resolvedModuleId;
+
+  useEffect(() => {
+    setReadyModuleId(null);
+  }, [resolvedModuleId]);
+
+  useEffect(() => {
+    if (!resolvedModuleId) return;
+    if (!tableQueryResult.isLoading || tableQueryResult.isError) {
+      setReadyModuleId(resolvedModuleId);
+    }
+  }, [resolvedModuleId, tableQueryResult.isLoading, tableQueryResult.isError]);
 
   useEffect(() => {
     if (isFullscreen) {
@@ -350,6 +416,8 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 
   const searchTargetField = useMemo(() => {
     if (!moduleConfig) return null;
+    const keyField = moduleConfig.fields.find(f => f.isKey);
+    if (keyField) return keyField.key;
     const priorityKeys = ['name', 'title', 'business_name', 'full_name', 'subject', 'description'];
     const priorityField = moduleConfig.fields.find(f => priorityKeys.includes(f.key));
     if (priorityField) return priorityField.key;
@@ -510,7 +578,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-[1800px] mx-auto animate-fadeIn pb-20 h-[calc(100vh-64px)] flex flex-col">
+    <div className="p-4 md:p-6 max-w-[1800px] mx-auto animate-fadeIn pb-20 h-[calc(105vh-64px)] flex flex-col">
         <div className="flex flex-col gap-2 mb-4 shrink-0">
         {/* ردیف ۱: عنوان + شمارنده + دکمه افزودن */}
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -572,11 +640,8 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 
          <ViewWrapper isFullscreen={isFullscreen}>
          <div className="flex-1 overflow-hidden relative rounded-[2rem]">
-           {loading ? (
-             <div className="flex h-full items-center justify-center flex-col gap-4 text-gray-400">
-               <Spin size="large" />
-               <span>در حال دریافت اطلاعات...</span>
-             </div>
+           {showContentSkeleton ? (
+              <ModuleListContentSkeleton viewMode={viewMode} />
            ) : allData.length === 0 ? (
              <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem] border border-dashed border-gray-300">
                <Empty description="هیچ داده‌ای یافت نشد" />
@@ -588,7 +653,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                   <SmartTableRenderer 
                     moduleConfig={moduleConfig}
                     data={enrichedData} 
-                    loading={loading}
+                    loading={isRefreshing}
                     visibleColumns={visibleColumns.length > 0 ? visibleColumns : undefined}
                     onChange={tableProps.onChange as any}
                     pagination={tableProps.pagination}

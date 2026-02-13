@@ -59,10 +59,13 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   // ✅ Responsive scroll height
   useEffect(() => {
     const updateScrollHeight = () => {
+      const viewportHeight = window.innerHeight || 800;
       if (window.innerWidth < 768) {
-        setScrollHeight(250); // موبایل
+        const mobileHeight = Math.min(520, Math.max(300, viewportHeight - 290));
+        setScrollHeight(mobileHeight); // موبایل
       } else {
-        setScrollHeight(440); // دسکتاپ (15 rows approx)
+        const desktopHeight = Math.min(700, Math.max(440, viewportHeight - 320));
+        setScrollHeight(desktopHeight); // دسکتاپ
       }
     };
     
@@ -319,6 +322,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
                     moduleId={moduleConfig?.id}
                     readOnly={true} 
                     compact={true}
+                    lazyLoad={true}
                     draftStages={record?.production_stages_draft || []}
                     showWageSummary={false}
                  />
@@ -460,6 +464,20 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     });
     }
 
+  const tablePagination =
+    pagination === false
+      ? false
+      : {
+          pageSize: 10,
+          position: ['bottomCenter'],
+          size: 'small',
+          showSizeChanger: true,
+          pageSizeOptions: [10, 20, 50, 100],
+          showTotal: (total: number, range: [number, number]) =>
+            `${toPersianNumber(range[0])}-${toPersianNumber(range[1])} از ${toPersianNumber(total)}`,
+          ...(pagination || {}),
+        };
+
   return (
     <div className={["custom-erp-table", containerClassName].filter(Boolean).join(' ')}>
       <Table 
@@ -468,14 +486,8 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
           rowKey="id" 
           loading={loading} 
           size="small" 
-            tableLayout={tableLayout}
-          pagination={pagination || { 
-              pageSize: 20, 
-              position: ['bottomCenter'], 
-              size: 'small',
-              showSizeChanger: true,
-              showTotal: (total, range) => `${toPersianNumber(range[0])}-${toPersianNumber(range[1])} از ${toPersianNumber(total)}`
-          }} 
+          tableLayout={tableLayout}
+          pagination={tablePagination} 
           onChange={onChange}
           scroll={disableScroll ? undefined : { x: scrollX ?? 'max-content', y: scrollHeight }}
           // 🔥 اتصال انتخاب گروهی

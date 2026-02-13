@@ -6,6 +6,7 @@ import { supabase } from '../../supabaseClient';
 import { MODULES } from '../../moduleRegistry';
 import RelatedRecordCard from './RelatedRecordCard';
 import { RelatedTabConfig } from '../../types';
+import { getRecordTitle } from '../../utils/recordTitle';
 
 interface RelatedRecordsPanelProps {
   tab: RelatedTabConfig;
@@ -192,7 +193,7 @@ const RelatedRecordsPanel: React.FC<RelatedRecordsPanelProps> = ({ tab, currentR
     }
 
     return items.filter((item: any) => {
-      const title = item?.name || item?.title || item?.system_code || '';
+      const title = getRecordTitle(item, targetConfig, { fallback: '' });
       if (String(title).toLowerCase().includes(term)) return true;
       return (targetConfig?.fields || [])
         .filter((field) => field.isTableColumn)

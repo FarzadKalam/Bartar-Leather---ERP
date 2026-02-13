@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, InputNumber, Select, Spin, Table, Typography, message } from 'antd';
-import { PlusOutlined, SaveOutlined, CloseOutlined, EditOutlined, RightOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, SaveOutlined, CloseOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { BlockDefinition, FieldType } from '../types';
 import { MODULES } from '../moduleRegistry';
@@ -155,6 +155,7 @@ const GridTable: React.FC<GridTableProps> = ({
     let totalMain = 0;
     let totalSub = 0;
     let totalFinal = 0;
+    let totalUsageAll = 0;
     let totalCost = 0;
 
     const nextPieces = pieces.map((piece: any) => {
@@ -178,6 +179,7 @@ const GridTable: React.FC<GridTableProps> = ({
       totalMain += baseUsage || 0;
       totalSub += qtySub || 0;
       totalFinal += finalUsage || 0;
+      totalUsageAll += totalUsage || 0;
       totalCost += totalCostRow || 0;
 
       return {
@@ -199,6 +201,7 @@ const GridTable: React.FC<GridTableProps> = ({
         total_qty_main: totalMain,
         total_qty_sub: totalSub,
         total_final_usage: totalFinal,
+        total_usage: totalUsageAll,
         total_cost: totalCost,
       },
     };
@@ -360,6 +363,48 @@ const GridTable: React.FC<GridTableProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (!isProductionOrder || productOptionsLoading) return;
+    const source = isEditing ? tempData : data;
+    const selectedIds = Array.from(
+      new Set(
+        (source || [])
+          .map((row: any) => row?.header?.selected_product_id)
+          .filter((val: any) => !!val)
+      )
+    ) as string[];
+    if (selectedIds.length === 0) return;
+
+    const existing = new Set(productOptions.map((opt: any) => opt.value));
+    const missing = selectedIds.filter((id) => !existing.has(id));
+    if (missing.length === 0) return;
+
+    const fetchMissingSelected = async () => {
+      try {
+        const { data: products } = await supabase
+          .from('products')
+          .select('id, name, system_code, category, product_type')
+          .in('id', missing);
+        const options = (products || []).map((p: any) => ({
+          value: p.id,
+          label: p.system_code ? `${p.system_code} - ${p.name}` : p.name,
+          category: p.category || null,
+          product_type: p.product_type || null,
+        }));
+        if (options.length) {
+          setProductOptions((prev) => {
+            const prevMap = new Map(prev.map((item: any) => [item.value, item]));
+            options.forEach((item) => prevMap.set(item.value, item));
+            return Array.from(prevMap.values());
+          });
+        }
+      } catch (err) {
+        console.warn('Could not load selected products labels', err);
+      }
+    };
+    fetchMissingSelected();
+  }, [isProductionOrder, isEditing, tempData, data, productOptions, productOptionsLoading]);
+
   const ensureDynamicOptions = async (categoriesToLoad: string[]) => {
     const missing = categoriesToLoad.filter(
       (cat) => !dynamicOptions?.[cat] && !localDynamicOptions?.[cat]
@@ -392,16 +437,24 @@ const GridTable: React.FC<GridTableProps> = ({
       type: f.type,
       filterable: true,
       filterKey: f.key,
+      dynamicOptionsCategory: f.dynamicOptionsCategory,
     }));
 
     const rowData = { ...(row.specs || {}) };
     const filters = buildProductFilters(tableColumns, rowData, dynamicOptions, localDynamicOptions);
     const categoryValue = row?.header?.category || null;
-    const baseFilters = [
-      { filterKey: 'product_type', value: 'raw', colType: FieldType.TEXT }
-    ];
+    const baseFilters: Array<{ filterKey: string; value: any; colType: FieldType }> = [];
     if (categoryValue) {
-      baseFilters.push({ filterKey: 'category', value: categoryValue, colType: FieldType.SELECT });
+      const categoryLabel = categories.find((c: any) => c.value === categoryValue)?.label || null;
+      const categoryValues = [categoryValue, categoryLabel]
+        .filter((v) => typeof v === 'string' && v.trim() !== '')
+        .map((v) => String(v).trim())
+        .filter((v, i, arr) => arr.indexOf(v) === i);
+      baseFilters.push({
+        filterKey: 'category',
+        value: categoryValues.length > 1 ? categoryValues : categoryValues[0],
+        colType: FieldType.SELECT,
+      });
     }
     const result = await runProductsQuery(supabase as any, [...baseFilters, ...filters]);
     if (result.error) throw result.error;
@@ -411,6 +464,7 @@ const GridTable: React.FC<GridTableProps> = ({
   if (loading) return <div className="p-6 text-center"><Spin /></div>;
 
   const sourceData = isEditing ? tempData : data;
+  const rowHeaderBarStyle = { backgroundColor: '#8b5e3c' };
 
   return (
     <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 transition-all">
@@ -459,12 +513,16 @@ const GridTable: React.FC<GridTableProps> = ({
 
           return (
             <div key={row.key || rowIndex} className="border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden">
-              <div id={`grid-row-${row.key || rowIndex}`} className="bg-gray-50 dark:bg-[#111] px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div
+                id={`grid-row-${row.key || rowIndex}`}
+                className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-white"
+                style={rowHeaderBarStyle}
+              >
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                   <Button
                     type="text"
                     size="small"
-                    className="p-0"
+                    className="p-0 !text-white hover:!text-white/90"
                     onClick={() => {
                       const nextCollapsed = !collapsed;
                       updateRow(rowIndex, { collapsed: nextCollapsed });
@@ -475,9 +533,9 @@ const GridTable: React.FC<GridTableProps> = ({
                         }, 80);
                       }
                     }}
-                    icon={<RightOutlined className={`transition-transform text-leather-600 ${collapsed ? '' : 'rotate-90'}`} />}
+                    icon={<RightOutlined className={`transition-transform text-white ${collapsed ? '' : 'rotate-90'}`} />}
                   />
-                  <span className="text-xs text-gray-500">دسته‌بندی مواد اولیه</span>
+                  <span className="text-xs text-white">دسته‌بندی مواد اولیه</span>
                   <Select
                     value={categoryValue}
                     onChange={(val) => updateRow(rowIndex, { header: { ...row.header, category: val }, specs: {}, pieces: [defaultPiece()], collapsed: false })}
@@ -490,19 +548,35 @@ const GridTable: React.FC<GridTableProps> = ({
                   />
                   {isProductionOrder && (
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full">
+                      {(() => {
+                        const selectedId = row.header?.selected_product_id || null;
+                        const selectedName = row.header?.selected_product_name || null;
+                        const rawOptions = (productOptions.length ? productOptions : (relationOptions['products'] || []));
+                        const filteredOptions = rawOptions
+                          .filter((o: any) => {
+                            if (o.product_type && o.product_type !== 'raw') return false;
+                            if (categoryValue && o.category && o.category !== categoryValue) {
+                              if (selectedId && o.value === selectedId) return true;
+                              return false;
+                            }
+                            return true;
+                          })
+                          .map((o: any) => ({ label: o.label, value: o.value }));
+                        const hasSelected = selectedId && filteredOptions.some((o: any) => o.value === selectedId);
+                        if (selectedId && !hasSelected) {
+                          filteredOptions.unshift({
+                            value: selectedId,
+                            label: selectedName || String(selectedId),
+                          });
+                        }
+                        return (
                       <Select
                         value={row.header?.selected_product_id || null}
                         placeholder="انتخاب محصول"
                         className="min-w-[200px] w-full sm:w-auto"
                         showSearch
                         optionFilterProp="label"
-                        options={(productOptions.length ? productOptions : (relationOptions['products'] || []))
-                          .filter((o: any) => {
-                            if (o.product_type && o.product_type !== 'raw') return false;
-                            if (categoryValue && o.category && o.category !== categoryValue) return false;
-                            return true;
-                          })
-                          .map((o: any) => ({ label: o.label, value: o.value }))}
+                        options={filteredOptions}
                         loading={productOptionsLoading}
                         onDropdownVisibleChange={(open) => {
                           if (open && productOptions.length === 0) loadProductOptions();
@@ -512,9 +586,11 @@ const GridTable: React.FC<GridTableProps> = ({
                         getPopupContainer={() => document.body}
                         dropdownStyle={{ zIndex: 10050 }}
                       />
+                        );
+                      })()}
                       <QrScanPopover
                         label=""
-                        buttonClassName="shrink-0"
+                        buttonClassName="shrink-0 !text-white hover:!text-white/90"
                         onScan={async (scan) => {
                           if (scan.recordId && scan.moduleId === 'products') {
                             await applySelectedProduct(rowIndex, scan.recordId);
@@ -528,6 +604,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           size="small"
                           icon={<CloseCircleOutlined />}
                           onClick={() => applySelectedProduct(rowIndex, null)}
+                          className="!text-white hover:!text-white/90"
                         />
                       )}
                     </div>
@@ -535,38 +612,47 @@ const GridTable: React.FC<GridTableProps> = ({
                 </div>
 
                 {!isReadOnly && (
-                  <Button danger type="text" size="small" onClick={() => removeGridRow(rowIndex)}>حذف</Button>
+                  <Button type="text" size="small" className="!text-white hover:!text-white/90" onClick={() => removeGridRow(rowIndex)}>حذف</Button>
                 )}
               </div>
 
               {!collapsed && (
                 <div className="p-4 space-y-4">
                   {specFields.length > 0 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      {specFields.map((field: any) => {
-                        if (canViewField && canViewField(field.key) === false) return null;
-                        let options = field.options;
-                        if (field.dynamicOptionsCategory) {
-                          options = dynamicOptions[field.dynamicOptionsCategory] || localDynamicOptions[field.dynamicOptionsCategory];
-                        }
-                        return (
-                          <div key={field.key} className="space-y-1">
-                            <div className="text-[11px] text-gray-500 font-medium">{field.labels?.fa}</div>
-                            <SmartFieldRenderer
-                              field={field}
-                              value={row.specs?.[field.key]}
-                              forceEditMode={true}
-                              compactMode={true}
-                              options={options}
-                              onChange={(val) => {
-                                if (isSpecsLocked) return;
-                                updateRow(rowIndex, { specs: { ...(row.specs || {}), [field.key]: val } });
-                              }}
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
+                    <>
+                      {isSpecsLocked && (
+                        <div className="flex items-center gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          <LockOutlined />
+                          <span>مشخصات از روی محصول انتخاب‌شده قفل شده‌اند. برای ویرایش، محصول را حذف کنید.</span>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {specFields.map((field: any) => {
+                          if (canViewField && canViewField(field.key) === false) return null;
+                          let options = field.options;
+                          if (field.dynamicOptionsCategory) {
+                            options = dynamicOptions[field.dynamicOptionsCategory] || localDynamicOptions[field.dynamicOptionsCategory];
+                          }
+                          const effectiveField = isSpecsLocked ? { ...field, readonly: true } : field;
+                          return (
+                            <div key={field.key} className={`space-y-1 ${isSpecsLocked ? 'opacity-75' : ''}`}>
+                              <div className="text-[11px] text-gray-500 font-medium">{field.labels?.fa}</div>
+                              <SmartFieldRenderer
+                                field={effectiveField}
+                                value={row.specs?.[field.key]}
+                                forceEditMode={true}
+                                compactMode={true}
+                                options={options}
+                                onChange={(val) => {
+                                  if (isSpecsLocked) return;
+                                  updateRow(rowIndex, { specs: { ...(row.specs || {}), [field.key]: val } });
+                                }}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
                   )}
 
                   {isProductionOrder && !row.header?.selected_product_id && (
@@ -595,7 +681,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           title: 'نام قطعه',
                           dataIndex: 'name',
                           key: 'name',
-                          width: 180,
+                          width: 205,
                           render: (val: any, _record: any, pieceIndex: number) => (
                             <Input className="font-medium" value={val} onChange={(e) => updatePiece(rowIndex, pieceIndex, { name: e.target.value })} disabled={isReadOnly} />
                           ),
@@ -671,13 +757,15 @@ const GridTable: React.FC<GridTableProps> = ({
                           title: 'مقدار واحد اصلی',
                           dataIndex: 'qty_main',
                           key: 'qty_main',
-                          render: (val: any) => <Text className="persian-number font-medium">{formatQuantity(val)}</Text>,
+                          width: 130,
+                          render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
                         },
                         {
                           title: 'مقدار واحد فرعی',
                           dataIndex: 'qty_sub',
                           key: 'qty_sub',
-                          render: (val: any) => <Text className="persian-number font-medium">{formatQuantity(val)}</Text>,
+                          width: 130,
+                          render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
                         },
                         {
                           title: 'فرمول',
@@ -696,10 +784,11 @@ const GridTable: React.FC<GridTableProps> = ({
                           ),
                         },
                         {
-                          title: 'مقدار مصرف نهایی',
+                          title: 'مقدار مصرف یک تولید',
                           dataIndex: 'final_usage',
                           key: 'final_usage',
-                          render: (val: any) => <Text className="persian-number font-medium">{formatQuantity(val)}</Text>,
+                          width: 140,
+                          render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
                         },
                         ...(isProductionOrder ? [
                           {
@@ -714,19 +803,22 @@ const GridTable: React.FC<GridTableProps> = ({
                             title: 'هزینه هر عدد',
                             dataIndex: 'cost_per_item',
                             key: 'cost_per_item',
-                            render: (val: any) => <Text className="persian-number font-medium">{formatPersianPrice(val || 0, true)}</Text>,
+                            width: 150,
+                            render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>,
                           },
                           {
                             title: 'مقدار مصرف کل',
                             dataIndex: 'total_usage',
                             key: 'total_usage',
-                            render: (val: any) => <Text className="persian-number font-medium">{formatQuantity(val)}</Text>,
+                            width: 140,
+                            render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
                           },
                           {
                             title: 'هزینه کل',
                             dataIndex: 'total_cost',
                             key: 'total_cost',
-                            render: (val: any) => <Text className="persian-number font-medium">{formatPersianPrice(val || 0, true)}</Text>,
+                            width: 150,
+                            render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>,
                           },
                         ] : []),
                       ]}
@@ -739,10 +831,13 @@ const GridTable: React.FC<GridTableProps> = ({
                   </div>
 
                   <div className="bg-gray-50 dark:bg-[#101010] rounded-xl p-3 flex flex-wrap gap-4 text-xs border border-leather-500">
-                    <span>جمع تعداد: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_quantity || 0)}</Text></span>
+                    <span>جمع تعداد در یک تولید: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_quantity || 0)}</Text></span>
                     <span>جمع واحد اصلی: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_qty_main || 0)}</Text></span>
                     <span>جمع واحد فرعی: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_qty_sub || 0)}</Text></span>
-                    <span>جمع مصرف نهایی: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_final_usage || 0)}</Text></span>
+                    <span>جمع مصرف یک تولید: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_final_usage || 0)}</Text></span>
+                    {isProductionOrder && (
+                      <span>جمع مقدار مصرف کل: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_usage || 0)}</Text></span>
+                    )}
                     {isProductionOrder && (
                       <span>جمع هزینه: <Text className="persian-number font-medium">{formatPersianPrice(row.totals?.total_cost || 0, true)}</Text></span>
                     )}
@@ -793,7 +888,7 @@ const ProductsPreview: React.FC<{
     };
     load();
     return () => { active = false; };
-  }, [row]);
+  }, [row, dynamicOptions]);
 
   if (loading) return <div className="py-4 text-center"><Spin size="small" /></div>;
 

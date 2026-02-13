@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Form, Button, message, Spin, Divider, Select, Space, Modal, Checkbox } from 'antd';
 import { UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
@@ -42,6 +42,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
   const [lastAppliedBomId, setLastAppliedBomId] = useState<string | null>(null);
+  const bomConfirmOpenRef = useRef<string | null>(null);
 
   const buildAssigneeCombo = (assigneeType?: string | null, assigneeId?: string | null) => {
     if (!assigneeType || !assigneeId) return null;
@@ -343,7 +344,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       try {
         const { data, error } = await supabase
           .from('production_boms')
-          .select('grid_materials, product_category, production_stages_draft')
+          .select('name, grid_materials, product_category, production_stages_draft')
           .eq('id', bomId)
           .single();
         if (error) throw error;
@@ -352,6 +353,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
           grid_materials: data?.grid_materials || [],
           product_category: data?.product_category || null,
           production_stages_draft: data?.production_stages_draft || [],
+          name: data?.name || undefined,
         };
 
         form.setFieldsValue(payload);
@@ -371,13 +373,22 @@ const SmartForm: React.FC<SmartFormProps> = ({
       return;
     }
 
+    if (bomConfirmOpenRef.current === bomId) return;
+    bomConfirmOpenRef.current = bomId;
+
     Modal.confirm({
       title: 'کپی از شناسنامه تولید',
       content: 'جداول سفارش تولید ریست شوند و مقادیر از روی BOM کپی شوند؟',
       okText: 'بله، کپی کن',
       cancelText: 'خیر',
-      onOk: applyBom,
-      onCancel: () => setLastAppliedBomId(bomId),
+      onOk: async () => {
+        await applyBom();
+        bomConfirmOpenRef.current = null;
+      },
+      onCancel: () => {
+        setLastAppliedBomId(bomId);
+        bomConfirmOpenRef.current = null;
+      },
     });
   }, [module.id, watchedValues?.bom_id, lastAppliedBomId, initialValuesProp]);
 
@@ -698,7 +709,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
           <Button shape="circle" icon={<CloseOutlined />} onClick={onCancel} className="border-none hover:bg-red-50 hover:text-red-500" />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar" style={{ position: 'relative', zIndex: 0 }}>
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar scrollbar-wide" style={{ position: 'relative', zIndex: 0 }}>
           {loading && !isBulkEdit ? (
             <div className="h-full flex items-center justify-center"><Spin size="large" /></div>
           ) : (

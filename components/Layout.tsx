@@ -25,6 +25,7 @@ import { supabase } from '../supabaseClient'; // 👈 ایمپورت سوپاب�
 import { MODULES } from '../moduleRegistry';
 import QrScanPopover from './QrScanPopover';
 import NotificationsPopover from './NotificationsPopover';
+import { getRecordTitle } from '../utils/recordTitle';
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -84,8 +85,12 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
 
   // Collapse sidebar on route change
   useEffect(() => {
-    setCollapsed(true);
-  }, [location.pathname]);
+    if (isMobile) {
+      setCollapsed(true);
+      return;
+    }
+    setCollapsed(location.pathname !== '/');
+  }, [location.pathname, isMobile]);
 
   const handleLogout = () => {
     Modal.confirm({
@@ -142,8 +147,9 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
     return Object.entries(MODULES).map(([id, config]) => {
       const fieldKeys = (config.fields || []).map((f: any) => f.key);
       const preferred = ['name', 'title', 'system_code', 'manual_code', 'business_name'];
-      const inferred = fieldKeys.filter((key: string) => /name|title|code/i.test(key));
-      const keys = Array.from(new Set([...preferred, ...inferred])).filter((key) => fieldKeys.includes(key));
+      const keyField = config.fields?.find((f: any) => f.isKey)?.key;
+      const inferred = fieldKeys.filter((key: string) => /name|title|code|number|subject/i.test(key));
+      const keys = Array.from(new Set([...preferred, ...(keyField ? [keyField] : []), ...inferred])).filter((key) => fieldKeys.includes(key));
       return { id, title: config.titles?.fa || id, keys };
     });
   }, []);
@@ -344,7 +350,8 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
                     <div className="h-[2px] bg-leather-500 rounded-full mx-2 mt-0.5 mb-0.5" />
                     <div className="space-y-0.5">
                       {group.items.map((item: any) => {
-                        const label = item.name || item.title || item.business_name || item.system_code || item.manual_code || item.id;
+                        const moduleConfig = MODULES[group.moduleId];
+                        const label = getRecordTitle(item, moduleConfig, { fallback: '-' });
                         const code = item.system_code || item.manual_code;
                         return (
                           <div

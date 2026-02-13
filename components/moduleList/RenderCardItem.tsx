@@ -3,6 +3,7 @@ import { Avatar, Checkbox, Popover, Tag } from "antd";
 import { AppstoreOutlined } from "@ant-design/icons";
 import { FieldType } from "../../types";
 import { formatPersianPrice, toPersianNumber, safeJalaliFormat, parseDateValue } from "../../utils/persianNumberFormatter";
+import { getRecordTitle } from "../../utils/recordTitle";
 
 export interface RenderCardItemProps {
   item: any;
@@ -39,7 +40,7 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
 }) => {
   const isSelected = selectedRowKeys.includes(item.id);
   const imageUrl = imageField ? item[imageField] : null;
-  const title = item.name || item.business_name || item.title || item.last_name || "بدون نام";
+  const title = getRecordTitle(item, moduleConfig, { fallback: "-" });
   const isTasks = moduleId === 'tasks';
 
   const statusFieldConfig = moduleConfig?.fields.find(

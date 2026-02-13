@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Button, Modal, Input, Checkbox, Tabs, Badge, List, 
-  Tooltip, Popconfirm, Alert, App 
+  Tooltip, Popconfirm, Alert, App, Skeleton 
 } from 'antd';
 import { 
     PlusOutlined, SaveOutlined, DeleteOutlined, 
@@ -23,6 +23,7 @@ interface ViewManagerProps {
 const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onViewChange, onRefresh }) => {
   const { message } = App.useApp();
   const [views, setViews] = useState<SavedView[]>([]);
+  const [loadingViews, setLoadingViews] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewName, setViewName] = useState('');
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
@@ -31,20 +32,41 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
   const moduleConfig = MODULES[moduleId];
 
   useEffect(() => {
-    if (moduleId) fetchViews();
-  }, [moduleId]);
+    if (!moduleId) return;
+    let active = true;
 
-  const fetchViews = async () => {
-    const { data } = await supabase.from('saved_views').select('*').eq('module_id', moduleId).order('created_at', { ascending: false });
-    const defaultView: SavedView = { 
-        id: 'default_all', 
-        module_id: moduleId, 
-        name: 'همه رکوردها', 
-        is_default: true, 
-        config: { columns: [], filters: [] } 
+    const fetchViews = async () => {
+      const defaultView: SavedView = {
+        id: 'default_all',
+        module_id: moduleId,
+        name: 'همه رکوردها',
+        is_default: true,
+        config: { columns: [], filters: [] }
+      };
+
+      setViews([defaultView]);
+      setLoadingViews(true);
+      try {
+        const { data } = await supabase
+          .from('saved_views')
+          .select('*')
+          .eq('module_id', moduleId)
+          .order('created_at', { ascending: false });
+        if (!active) return;
+        setViews([defaultView, ...(data || [])]);
+      } catch {
+        if (!active) return;
+        setViews([defaultView]);
+      } finally {
+        if (active) setLoadingViews(false);
+      }
     };
-    setViews([defaultView, ...(data || [])]);
-  };
+
+    fetchViews();
+    return () => {
+      active = false;
+    };
+  }, [moduleId]);
 
   const handleOpenNewView = () => {
     const allCols = moduleConfig.fields.map(f => f.key);
@@ -186,43 +208,56 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
 
         {/* چیپ‌های ویو */}
         <div className="flex items-center gap-1 overflow-x-auto flex-1 no-scrollbar px-1">
-            {views.map(view => (
-            <div
-                key={view.id}
-                onClick={() => onViewChange(view, (view.config as any))}
-                className={`group px-3 py-1 rounded-lg text-xs cursor-pointer whitespace-nowrap transition-all flex items-center gap-2 select-none border ${
-                currentView?.id === view.id
-                    ? 'bg-leather-600 text-white border-leather-600 shadow-md font-bold'
-                    : 'bg-gray-50 dark:bg-white/5 border-transparent hover:bg-gray-100 text-gray-600 dark:text-gray-300'
-                }`}
-            >
-                {view.name}
-                <div className={`flex items-center gap-1 mr-1 transition-opacity ${currentView?.id === view.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                <Tooltip title="ویرایش">
-                    <span className="p-1 rounded-full hover:bg-black/10 flex items-center" onClick={(e) => handleEditView(view, e)}>
-                    <EditOutlined className="text-[10px]" />
-                    </span>
-                </Tooltip>
+            {loadingViews ? (
+              <>
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <Skeleton.Button
+                    key={idx}
+                    active
+                    size="small"
+                    style={{ width: idx === 0 ? 96 : 80, height: 26, borderRadius: 8 }}
+                  />
+                ))}
+              </>
+            ) : (
+              views.map(view => (
+                <div
+                  key={view.id}
+                  onClick={() => onViewChange(view, (view.config as any))}
+                  className={`group px-3 py-1 rounded-lg text-xs cursor-pointer whitespace-nowrap transition-all flex items-center gap-2 select-none border ${
+                    currentView?.id === view.id
+                      ? 'bg-leather-600 text-white border-leather-600 shadow-md font-bold'
+                      : 'bg-gray-50 dark:bg-white/5 border-transparent hover:bg-gray-100 text-gray-600 dark:text-gray-300'
+                  }`}
+                >
+                  {view.name}
+                  <div className={`flex items-center gap-1 mr-1 transition-opacity ${currentView?.id === view.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <Tooltip title="ویرایش">
+                      <span className="p-1 rounded-full hover:bg-black/10 flex items-center" onClick={(e) => handleEditView(view, e)}>
+                        <EditOutlined className="text-[10px]" />
+                      </span>
+                    </Tooltip>
 
-                {!view.is_default && !view.id.startsWith('default_') && (
-                    <Popconfirm
-                    title="حذف نما؟"
-                    onConfirm={async (e) => {
-                        e?.stopPropagation();
-                        await supabase.from('saved_views').delete().eq('id', view.id);
-                        setViews(prev => prev.filter(v => v.id !== view.id));
-                        if (currentView?.id === view.id) onViewChange(null, null);
-                    }}
-                    onCancel={(e) => e?.stopPropagation()}
-                    >
-                    <span className="p-1 rounded-full hover:bg-red-50 hover:text-red-500 flex items-center" onClick={(e) => e.stopPropagation()}>
-                        <DeleteOutlined className="text-[10px]" />
-                    </span>
-                    </Popconfirm>
-                )}
+                    {!view.is_default && !view.id.startsWith('default_') && (
+                      <Popconfirm
+                        title="حذف نما؟"
+                        onConfirm={async (e) => {
+                          e?.stopPropagation();
+                          await supabase.from('saved_views').delete().eq('id', view.id);
+                          setViews(prev => prev.filter(v => v.id !== view.id));
+                          if (currentView?.id === view.id) onViewChange(null, null);
+                        }}
+                        onCancel={(e) => e?.stopPropagation()}
+                      >
+                        <span className="p-1 rounded-full hover:bg-red-50 hover:text-red-500 flex items-center" onClick={(e) => e.stopPropagation()}>
+                          <DeleteOutlined className="text-[10px]" />
+                        </span>
+                      </Popconfirm>
+                    )}
+                  </div>
                 </div>
-            </div>
-            ))}
+              ))
+            )}
         </div>
 
         </div>

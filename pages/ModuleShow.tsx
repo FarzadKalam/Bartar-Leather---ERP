@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Spin, App, Avatar, Checkbox, Modal, Select } from 'antd';
 import { EditOutlined, CheckOutlined, CloseOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
@@ -18,13 +18,14 @@ import HeroSection from '../components/moduleShow/HeroSection';
 import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
 import TablesSection from '../components/moduleShow/TablesSection';
 import PrintSection from '../components/moduleShow/PrintSection';
+import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece } from '../components/production/StartProductionModal';
 import { printStyles } from '../utils/printTemplates';
 import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import QrScanPopover from '../components/QrScanPopover';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
+import { getRecordTitle } from '../utils/recordTitle';
 import {
-  collectProductionMoves,
   applyProductionMoves,
   rollbackProductionMoves,
   consumeProductionMaterials,
@@ -55,9 +56,11 @@ const ModuleShow: React.FC = () => {
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   const [autoSyncedBomId, setAutoSyncedBomId] = useState<string | null>(null);
+  const bomCopyPromptRef = useRef<string | null>(null);
   const [productionModal, setProductionModal] = useState<'start' | 'stop' | 'complete' | null>(null);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
-  const [productionShelfId, setProductionShelfId] = useState<string | null>(null);
+  const [sourceShelfOptionsByProduct, setSourceShelfOptionsByProduct] = useState<Record<string, { label: string; value: string }[]>>({});
+  const [startMaterials, setStartMaterials] = useState<StartMaterialGroup[]>([]);
   const [outputProductOptions, setOutputProductOptions] = useState<{ label: string; value: string }[]>([]);
   const [outputShelfOptions, setOutputShelfOptions] = useState<{ label: string; value: string }[]>([]);
   const [outputProductId, setOutputProductId] = useState<string | null>(null);
@@ -66,6 +69,7 @@ const ModuleShow: React.FC = () => {
   const [outputProductType, setOutputProductType] = useState<'semi' | 'final' | null>(null);
   const [productionQuantityPreview, setProductionQuantityPreview] = useState<number | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
+  const startDraftStorageKey = useMemo(() => (id ? `production-start-draft:${id}` : null), [id]);
     const fetchProductionQuantity = useCallback(async () => {
       if (moduleId !== 'production_orders' || !id) return null;
       const { data: lines } = await supabase
@@ -79,11 +83,247 @@ const ModuleShow: React.FC = () => {
       return total;
     }, [moduleId, id]);
 
-  const getOrderQuantity = useCallback((override?: number | null) => {
-    const raw = override ?? data?.quantity ?? data?.production_qty ?? data?.production_quantity ?? data?.qty ?? data?.count ?? 0;
+  const readOrderQuantity = useCallback((record: any, override?: number | null) => {
+    const raw = override ?? record?.quantity ?? record?.production_qty ?? record?.production_quantity ?? record?.qty ?? record?.count ?? 0;
     const parsed = parseFloat(raw as any);
     return Number.isFinite(parsed) ? parsed : 0;
-  }, [data]);
+  }, []);
+
+  const getOrderQuantity = useCallback((override?: number | null) => {
+    return readOrderQuantity(data, override);
+  }, [data, readOrderQuantity]);
+
+  const categoryLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const gridBlock = moduleConfig?.blocks?.find((block: any) => block?.id === 'grid_materials') as any;
+    const categories = gridBlock?.gridConfig?.categories || [];
+    categories.forEach((category: any) => {
+      const key = String(category?.value || '');
+      if (!key) return;
+      map.set(key, category?.label || key);
+    });
+    return map;
+  }, [moduleConfig]);
+
+  const productMetaMap = useMemo(() => {
+    const map = new Map<string, { name: string; system_code: string }>();
+    const products = relationOptions?.products || [];
+    products.forEach((product: any) => {
+      const id = String(product?.value || '');
+      if (!id) return;
+      const label = String(product?.label || '').trim();
+      const hyphenIndex = label.indexOf(' - ');
+      let systemCode = '';
+      let name = label || id;
+      if (hyphenIndex > 0) {
+        systemCode = label.slice(0, hyphenIndex).trim();
+        name = label.slice(hyphenIndex + 3).trim() || label;
+      }
+      map.set(id, {
+        name,
+        system_code: systemCode,
+      });
+    });
+    return map;
+  }, [relationOptions]);
+
+  const toNumber = (value: any) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const getRowSelectedProduct = useCallback((row: any) => {
+    const header = row?.header || {};
+    const pieces = Array.isArray(row?.pieces) ? row.pieces : [];
+
+    const selectedProductId =
+      header?.selected_product_id ||
+      row?.selected_product_id ||
+      row?.product_id ||
+      pieces.find((piece: any) => piece?.selected_product_id || piece?.product_id)?.selected_product_id ||
+      pieces.find((piece: any) => piece?.selected_product_id || piece?.product_id)?.product_id ||
+      null;
+
+    const selectedProductMeta = selectedProductId ? productMetaMap.get(String(selectedProductId)) : null;
+    const selectedProductName =
+      header?.selected_product_name ||
+      row?.selected_product_name ||
+      row?.product_name ||
+      selectedProductMeta?.name ||
+      '-';
+    const selectedProductCode =
+      header?.selected_product_code ||
+      row?.selected_product_code ||
+      row?.product_system_code ||
+      selectedProductMeta?.system_code ||
+      '';
+
+    return {
+      selectedProductId: selectedProductId ? String(selectedProductId) : null,
+      selectedProductName: String(selectedProductName || '-'),
+      selectedProductCode: String(selectedProductCode || ''),
+    };
+  }, [productMetaMap]);
+
+  const buildStartMaterialsDraft = useCallback((order: any, quantity: number) => {
+    const rows = Array.isArray(order?.grid_materials) ? order.grid_materials : [];
+    const normalizedOrderQty = quantity > 0 ? quantity : 1;
+    return rows
+      .map((row: any, rowIndex: number) => {
+        const categoryValue = String(row?.header?.category || '');
+        const categoryLabel = categoryLabelMap.get(categoryValue) || categoryValue || 'بدون دسته‌بندی';
+        const rowPieces = Array.isArray(row?.pieces) && row.pieces.length > 0 ? row.pieces : [row];
+        const pieces = rowPieces
+          .map((piece: any, pieceIndex: number) => {
+            const totalUsageRaw = toNumber(piece?.total_usage);
+            const perItemUsageRaw = toNumber(piece?.final_usage);
+            const perItemUsage = perItemUsageRaw > 0
+              ? perItemUsageRaw
+              : (totalUsageRaw > 0 ? totalUsageRaw / normalizedOrderQty : 0);
+            const totalUsage = totalUsageRaw > 0
+              ? totalUsageRaw
+              : perItemUsage * normalizedOrderQty;
+            return {
+              key: `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`,
+              name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
+              length: toNumber(piece?.length),
+              width: toNumber(piece?.width),
+              quantity: toNumber(piece?.quantity),
+              totalQuantity: toNumber(piece?.quantity) * normalizedOrderQty,
+              mainUnit: String(piece?.main_unit || row?.header?.main_unit || ''),
+              perItemUsage,
+              totalUsage,
+              deliveredQty: totalUsage,
+            } as StartMaterialPiece;
+          });
+
+        const totalPerItemUsage = pieces.reduce((sum, piece) => sum + piece.perItemUsage, 0);
+        const totalUsage = pieces.reduce((sum, piece) => sum + piece.totalUsage, 0);
+        const totalDeliveredQty = pieces.reduce((sum, piece) => sum + piece.deliveredQty, 0);
+        const { selectedProductId, selectedProductName, selectedProductCode } = getRowSelectedProduct(row);
+        const sourceShelfId =
+          row?.selected_shelf_id ||
+          row?.shelf_id ||
+          rowPieces.find((piece: any) => piece?.selected_shelf_id || piece?.shelf_id)?.selected_shelf_id ||
+          rowPieces.find((piece: any) => piece?.selected_shelf_id || piece?.shelf_id)?.shelf_id ||
+          null;
+        return {
+          key: `${String(row?.key || 'group')}_${rowIndex}`,
+          categoryLabel,
+          selectedProductId,
+          selectedProductName,
+          selectedProductCode,
+          sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
+          productionShelfId: order?.production_shelf_id || null,
+          pieces,
+          totalPerItemUsage,
+          totalUsage,
+          totalDeliveredQty,
+          collapsed: rowIndex !== 0,
+          isConfirmed: false,
+        } as StartMaterialGroup;
+      })
+      .filter((group: StartMaterialGroup) => group.pieces.length > 0);
+  }, [categoryLabelMap, getRowSelectedProduct]);
+
+  const updateStartMaterialDelivered = useCallback((groupIndex: number, pieceIndex: number, value: number | null) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const pieces = [...group.pieces];
+      const piece = pieces[pieceIndex];
+      if (!piece) return prev;
+      const deliveredQty = Math.max(0, toNumber(value));
+      pieces[pieceIndex] = { ...piece, deliveredQty };
+      const totalPerItemUsage = pieces.reduce((sum, row) => sum + row.perItemUsage, 0);
+      const totalUsage = pieces.reduce((sum, row) => sum + row.totalUsage, 0);
+      const totalDeliveredQty = pieces.reduce((sum, row) => sum + row.deliveredQty, 0);
+      next[groupIndex] = { ...group, pieces, totalPerItemUsage, totalUsage, totalDeliveredQty, isConfirmed: false };
+      return next;
+    });
+  }, []);
+
+  const setStartMaterialCollapsed = useCallback((groupIndex: number, collapsed: boolean) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      next[groupIndex] = { ...group, collapsed };
+      return next;
+    });
+  }, []);
+
+  const setStartMaterialSourceShelf = useCallback((groupIndex: number, shelfId: string | null) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      next[groupIndex] = { ...group, sourceShelfId: shelfId, isConfirmed: false };
+      return next;
+    });
+  }, []);
+
+  const handleSourceShelfScan = useCallback((groupIndex: number, shelfId: string) => {
+    const group = startMaterials[groupIndex];
+    if (!group) return;
+    const productId = group.selectedProductId;
+    if (!productId) {
+      msg.error('برای این ردیف، محصول انتخاب نشده است.');
+      return;
+    }
+    const validOptions = sourceShelfOptionsByProduct[productId] || [];
+    const isAllowed = validOptions.some((option) => option.value === shelfId);
+    if (!isAllowed) {
+      msg.error('این قفسه برای محصول انتخاب‌شده موجودی ندارد.');
+      return;
+    }
+    setStartMaterialSourceShelf(groupIndex, shelfId);
+  }, [msg, setStartMaterialSourceShelf, sourceShelfOptionsByProduct, startMaterials]);
+
+  const setStartMaterialProductionShelf = useCallback((groupIndex: number, shelfId: string | null) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      next[groupIndex] = { ...group, productionShelfId: shelfId, isConfirmed: false };
+      return next;
+    });
+  }, []);
+
+  const readStartDraft = useCallback(() => {
+    if (!startDraftStorageKey || typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(startDraftStorageKey);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }, [startDraftStorageKey]);
+
+  const writeStartDraft = useCallback((groups: StartMaterialGroup[]) => {
+    if (!startDraftStorageKey || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        startDraftStorageKey,
+        JSON.stringify({
+          groups,
+        })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [startDraftStorageKey]);
+
+  const clearStartDraft = useCallback(() => {
+    if (!startDraftStorageKey || typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(startDraftStorageKey);
+    } catch {
+      // ignore storage errors
+    }
+  }, [startDraftStorageKey]);
 
   const buildConsumptionMoves = useCallback((order: any, quantity: number, productionShelfId: string) => {
     const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
@@ -221,6 +461,47 @@ const ModuleShow: React.FC = () => {
     setProductionShelfOptions(options);
   }, []);
 
+  const loadSourceShelvesByProduct = useCallback(async (productIds: string[]) => {
+    if (!productIds.length) {
+      setSourceShelfOptionsByProduct({});
+      return;
+    }
+    const { data: inventoryRows } = await supabase
+      .from('product_inventory')
+      .select('product_id, shelf_id, stock')
+      .in('product_id', productIds)
+      .gt('stock', 0);
+
+    const rows = (inventoryRows || []).filter((row: any) => row?.product_id && row?.shelf_id);
+    const shelfIds = Array.from(new Set(rows.map((row: any) => String(row.shelf_id))));
+    let shelfMap = new Map<string, string>();
+    if (shelfIds.length > 0) {
+      const { data: shelves } = await supabase
+        .from('shelves')
+        .select('id, shelf_number, name, warehouses(name)')
+        .in('id', shelfIds)
+        .limit(1000);
+      shelfMap = new Map(
+        (shelves || []).map((shelf: any) => [
+          String(shelf.id),
+          `${shelf.shelf_number || shelf.name || shelf.id}${shelf?.warehouses?.name ? ` - ${shelf.warehouses.name}` : ''}`,
+        ])
+      );
+    }
+
+    const next: Record<string, { label: string; value: string }[]> = {};
+    rows.forEach((row: any) => {
+      const productId = String(row.product_id);
+      const shelfId = String(row.shelf_id);
+      const label = shelfMap.get(shelfId) || shelfId;
+      if (!next[productId]) next[productId] = [];
+      if (!next[productId].some((opt) => opt.value === shelfId)) {
+        next[productId].push({ value: shelfId, label });
+      }
+    });
+    setSourceShelfOptionsByProduct(next);
+  }, []);
+
   const loadOutputShelves = useCallback(async () => {
     const { data: shelves } = await supabase
       .from('shelves')
@@ -246,25 +527,116 @@ const ModuleShow: React.FC = () => {
   }, []);
 
   const openProductionModal = async (type: 'start' | 'stop' | 'complete') => {
-    setProductionModal(type);
     if (type === 'start') {
+      let modalRecord = data;
+      if (moduleId === 'production_orders' && id) {
+        try {
+          const { data: latestRecord, error: latestError } = await supabase
+            .from(moduleId)
+            .select('*')
+            .eq('id', id)
+            .single();
+          if (latestError) throw latestError;
+          if (latestRecord) {
+            modalRecord = { ...(data || {}), ...latestRecord };
+            setData((prev: any) => ({ ...(prev || {}), ...latestRecord }));
+          }
+        } catch (err) {
+          console.warn('Could not refresh production order before opening modal', err);
+        }
+      }
+
       const qtyFromLines = await fetchProductionQuantity();
-      const fallbackQty = getOrderQuantity();
+      const fallbackQty = readOrderQuantity(modalRecord);
       const resolvedQty = (typeof qtyFromLines === 'number' && qtyFromLines > 0) ? qtyFromLines : fallbackQty;
       if (resolvedQty > 0) {
         setProductionQuantityPreview(resolvedQty);
-        if (typeof qtyFromLines === 'number' && qtyFromLines > 0 && data?.quantity !== qtyFromLines) {
+        if (typeof qtyFromLines === 'number' && qtyFromLines > 0 && modalRecord?.quantity !== qtyFromLines) {
           await finalizeStatusUpdate({ quantity: qtyFromLines });
         }
       } else {
         setProductionQuantityPreview(null);
       }
+      const baseGroups = buildStartMaterialsDraft(modalRecord, resolvedQty);
+      const selectedProductIds = Array.from(
+        new Set(
+          baseGroups
+            .map((group) => group.selectedProductId)
+            .filter((value): value is string => !!value)
+        )
+      );
+      const fetchedProductMeta = new Map<string, { name: string; system_code: string }>();
+      if (selectedProductIds.length > 0) {
+        const { data: products } = await supabase
+          .from('products')
+          .select('id, name, system_code')
+          .in('id', selectedProductIds);
+        (products || []).forEach((product: any) => {
+          fetchedProductMeta.set(String(product.id), {
+            name: String(product.name || ''),
+            system_code: String(product.system_code || ''),
+          });
+        });
+      }
+      const draft = readStartDraft();
+      const draftGroups = Array.isArray(draft?.groups) ? draft.groups : [];
+      const mergedGroups = baseGroups.map((group: StartMaterialGroup) => {
+        const selectedMeta = group.selectedProductId
+          ? (fetchedProductMeta.get(group.selectedProductId) || productMetaMap.get(group.selectedProductId))
+          : null;
+        const savedGroup = draftGroups.find((item: any) => item?.key === group.key);
+        const baseWithMeta = {
+          ...group,
+          selectedProductName: selectedMeta?.name || group.selectedProductName,
+          selectedProductCode: selectedMeta?.system_code || group.selectedProductCode,
+        };
+        if (!savedGroup) return baseWithMeta;
+        const savedPieces = Array.isArray(savedGroup?.pieces) ? savedGroup.pieces : [];
+        const pieceMap = new Map(savedPieces.map((piece: any) => [piece?.key, piece]));
+        const pieces = baseWithMeta.pieces.map((piece) => {
+          const savedPiece = pieceMap.get(piece.key);
+          if (!savedPiece) return piece;
+          return {
+            ...piece,
+            deliveredQty: Math.max(0, toNumber(savedPiece.deliveredQty)),
+          };
+        });
+        const totalPerItemUsage = pieces.reduce((sum, piece) => sum + piece.perItemUsage, 0);
+        const totalUsage = pieces.reduce((sum, piece) => sum + piece.totalUsage, 0);
+        const totalDeliveredQty = pieces.reduce((sum, piece) => sum + piece.deliveredQty, 0);
+        const savedName = typeof savedGroup?.selectedProductName === 'string' && savedGroup.selectedProductName.trim() && savedGroup.selectedProductName !== '-'
+          ? savedGroup.selectedProductName
+          : null;
+        const savedCode = typeof savedGroup?.selectedProductCode === 'string' && savedGroup.selectedProductCode.trim()
+          ? savedGroup.selectedProductCode
+          : null;
+        return {
+          ...baseWithMeta,
+          pieces,
+          totalPerItemUsage,
+          totalUsage,
+          totalDeliveredQty,
+          selectedProductName: savedName || baseWithMeta.selectedProductName,
+          selectedProductCode: savedCode || baseWithMeta.selectedProductCode,
+          sourceShelfId: savedGroup?.sourceShelfId ?? baseWithMeta.sourceShelfId,
+          productionShelfId: savedGroup?.productionShelfId ?? baseWithMeta.productionShelfId,
+          collapsed: typeof savedGroup?.collapsed === 'boolean' ? savedGroup.collapsed : baseWithMeta.collapsed,
+          isConfirmed: savedGroup?.isConfirmed === true,
+        };
+      });
+      setStartMaterials(mergedGroups);
       await loadProductionShelves();
+      await loadSourceShelvesByProduct(selectedProductIds);
+      setProductionModal(type);
+      return;
     }
     if (type === 'complete') {
       await loadOutputShelves();
       await loadOutputProducts();
+      setProductionModal(type);
+      return;
     }
+    setProductionModal(type);
   };
 
   const finalizeStatusUpdate = async (payload: any) => {
@@ -273,6 +645,26 @@ const ModuleShow: React.FC = () => {
     if (error) throw error;
     setData((prev: any) => ({ ...prev, ...payload }));
   };
+
+  useEffect(() => {
+    if (productionModal !== 'start') return;
+    writeStartDraft(startMaterials);
+  }, [productionModal, startMaterials, writeStartDraft]);
+
+  useEffect(() => {
+    if (productionModal !== 'start') return;
+    if (productMetaMap.size === 0) return;
+    setStartMaterials((prev) =>
+      prev.map((group) => {
+        if (!group.selectedProductId) return group;
+        const meta = productMetaMap.get(group.selectedProductId);
+        if (!meta) return group;
+        const nextName = group.selectedProductName && group.selectedProductName !== '-' ? group.selectedProductName : meta.name;
+        const nextCode = group.selectedProductCode || meta.system_code || '';
+        return { ...group, selectedProductName: nextName, selectedProductCode: nextCode };
+      })
+    );
+  }, [productionModal, productMetaMap]);
 
   const handleProductionStatusChange = async (nextStatus: string) => {
     if (moduleId !== 'production_orders') return;
@@ -470,7 +862,7 @@ const ModuleShow: React.FC = () => {
       try {
         const { data: bom, error } = await supabase
           .from('production_boms')
-          .select('grid_materials, production_stages_draft, product_category')
+          .select('name, grid_materials, production_stages_draft, product_category')
           .eq('id', data.bom_id)
           .single();
         if (error) throw error;
@@ -479,6 +871,7 @@ const ModuleShow: React.FC = () => {
           grid_materials: bom?.grid_materials || [],
           production_stages_draft: bom?.production_stages_draft || [],
           product_category: bom?.product_category ?? data?.product_category ?? null,
+          name: bom?.name || data?.name || '',
         };
 
         await supabase.from('production_orders').update(patch).eq('id', data.id);
@@ -494,7 +887,7 @@ const ModuleShow: React.FC = () => {
 
   useEffect(() => {
     if (!moduleConfig) return;
-    const recordName = data?.name || data?.title || data?.system_code || id || '';
+    const recordName = getRecordTitle(data, moduleConfig, { fallback: '' });
     window.dispatchEvent(new CustomEvent('erp:breadcrumb', {
       detail: {
         moduleTitle: moduleConfig.titles?.fa || moduleId,
@@ -506,6 +899,13 @@ const ModuleShow: React.FC = () => {
       window.dispatchEvent(new CustomEvent('erp:breadcrumb', { detail: null }));
     };
   }, [moduleConfig, moduleId, data, id]);
+
+  useEffect(() => {
+    if (!moduleConfig) return;
+    const moduleTitle = moduleConfig.titles?.fa || moduleId;
+    const recordName = getRecordTitle(data, moduleConfig, { fallback: '' });
+    document.title = recordName ? `${recordName} | ${moduleTitle} | مهربانو` : `${moduleTitle} | مهربانو`;
+  }, [moduleConfig, moduleId, data]);
 
     const handleAssigneeChange = useCallback(async (value: string) => {
       const [type, assignId] = value.split('_');
@@ -537,7 +937,7 @@ const ModuleShow: React.FC = () => {
 
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || null;
-        const recordTitle = (data as any)?.name || (data as any)?.title || (data as any)?.system_code || null;
+        const recordTitle = getRecordTitle(data, moduleConfig) || null;
         await supabase.from('changelogs').insert([
           {
             module_id: moduleId,
@@ -558,11 +958,18 @@ const ModuleShow: React.FC = () => {
 
   // تابع برای کپی اقلام BOM به جداول مواد اولیه (با تایید کاربر)
     const handleRelatedBomChange = useCallback(async (bomId: string) => {
+      if (!bomId) return;
+      if (bomCopyPromptRef.current === bomId) return;
+      bomCopyPromptRef.current = bomId;
+
       modal.confirm({
         title: 'کپی از شناسنامه تولید',
         content: 'جداول سفارش تولید ریست شوند و مقادیر از روی BOM کپی شوند؟',
         okText: 'بله، کپی کن',
         cancelText: 'خیر',
+        onCancel: () => {
+          bomCopyPromptRef.current = null;
+        },
         onOk: async () => {
           try {
             const { data: bom, error: bomError } = await supabase
@@ -577,7 +984,12 @@ const ModuleShow: React.FC = () => {
             if (bom.grid_materials) {
               updateData['grid_materials'] = bom.grid_materials;
             }
-            updateData['related_bom'] = bomId;
+            if (moduleId === 'production_orders') {
+              updateData['bom_id'] = bomId;
+              updateData['name'] = bom?.name || '';
+            } else {
+              updateData['related_bom'] = bomId;
+            }
             updateData['product_category'] = bom?.product_category ?? null;
             if (bom.production_stages_draft) {
               updateData['production_stages_draft'] = bom.production_stages_draft;
@@ -599,6 +1011,8 @@ const ModuleShow: React.FC = () => {
             msg.success('اقلام شناسنامه تولید بارگذاری شد و بهای تمام شده محاسبه شد');
           } catch (e: any) {
             msg.error('خطا در بارگذاری اقلام: ' + e.message);
+          } finally {
+            bomCopyPromptRef.current = null;
           }
         }
       });
@@ -689,7 +1103,7 @@ const ModuleShow: React.FC = () => {
         if (!moduleId || !id) return;
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || null;
-        const recordTitle = (data as any)?.name || (data as any)?.title || (data as any)?.system_code || null;
+        const recordTitle = getRecordTitle(data, moduleConfig) || null;
 
         const { error } = await supabase.from('changelogs').insert([
           {
@@ -1029,32 +1443,55 @@ const ModuleShow: React.FC = () => {
 
   const handleConfirmStartProduction = async () => {
     try {
-      if (!productionShelfId) {
-        msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
+      const confirmedGroups = startMaterials.filter((group) => group.isConfirmed === true);
+      if (confirmedGroups.length === 0) {
+        msg.error('حداقل یک محصول را با دکمه "ثبت" تایید کنید.');
         return;
       }
-      const latestQty = getOrderQuantity(productionQuantityPreview ?? (await fetchProductionQuantity()));
-      const { moves, missingProduct, missingShelf, quantity } = collectProductionMoves({ ...data, quantity: latestQty }, productionShelfId);
-      if (!quantity || quantity <= 0) {
-        msg.error(PRODUCTION_MESSAGES.requireQuantity);
+      const materialsWithDelivery = confirmedGroups.filter((group) => group.totalDeliveredQty > 0);
+      if (!materialsWithDelivery.length) {
+        msg.error('برای محصول‌های تایید شده، مقدار تحویل شده معتبر ثبت نشده است.');
         return;
       }
-      if (missingProduct.length) {
+      const missingProduct = materialsWithDelivery.filter((group) => !group.selectedProductId);
+      if (missingProduct.length > 0) {
         msg.error(PRODUCTION_MESSAGES.requireSelectedProduct);
         return;
       }
-      if (missingShelf.length) {
-        msg.error(PRODUCTION_MESSAGES.requireSourceShelf);
+      const missingSourceShelf = materialsWithDelivery.filter((group) => !group.sourceShelfId);
+      if (missingSourceShelf.length > 0) {
+        msg.error('برای محصول‌های ثبت‌شده، قفسه برداشت انتخاب نشده است.');
         return;
       }
+      const invalidSourceShelf = materialsWithDelivery.filter((group) => {
+        const options = group.selectedProductId ? (sourceShelfOptionsByProduct[group.selectedProductId] || []) : [];
+        return !options.some((option) => option.value === group.sourceShelfId);
+      });
+      if (invalidSourceShelf.length > 0) {
+        msg.error('برخی قفسه‌های برداشت برای محصول انتخاب‌شده موجودی معتبر ندارند.');
+        return;
+      }
+      const missingProductionShelf = materialsWithDelivery.filter((group) => !group.productionShelfId);
+      if (missingProductionShelf.length > 0) {
+        msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
+        return;
+      }
+      const moves = materialsWithDelivery.map((group) => ({
+        product_id: String(group.selectedProductId),
+        from_shelf_id: String(group.sourceShelfId),
+        to_shelf_id: String(group.productionShelfId),
+        quantity: group.totalDeliveredQty,
+      }));
 
       setStatusLoading(true);
       await applyProductionMoves(moves);
+      const firstProductionShelfId = moves[0]?.to_shelf_id || null;
       await finalizeStatusUpdate({
         status: 'in_progress',
-        production_shelf_id: productionShelfId,
+        production_shelf_id: firstProductionShelfId,
         production_moves: moves,
       });
+      clearStartDraft();
       msg.success('تولید آغاز شد');
       setProductionModal(null);
     } catch (e: any) {
@@ -1063,6 +1500,40 @@ const ModuleShow: React.FC = () => {
       setStatusLoading(false);
     }
   };
+
+  const handleConfirmStartGroup = useCallback((groupIndex: number) => {
+    const group = startMaterials[groupIndex];
+    if (!group) return;
+    if (!group.selectedProductId) {
+      msg.error('برای این محصول، محصول انتخاب‌شده مشخص نیست.');
+      return;
+    }
+    if (!group.sourceShelfId) {
+      msg.error('برای این محصول، قفسه برداشت انتخاب نشده است.');
+      return;
+    }
+    const validSourceShelves = group.selectedProductId ? (sourceShelfOptionsByProduct[group.selectedProductId] || []) : [];
+    if (!validSourceShelves.some((option) => option.value === group.sourceShelfId)) {
+      msg.error('قفسه برداشت انتخاب‌شده برای این محصول موجودی ندارد.');
+      return;
+    }
+    if (!group.productionShelfId) {
+      msg.error('برای این محصول، قفسه تولید انتخاب نشده است.');
+      return;
+    }
+    if (!group.totalDeliveredQty || group.totalDeliveredQty <= 0) {
+      msg.error('برای این محصول، مقدار تحویل شده معتبر نیست.');
+      return;
+    }
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const current = next[groupIndex];
+      if (!current) return prev;
+      next[groupIndex] = { ...current, isConfirmed: true, collapsed: true };
+      return next;
+    });
+    msg.success('این محصول ثبت شد.');
+  }, [msg, sourceShelfOptionsByProduct, startMaterials]);
 
   const handleConfirmStopProduction = async () => {
     try {
@@ -1103,14 +1574,16 @@ const ModuleShow: React.FC = () => {
       }
       const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
       const productionShelfId = data?.production_shelf_id;
-      if (!productionShelfId) {
+      if (!moves.length && !productionShelfId) {
         msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
         return;
       }
       setStatusLoading(true);
-      const consumptionMoves = moves.length ? moves : buildConsumptionMoves(data, normalizedQty, productionShelfId);
+      const consumptionMoves = moves.length
+        ? moves
+        : buildConsumptionMoves(data, normalizedQty, String(productionShelfId));
       if (consumptionMoves.length) {
-        await consumeProductionMaterials(consumptionMoves, productionShelfId);
+        await consumeProductionMaterials(consumptionMoves, productionShelfId || undefined);
       }
       await addFinishedGoods(outputProductId, outputShelfId, normalizedQty);
       await syncProductStock(outputProductId);
@@ -1148,30 +1621,6 @@ const ModuleShow: React.FC = () => {
       product_inventory: [inventoryRow],
       __requireInventoryShelf: true,
     } as any;
-  };
-
-  const getProductionSummary = (quantityOverride?: number | null) => {
-    const quantity = getOrderQuantity(typeof quantityOverride === 'number' ? quantityOverride : null);
-    const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
-    const map = new Map<string, { name: string; qty: number }>();
-    tables.forEach((table) => {
-      const rows = Array.isArray(data?.[table]) ? data[table] : [];
-      rows.forEach((row: any) => {
-        const usage = parseFloat(row?.usage ?? row?.quantity ?? row?.qty ?? row?.count ?? 0) || 0;
-        if (usage <= 0) return;
-        const productId = row?.selected_product_id || row?.product_id || 'unknown';
-        const name = row?.selected_product_name || row?.product_name || row?.name || row?.title || productId;
-        const key = String(productId);
-        const prev = map.get(key);
-        const nextQty = usage * quantity;
-        if (prev) {
-          prev.qty += nextQty;
-        } else {
-          map.set(key, { name, qty: nextQty });
-        }
-      });
-    });
-    return Array.from(map.values());
   };
 
   const handleCreateProductSave = async (values: any, meta?: { productInventory?: any[] }) => {
@@ -1215,7 +1664,7 @@ const ModuleShow: React.FC = () => {
       const normalizedQty = Number.isFinite(latestQty) ? latestQty : 0;
       const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
       const productionShelfId = data?.production_shelf_id;
-      if (!productionShelfId) {
+      if (!moves.length && !productionShelfId) {
         msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
         return;
       }
@@ -1223,9 +1672,11 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireQuantity);
         return;
       }
-      const consumptionMoves = moves.length ? moves : buildConsumptionMoves(data, normalizedQty, productionShelfId);
+      const consumptionMoves = moves.length
+        ? moves
+        : buildConsumptionMoves(data, normalizedQty, String(productionShelfId));
       if (consumptionMoves.length) {
-        await consumeProductionMaterials(consumptionMoves, productionShelfId);
+        await consumeProductionMaterials(consumptionMoves, productionShelfId || undefined);
       }
       await finalizeStatusUpdate({
         status: 'completed',
@@ -1310,7 +1761,10 @@ const ModuleShow: React.FC = () => {
               value={tempValue}
               onChange={(val) => {
                 setTempValues(prev => ({ ...prev, [field.key]: val }));
-                if ((field.key === 'related_bom' || (moduleId === 'production_orders' && field.key === 'bom_id')) && val) {
+                const shouldHandleBom =
+                  (field.key === 'related_bom' && val && val !== data?.related_bom) ||
+                  (moduleId === 'production_orders' && field.key === 'bom_id' && val && val !== data?.bom_id);
+                if (shouldHandleBom) {
                   setTimeout(() => handleRelatedBomChange(val), 100);
                 }
               }}
@@ -1416,13 +1870,15 @@ const ModuleShow: React.FC = () => {
           if (r) { assigneeIcon = <Avatar icon={<TeamOutlined />} size="small" className="bg-blue-100 text-blue-600" />; }
       }
   }
+  const resolvedRecordTitle = getRecordTitle(data, moduleConfig, { fallback: '' });
+
   return (
-    <div className="p-4 pt-1 md:p-6 md:pt-1 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16">
+    <div className="p-4 pt-1 md:p-6 md:pt-1 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16 scrollbar-wide">
       <div className="mb-4 md:mb-0">
         <RelatedSidebar
           moduleConfig={moduleConfig}
           recordId={id!}
-          recordName={data?.name || data?.system_code || id}
+          recordName={resolvedRecordTitle}
           mentionUsers={allUsers}
           mentionRoles={allRoles}
         />
@@ -1430,7 +1886,7 @@ const ModuleShow: React.FC = () => {
 
       <HeaderActions
         moduleTitle={moduleConfig.titles.fa}
-        recordName={data.name}
+        recordName={resolvedRecordTitle}
         shareUrl={printManager.printQrValue}
         onBack={() => navigate(`/${moduleId}`)}
         onHome={() => navigate('/')}
@@ -1445,6 +1901,7 @@ const ModuleShow: React.FC = () => {
 
       <HeroSection
         data={{ ...data, id }}
+        recordTitle={resolvedRecordTitle}
         moduleId={moduleId}
         moduleConfig={moduleConfig}
         currentTags={currentTags}
@@ -1515,6 +1972,7 @@ const ModuleShow: React.FC = () => {
           title="ایجاد سفارش تولید"
           initialValues={{
             bom_id: id,
+            name: data?.name || '',
             product_category: data?.product_category || null,
             grid_materials: data?.grid_materials || [],
             production_stages_draft: data?.production_stages_draft || [],
@@ -1527,58 +1985,21 @@ const ModuleShow: React.FC = () => {
 
       {moduleId === 'production_orders' && (
         <>
-          <Modal
-            title={PRODUCTION_MESSAGES.startTitle}
+          <StartProductionModal
             open={productionModal === 'start'}
-            onOk={handleConfirmStartProduction}
+            loading={statusLoading}
+            materials={startMaterials}
+            sourceShelfOptionsByProduct={sourceShelfOptionsByProduct}
+            productionShelfOptions={productionShelfOptions}
             onCancel={() => setProductionModal(null)}
-            okText="شروع تولید"
-            cancelText="انصراف"
-            confirmLoading={statusLoading}
-            destroyOnClose
-          >
-            <div className="space-y-4">
-              <div className="text-sm text-gray-600 whitespace-pre-line">
-                {PRODUCTION_MESSAGES.startNotice(toPersianNumber(productionQuantityPreview ?? data?.quantity ?? 0))}
-              </div>
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
-                <div className="text-xs text-gray-500 mb-2">خلاصه مواد مصرفی</div>
-                <div className="space-y-1">
-                  {getProductionSummary(productionQuantityPreview).length === 0 ? (
-                    <div className="text-xs text-gray-400">موردی ثبت نشده است.</div>
-                  ) : (
-                    getProductionSummary(productionQuantityPreview).map((item, idx) => (
-                      <div key={`${item.name}-${idx}`} className="flex items-center justify-between text-xs text-gray-600">
-                        <span>{item.name}</span>
-                        <span>{toPersianNumber(item.qty)}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Select
-                  placeholder="انتخاب قفسه تولید"
-                  value={productionShelfId}
-                  onChange={(val) => setProductionShelfId(val)}
-                  options={productionShelfOptions}
-                  showSearch
-                  optionFilterProp="label"
-                  className="w-full"
-                  getPopupContainer={() => document.body}
-                />
-                <QrScanPopover
-                  label=""
-                  buttonProps={{ type: 'default', shape: 'circle' }}
-                  onScan={({ moduleId: scannedModule, recordId }) => {
-                    if (scannedModule === 'shelves' && recordId) {
-                      setProductionShelfId(recordId);
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          </Modal>
+            onStart={handleConfirmStartProduction}
+            onToggleGroup={setStartMaterialCollapsed}
+            onDeliveredChange={updateStartMaterialDelivered}
+            onSourceShelfChange={setStartMaterialSourceShelf}
+            onSourceShelfScan={handleSourceShelfScan}
+            onProductionShelfChange={setStartMaterialProductionShelf}
+            onConfirmGroup={handleConfirmStartGroup}
+          />
 
           <Modal
             title={PRODUCTION_MESSAGES.stopTitle}

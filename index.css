@@ -24,6 +24,8 @@
 /* اعمال فونت وزیر روی تمام کامپوننت‌های Ant Design */
 .ant-btn, 
 .ant-input, 
+.ant-input-number,
+.ant-input-number-input,
 .ant-select, 
 .ant-picker, 
 .ant-picker-dropdown, 
@@ -36,28 +38,38 @@
   font-family: 'Vazirmatn', system-ui, sans-serif !important;
 }
 
+.ant-input-number-input {
+  font-feature-settings: "ss01";
+}
+
 /* =========================================
    2. اسکرول‌بار سفارشی (Custom Scrollbar)
    ========================================= */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent; 
+  background: rgba(0, 0, 0, 0.06); 
 }
 ::-webkit-scrollbar-thumb {
   background: #d1d5db; 
-  border-radius: 4px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 .dark ::-webkit-scrollbar-track {
   background: #1f1f1f;
 }
 .dark ::-webkit-scrollbar-thumb {
   background: #424242; 
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #c58f60; /* رنگ نارنجی چرم */
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
 /* =========================================
@@ -155,9 +167,65 @@
   font-feature-settings: "ss01";
 }
 
-/* اسکرول‌بار */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+/* اسکرول‌بار پهن‌تر برای صفحات و مودال‌های اصلی */
+.scrollbar-wide {
+  scrollbar-width: auto;
+  scrollbar-color: #b8b8b8 rgba(0, 0, 0, 0.08);
+}
+
+.scrollbar-wide::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.scrollbar-wide::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.scrollbar-wide::-webkit-scrollbar-thumb {
+  background: #b8b8b8;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.scrollbar-wide::-webkit-scrollbar-thumb:hover {
+  background: #c58f60;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.ant-modal-wrap,
+.ant-modal-body {
+  scrollbar-width: auto;
+  scrollbar-color: #b8b8b8 rgba(0, 0, 0, 0.08);
+}
+
+.ant-modal-wrap::-webkit-scrollbar,
+.ant-modal-body::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+
+.ant-modal-wrap::-webkit-scrollbar-track,
+.ant-modal-body::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.ant-modal-wrap::-webkit-scrollbar-thumb,
+.ant-modal-body::-webkit-scrollbar-thumb {
+  background: #b8b8b8;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.ant-modal-wrap::-webkit-scrollbar-thumb:hover,
+.ant-modal-body::-webkit-scrollbar-thumb:hover {
+  background: #c58f60;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
 
 /* =========================================
    5. استایل‌های چاپ (Print Styles)

@@ -111,15 +111,17 @@ export const rollbackProductionMoves = async (moves: ProductionMove[]) => {
   await applyProductionMoves(reversed);
 };
 
-export const consumeProductionMaterials = async (moves: ProductionMove[], productionShelfId: string) => {
+export const consumeProductionMaterials = async (moves: ProductionMove[], productionShelfId?: string) => {
   const grouped = new Map<string, number>();
   moves.forEach((move) => {
-    const key = `${move.product_id}:${productionShelfId}`;
+    const targetShelfId = move?.to_shelf_id || productionShelfId;
+    if (!targetShelfId) return;
+    const key = `${move.product_id}:${targetShelfId}`;
     grouped.set(key, (grouped.get(key) || 0) + move.quantity);
   });
   for (const [key, qty] of grouped.entries()) {
-    const [productId] = key.split(':');
-    await adjustStock(productId, productionShelfId, -qty);
+    const [productId, shelfId] = key.split(':');
+    await adjustStock(productId, shelfId, -qty);
   }
 };
 
