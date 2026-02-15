@@ -6,6 +6,7 @@ import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import EditableTable from './EditableTable.tsx';
 import GridTable from './GridTable';
+import SmartTableRenderer from './SmartTableRenderer';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType } from '../types';
@@ -485,6 +486,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       }
       if (module.id === 'shelves') {
         delete values.shelf_inventory;
+        delete values.shelf_stock_movements;
       }
       if (module.id === 'production_orders') {
         if (values.grid_materials === undefined) {
@@ -830,6 +832,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
               {sortedBlocks.map(block => {
                 if (block.visibleIf && !checkVisibility(block.visibleIf, currentValues)) return null;
                 if (module.id === 'products' && block.id === 'product_stock_movements') return null;
+                if (module.id === 'shelves' && block.id === 'shelf_stock_movements') return null;
 
                 if (module.id === 'production_orders' && !recordId && block.type === BlockType.GRID_TABLE) {
                   return null;
@@ -878,24 +881,52 @@ const SmartForm: React.FC<SmartFormProps> = ({
                       </div>
                       {block.tableColumns && (
                         <div className="mt-6">
-                          <Form.Item name={block.id} noStyle>
-                            <EditableTable
-                              block={block}
-                              initialData={formData[block.id] || []}
-                              mode="local"
-                              moduleId={module.id}
+                          {module.id === 'products' && block.id === 'product_inventory' ? (
+                            <SmartTableRenderer
+                              moduleConfig={{
+                                id: `${module.id}_${block.id}_readonly`,
+                                fields: (block.tableColumns || []).map((col: any, idx: number) => ({
+                                  key: col.key,
+                                  labels: { fa: col.title, en: col.key },
+                                  type: col.type,
+                                  options: col.options,
+                                  relationConfig: col.relationConfig,
+                                  dynamicOptionsCategory: col.dynamicOptionsCategory,
+                                  isTableColumn: true,
+                                  order: idx + 1,
+                                })),
+                              } as any}
+                              data={(Array.isArray(formData[block.id]) ? formData[block.id] : []).map((row: any, idx: number) => ({
+                                id: row?.id || row?.key || `${block.id}_${idx}`,
+                                ...row,
+                              }))}
+                              loading={false}
                               relationOptions={relationOptions}
                               dynamicOptions={dynamicOptions}
-                              canEditModule={canEditModule}
-                              canViewField={canViewField}
-                              readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
-                              onChange={(newData: any[]) => {
-                                const newFormData = { ...formData, [block.id]: newData };
-                                setFormData(newFormData);
-                                form.setFieldValue(block.id, newData);
-                              }}
+                              pagination={false}
+                              disableScroll={false}
+                              tableLayout="auto"
                             />
-                          </Form.Item>
+                          ) : (
+                            <Form.Item name={block.id} noStyle>
+                              <EditableTable
+                                block={block}
+                                initialData={formData[block.id] || []}
+                                mode="local"
+                                moduleId={module.id}
+                                relationOptions={relationOptions}
+                                dynamicOptions={dynamicOptions}
+                                canEditModule={canEditModule}
+                                canViewField={canViewField}
+                                readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
+                                onChange={(newData: any[]) => {
+                                  const newFormData = { ...formData, [block.id]: newData };
+                                  setFormData(newFormData);
+                                  form.setFieldValue(block.id, newData);
+                                }}
+                              />
+                            </Form.Item>
+                          )}
                         </div>
                       )}
                     </div>
@@ -954,7 +985,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
               })}
 
               {/* --- نمایش فوتر هوشمند --- */}
-              {currentSummaryData && (
+              {currentSummaryData && summaryConfigObj?.calculationType === SummaryCalculationType.INVOICE_FINANCIALS && (
                   <SummaryCard 
                     type={summaryConfigObj?.calculationType || SummaryCalculationType.SUM_ALL_ROWS} 
                     data={currentSummaryData} 

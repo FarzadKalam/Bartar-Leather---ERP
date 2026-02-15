@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+﻿import React, { useMemo, useState } from 'react';
 import { Select, Input, Button, Popconfirm, Divider, App } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -14,15 +14,40 @@ interface DynamicSelectFieldProps {
   allowClear?: boolean;
   disabled?: boolean;
   mode?: 'multiple' | 'tags';
-  onOptionsUpdate?: () => void; // callback برای رفرش options
+  onOptionsUpdate?: () => void;
   getPopupContainer?: (trigger: HTMLElement) => HTMLElement;
   dropdownStyle?: React.CSSProperties;
 }
 
-/**
- * کامپوننت SELECT با قابلیت افزودن و حذف گزینه‌های دینامیک
- * برای استفاده در هر دو SmartForm و ModuleShow
- */
+const containsLatinChars = (value: string) => /[A-Za-z]/.test(value);
+
+const normalizeDynamicValueToLabel = (
+  input: string | string[] | undefined,
+  options: Array<{ label: string; value: string }>,
+  mode?: 'multiple' | 'tags'
+): string | string[] | undefined => {
+  if (input === undefined) return undefined;
+
+  const map = new Map<string, string>();
+  (options || []).forEach((opt) => {
+    const key = String(opt?.value ?? '');
+    const label = String(opt?.label ?? key);
+    if (!key) return;
+    map.set(key, label);
+  });
+
+  if (mode === 'multiple' || mode === 'tags') {
+    const arr = Array.isArray(input) ? input : [input];
+    return arr.map((val) => {
+      const normalized = String(val ?? '');
+      return map.get(normalized) || normalized;
+    });
+  }
+
+  const normalized = String(input ?? '');
+  return map.get(normalized) || normalized;
+};
+
 const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   value,
   onChange,
@@ -36,7 +61,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   mode = undefined,
   onOptionsUpdate,
   getPopupContainer = () => document.body,
-  dropdownStyle
+  dropdownStyle,
 }) => {
   const { message: msg } = App.useApp();
   const [newOptionValue, setNewOptionValue] = useState('');
@@ -48,6 +73,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     width: isMobileViewport ? '92vw' : undefined,
     ...dropdownStyle,
   };
+
   const normalizedOptions = useMemo(() => {
     const next = Array.isArray(options) ? [...options] : [];
     const currentValues = mode === 'multiple'
@@ -64,15 +90,22 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     return next;
   }, [options, value, mode]);
 
-  // افزودن گزینه جدید
+  const handleSelectChange = (nextValue: string | string[] | undefined) => {
+    const normalized = normalizeDynamicValueToLabel(nextValue, normalizedOptions, mode);
+    onChange?.(normalized as any);
+  };
+
   const handleAddOption = async () => {
     const trimmedValue = newOptionValue.trim();
     if (!trimmedValue) {
       msg.warning('لطفاً مقدار گزینه را وارد کنید');
       return;
     }
+    if (containsLatinChars(trimmedValue)) {
+      msg.warning('مقدار گزینه باید فارسی باشد.');
+      return;
+    }
 
-    // بررسی تکراری بودن
     if (normalizedOptions.find(opt => String(opt.value).trim().toLowerCase() === trimmedValue.toLowerCase())) {
       msg.warning('این گزینه قبلاً وجود دارد');
       return;
@@ -84,24 +117,21 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         category,
         label: trimmedValue,
         value: trimmedValue,
-        is_active: true
+        is_active: true,
       }]);
 
       if (error) throw error;
 
       msg.success(`گزینه "${trimmedValue}" اضافه شد`);
-      
-      // انتخاب خودکار مقدار جدید
+
       if (mode === 'multiple') {
-        // برای MULTI_SELECT، مقدار جدید را به آرایه اضافه کن
         const currentValues = Array.isArray(value) ? value : (value ? [value] : []);
-        onChange?.([...currentValues, trimmedValue]);
+        handleSelectChange([...currentValues, trimmedValue]);
       } else {
-        onChange?.(trimmedValue);
+        handleSelectChange(trimmedValue);
       }
+
       setNewOptionValue('');
-      
-      // رفرش options از parent
       onOptionsUpdate?.();
     } catch (error: any) {
       console.error('Error adding option:', error);
@@ -111,7 +141,6 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     }
   };
 
-  // حذف گزینه
   const handleDeleteOption = async (optionValue: string) => {
     setLoading(true);
     try {
@@ -124,13 +153,11 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       if (error) throw error;
 
       msg.success('گزینه حذف شد');
-      
-      // اگر مقدار فعلی همین است، پاک کن
+
       if (value === optionValue) {
-        onChange?.(undefined as any);
+        handleSelectChange(undefined as any);
       }
-      
-      // رفرش options
+
       onOptionsUpdate?.();
     } catch (error: any) {
       console.error('Error deleting option:', error);
@@ -144,7 +171,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     <Select
       mode={mode}
       value={mode === 'multiple' ? (Array.isArray(value) ? value : (value ? [value] : [])) : value}
-      onChange={onChange}
+      onChange={handleSelectChange as any}
       placeholder={placeholder}
       className={className}
       showSearch={showSearch}
@@ -155,16 +182,15 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       getPopupContainer={getPopupContainer}
       options={normalizedOptions}
       popupMatchSelectWidth={isMobileViewport}
-      notFoundContent={loading ? "در حال بارگذاری..." : "موردی یافت نشد"}
+      notFoundContent={loading ? 'در حال بارگذاری...' : 'موردی یافت نشد'}
       dropdownStyle={mergedDropdownStyle}
-      // رندر سفارشی برای هر آیتم با دکمه حذف
       optionRender={(option) => (
-        <div 
-          style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
-            width: '100%'
+            width: '100%',
           }}
         >
           <span>{option.label}</span>
@@ -179,7 +205,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
             okText="بله، حذف شود"
             cancelText="خیر"
             placement="left"
-            zIndex={9999} // بالاتر از modal و drawer
+            zIndex={9999}
           >
             <Button
               type="text"
@@ -189,15 +215,14 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
               onClick={(e) => {
                 e.stopPropagation();
               }}
-              style={{ 
+              style={{
                 padding: '0 4px',
-                marginRight: '8px'
+                marginRight: '8px',
               }}
             />
           </Popconfirm>
         </div>
       )}
-      // بخش پایین dropdown برای افزودن گزینه جدید
       dropdownRender={(menu) => (
         <>
           {menu}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, InputNumber, Modal, Select, Table } from 'antd';
-import { CheckOutlined, RightOutlined } from '@ant-design/icons';
+import { RightOutlined, SaveOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 
@@ -12,6 +12,8 @@ export type StartMaterialPiece = {
   quantity: number;
   totalQuantity: number;
   mainUnit: string;
+  subUnit: string;
+  subUsage: number;
   perItemUsage: number;
   totalUsage: number;
   deliveredQty: number;
@@ -19,6 +21,7 @@ export type StartMaterialPiece = {
 
 export type StartMaterialGroup = {
   key: string;
+  rowIndex: number;
   categoryLabel: string;
   selectedProductId: string | null;
   selectedProductName: string;
@@ -37,7 +40,7 @@ interface StartProductionModalProps {
   open: boolean;
   loading: boolean;
   materials: StartMaterialGroup[];
-  sourceShelfOptionsByProduct: Record<string, { label: string; value: string }[]>;
+  sourceShelfOptionsByProduct: Record<string, { label: string; value: string; stock?: number }[]>;
   productionShelfOptions: { label: string; value: string }[];
   onCancel: () => void;
   onStart: () => void;
@@ -103,6 +106,13 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    type="text"
+                    size="small"
+                    className="!text-white hover:!text-white/90"
+                    icon={<SaveOutlined />}
+                    onClick={() => onConfirmGroup(groupIndex)}
+                  />
                   {group.isConfirmed && (
                     <span className="text-[11px] bg-white/20 rounded px-2 py-0.5">ثبت شده</span>
                   )}
@@ -166,6 +176,20 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                         key: 'mainUnit',
                         width: 90,
                         render: (value: string) => value || '-',
+                      },
+                      {
+                        title: 'واحد فرعی',
+                        dataIndex: 'subUnit',
+                        key: 'subUnit',
+                        width: 90,
+                        render: (value: string) => value || '-',
+                      },
+                      {
+                        title: 'مقدار واحد فرعی',
+                        dataIndex: 'subUsage',
+                        key: 'subUsage',
+                        width: 120,
+                        render: (value: number) => formatQty(value),
                       },
                       {
                         title: 'مقدار هر تولید',
@@ -254,16 +278,6 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="mt-3">
-                    <Button
-                      size="small"
-                      type={group.isConfirmed ? 'default' : 'primary'}
-                      icon={<CheckOutlined />}
-                      onClick={() => onConfirmGroup(groupIndex)}
-                    >
-                      ثبت
-                    </Button>
-                  </div>
                 </div>
               )}
             </div>

@@ -95,6 +95,9 @@ export const productionOrderModule: ModuleDefinition = {
     { key: 'quantity', labels: { fa: 'تعداد تولید', en: 'Production Qty' }, type: FieldType.STOCK, location: FieldLocation.HEADER, order: 3, validation: { required: true }, readonly: true, nature: FieldNature.SYSTEM },
     { key: 'production_cost', labels: { fa: 'جمع کل (برآورد هزینه)', en: 'Estimated Cost' }, type: FieldType.PRICE, location: FieldLocation.HEADER, order: 3.5, readonly: true, nature: FieldNature.SYSTEM },
     { key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4, options: [{ label: 'در انتظار', value: 'pending', color: 'orange' }, { label: 'در حال تولید', value: 'in_progress', color: 'blue' }, { label: 'تکمیل شده', value: 'completed', color: 'green' }], defaultValue: 'pending', isTableColumn: true },
+    { key: 'production_started_at', labels: { fa: '\u0632\u0645\u0627\u0646 \u0634\u0631\u0648\u0639 \u062a\u0648\u0644\u06cc\u062f', en: 'Production Start Time' }, type: FieldType.DATETIME, location: FieldLocation.HEADER, order: 4.1, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },
+    { key: 'production_stopped_at', labels: { fa: '\u0632\u0645\u0627\u0646 \u062a\u0648\u0642\u0641 \u062a\u0648\u0644\u06cc\u062f', en: 'Production Stop Time' }, type: FieldType.DATETIME, location: FieldLocation.HEADER, order: 4.2, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },
+    { key: 'production_completed_at', labels: { fa: '\u0632\u0645\u0627\u0646 \u062a\u06a9\u0645\u06cc\u0644 \u062a\u0648\u0644\u06cc\u062f', en: 'Production Complete Time' }, type: FieldType.DATETIME, location: FieldLocation.HEADER, order: 4.3, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },
     { 
       key: 'production_stages', 
       labels: { fa: 'مراحل تولید', en: 'Stages' }, 

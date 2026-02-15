@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, InputNumber, Select, Spin, Table, Typography, message } from 'antd';
-import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined } from '@ant-design/icons';
+import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Table, Typography, message } from 'antd';
+import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { BlockDefinition, FieldType } from '../types';
 import { MODULES } from '../moduleRegistry';
@@ -28,6 +28,8 @@ interface GridTableProps {
   canViewField?: (fieldKey: string) => boolean;
   readOnly?: boolean;
   orderQuantity?: number;
+  showDeliveredQtyColumn?: boolean;
+  forceProductionOrderMode?: boolean;
 }
 
 const defaultPiece = () => ({
@@ -50,9 +52,11 @@ const defaultPiece = () => ({
 });
 
 const unitOptions = HARD_CODED_UNIT_OPTIONS;
+const createPieceKey = () => `piece_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+const createRowKey = () => `grid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
 const createEmptyRow = () => ({
-  key: Date.now(),
+  key: createRowKey(),
   collapsed: true,
   header: {
     category: null,
@@ -60,7 +64,7 @@ const createEmptyRow = () => ({
     selected_product_name: null,
   },
   specs: {},
-  pieces: [{ key: Date.now(), ...defaultPiece() }],
+  pieces: [{ key: createPieceKey(), ...defaultPiece() }],
   totals: {},
 });
 
@@ -78,9 +82,11 @@ const GridTable: React.FC<GridTableProps> = ({
   canViewField,
   readOnly,
   orderQuantity = 0,
+  showDeliveredQtyColumn = false,
+  forceProductionOrderMode = false,
 }) => {
   const isReadOnly = readOnly === true || canEditModule === false || block?.readonly === true;
-  const isProductionOrder = moduleId === 'production_orders';
+  const isProductionOrder = moduleId === 'production_orders' || forceProductionOrderMode;
   const [activeEditRowKey, setActiveEditRowKey] = useState<string | null>(null);
   const [data, setData] = useState<any[]>(Array.isArray(initialData) ? initialData : []);
   const [tempData, setTempData] = useState<any[]>([]);
@@ -89,6 +95,13 @@ const GridTable: React.FC<GridTableProps> = ({
   const [productOptions, setProductOptions] = useState<Array<{ label: string; value: string }>>([]);
   const [productOptionsLoading, setProductOptionsLoading] = useState(false);
   const [localDynamicOptions, setLocalDynamicOptions] = useState<Record<string, any[]>>({});
+  const [selectedPieceKeysByRow, setSelectedPieceKeysByRow] = useState<Record<string, string[]>>({});
+  const [pieceActionPopover, setPieceActionPopover] = useState<{ rowKey: string; action: 'copy' | 'move' } | null>(null);
+  const [transferTargetMode, setTransferTargetMode] = useState<'existing' | 'new'>('existing');
+  const [transferTargetRowKey, setTransferTargetRowKey] = useState<string | null>(null);
+  const [transferTargetProductId, setTransferTargetProductId] = useState<string | null>(null);
+  const [transferProductOptions, setTransferProductOptions] = useState<Array<{ label: string; value: string; category?: string | null }>>([]);
+  const [transferProductOptionsLoading, setTransferProductOptionsLoading] = useState(false);
 
   const productModule = MODULES['products'];
   const specFieldsByBlock = useMemo(() => {
@@ -104,12 +117,12 @@ const GridTable: React.FC<GridTableProps> = ({
   useEffect(() => {
     const safeData = Array.isArray(initialData) ? initialData : [];
     const normalized = safeData.map((item, idx) => ({
-      key: item.key || item.id || `grid_${Date.now()}_${idx}`,
+      key: item.key || item.id || `${createRowKey()}_${idx}`,
       collapsed: item.collapsed ?? true,
       ...item,
       pieces: Array.isArray(item.pieces)
         ? item.pieces.map((piece: any, pIdx: number) => ({
-            key: piece.key || piece.id || `piece_${idx}_${pIdx}`,
+            key: piece.key || piece.id || `${createPieceKey()}_${idx}_${pIdx}`,
             ...piece,
           }))
         : item.pieces,
@@ -118,6 +131,12 @@ const GridTable: React.FC<GridTableProps> = ({
     setData(next);
     setTempData(next);
     setActiveEditRowKey(null);
+    setSelectedPieceKeysByRow({});
+    setPieceActionPopover(null);
+    setTransferTargetMode('existing');
+    setTransferTargetRowKey(null);
+    setTransferTargetProductId(null);
+    setTransferProductOptions([]);
   }, [initialData, mode]);
 
   const categories = block?.gridConfig?.categories || [];
@@ -147,11 +166,72 @@ const GridTable: React.FC<GridTableProps> = ({
     return tempData;
   };
 
+  const getRowKeyValue = (row: any, index: number) => String(row?.key || index);
+
+  const getSelectedPieceKeys = (rowKey: string) => selectedPieceKeysByRow[rowKey] || [];
+
+  const setSelectedPieceKeys = (rowKey: string, keys: string[]) => {
+    setSelectedPieceKeysByRow((prev) => {
+      if (!keys.length) {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      }
+      return { ...prev, [rowKey]: keys };
+    });
+  };
+
+  const closePieceActionPopover = () => {
+    setPieceActionPopover(null);
+    setTransferTargetMode('existing');
+    setTransferTargetRowKey(null);
+    setTransferTargetProductId(null);
+    setTransferProductOptions([]);
+  };
+
+  const getCategoryCandidates = (categoryValue: any): string[] => {
+    const raw = categoryValue == null ? null : String(categoryValue).trim();
+    if (!raw) return [];
+    const categoryMatch = categories.find((c: any) => String(c?.value || '') === raw || String(c?.label || '') === raw);
+    const candidates = [raw, categoryMatch?.value, categoryMatch?.label]
+      .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+      .map((item) => item.trim());
+    return Array.from(new Set(candidates));
+  };
+
+  const matchesCategory = (candidateCategory: any, currentCategory: any) => {
+    const currentCandidates = getCategoryCandidates(currentCategory);
+    if (currentCandidates.length === 0) return true;
+    const candidateCandidates = getCategoryCandidates(candidateCategory);
+    if (candidateCandidates.length === 0 && candidateCategory != null) {
+      const fallback = String(candidateCategory).trim();
+      return currentCandidates.includes(fallback);
+    }
+    return candidateCandidates.some((candidate) => currentCandidates.includes(candidate));
+  };
+
+  const cloneGridRowWithNewKeys = (row: any) => {
+    const pieces = Array.isArray(row?.pieces)
+      ? row.pieces.map((piece: any) => ({ ...piece, key: createPieceKey() }))
+      : [{ key: createPieceKey(), ...defaultPiece() }];
+    return applyCalculations({
+      ...row,
+      key: createRowKey(),
+      collapsed: false,
+      pieces,
+    });
+  };
+
   const formatQuantity = (value: any, decimals = 2) => {
     const num = Number(value);
     if (!Number.isFinite(num)) return toPersianNumber(0);
     const rounded = Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
     return toPersianNumber(rounded);
+  };
+
+  const toNumber = (value: any) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   };
 
   const applyCalculations = (gridRow: any) => {
@@ -241,7 +321,7 @@ const GridTable: React.FC<GridTableProps> = ({
     const nextData = [...source];
     const row = { ...nextData[rowIndex] };
     const pieces = Array.isArray(row.pieces) ? [...row.pieces] : [];
-    pieces.push({ key: Date.now(), ...defaultPiece() });
+    pieces.push({ key: createPieceKey(), ...defaultPiece() });
     row.pieces = pieces;
     nextData[rowIndex] = applyCalculations(row);
     updateGrid(nextData);
@@ -261,6 +341,10 @@ const GridTable: React.FC<GridTableProps> = ({
     const nextData = [...source];
     const removedKey = String(nextData[rowIndex]?.key || rowIndex);
     nextData.splice(rowIndex, 1);
+    setSelectedPieceKeys(removedKey, []);
+    if (pieceActionPopover?.rowKey === removedKey) {
+      closePieceActionPopover();
+    }
     if (mode === 'db' && !activeEditRowKey) {
       setSaving(true);
       void (async () => {
@@ -281,15 +365,17 @@ const GridTable: React.FC<GridTableProps> = ({
     updateGrid(nextData);
   };
 
-  const removePiece = (rowIndex: number, pieceIndex: number) => {
-    const source = getWorkingData();
-    const nextData = [...source];
-    const row = { ...nextData[rowIndex] };
-    const pieces = Array.isArray(row.pieces) ? [...row.pieces] : [];
-    pieces.splice(pieceIndex, 1);
-    row.pieces = pieces.length > 0 ? pieces : [{ key: Date.now(), ...defaultPiece() }];
-    nextData[rowIndex] = applyCalculations(row);
-    updateGrid(nextData);
+  const confirmRemoveGridRow = (rowIndex: number) => {
+    if (isReadOnly) return;
+    message.warning('در حال حذف جدول مواد اولیه هستید.');
+    Modal.confirm({
+      title: 'حذف جدول مواد اولیه',
+      content: 'این جدول حذف شود؟',
+      okText: 'حذف',
+      cancelText: 'انصراف',
+      okButtonProps: { danger: true },
+      onOk: () => removeGridRow(rowIndex),
+    });
   };
 
   const startEditRow = (rowKey: string) => {
@@ -298,7 +384,12 @@ const GridTable: React.FC<GridTableProps> = ({
       message.warning('ابتدا تغییرات ردیف در حال ویرایش را ثبت کنید.');
       return;
     }
-    setTempData(JSON.parse(JSON.stringify(data)));
+    const cloned = JSON.parse(JSON.stringify(data));
+    const rowIndex = cloned.findIndex((row: any, idx: number) => getRowKeyValue(row, idx) === rowKey);
+    if (rowIndex >= 0) {
+      cloned[rowIndex] = { ...cloned[rowIndex], collapsed: false };
+    }
+    setTempData(cloned);
     setActiveEditRowKey(rowKey);
   };
 
@@ -407,6 +498,226 @@ const GridTable: React.FC<GridTableProps> = ({
     } finally {
       setProductOptionsLoading(false);
     }
+  };
+
+  const loadTransferProductOptions = async (categoryValue: any, searchText = '') => {
+    setTransferProductOptionsLoading(true);
+    try {
+      const categoryCandidates = getCategoryCandidates(categoryValue);
+      const keyword = String(searchText || '').trim();
+      let query = supabase
+        .from('products')
+        .select('id, name, system_code, category')
+        .order('name', { ascending: true })
+        .limit(1000);
+
+      if (categoryCandidates.length === 1) {
+        query = query.eq('category', categoryCandidates[0]);
+      } else if (categoryCandidates.length > 1) {
+        query = query.in('category', categoryCandidates);
+      }
+
+      if (keyword) {
+        const safeKeyword = keyword.replace(/,/g, '').replace(/\*/g, '');
+        query = query.or(`name.ilike.%${safeKeyword}%,system_code.ilike.%${safeKeyword}%`);
+      }
+
+      const { data: products, error } = await query;
+      if (error) throw error;
+
+      const options = (products || []).map((product: any) => ({
+        value: String(product.id),
+        label: product.system_code ? `${product.system_code} - ${product.name}` : product.name,
+        category: product.category || null,
+      }));
+      setTransferProductOptions(options);
+    } catch (err) {
+      console.warn('Could not load transfer products', err);
+      setTransferProductOptions([]);
+    } finally {
+      setTransferProductOptionsLoading(false);
+    }
+  };
+
+  const duplicateGridRow = (rowIndex: number, currentRowKey?: string) => {
+    if (isReadOnly) return;
+    if (mode === 'db' && !!activeEditRowKey && activeEditRowKey !== String(currentRowKey || rowIndex)) {
+      message.warning('ابتدا تغییرات ردیف در حال ویرایش را ثبت کنید.');
+      return;
+    }
+
+    const source = getWorkingData();
+    const targetRow = source[rowIndex];
+    if (!targetRow) return;
+
+    const clonedRow = cloneGridRowWithNewKeys(targetRow);
+    const nextData = [...source];
+    nextData.splice(rowIndex + 1, 0, clonedRow);
+
+    if (mode === 'db' && !activeEditRowKey) {
+      setSaving(true);
+      void (async () => {
+        try {
+          await persistGridRows(nextData, 'کپی جدول انجام شد');
+        } catch (e: any) {
+          message.error(e.message || 'خطا در کپی جدول');
+        } finally {
+          setSaving(false);
+        }
+      })();
+      return;
+    }
+
+    updateGrid(nextData);
+  };
+
+  const togglePieceSelected = (rowKey: string, pieceKey: string, checked: boolean) => {
+    const current = getSelectedPieceKeys(rowKey);
+    if (checked) {
+      const next = Array.from(new Set([...current, pieceKey]));
+      setSelectedPieceKeys(rowKey, next);
+      return;
+    }
+    setSelectedPieceKeys(rowKey, current.filter((key) => key !== pieceKey));
+  };
+
+  const deleteSelectedPieces = (rowIndex: number) => {
+    const source = getWorkingData();
+    const row = source[rowIndex];
+    const rowKey = getRowKeyValue(row, rowIndex);
+    const selectedKeys = new Set(getSelectedPieceKeys(rowKey));
+    if (!selectedKeys.size) return;
+    Modal.confirm({
+      title: 'حذف قطعات انتخاب‌شده',
+      content: 'قطعات انتخاب‌شده حذف شوند؟',
+      okText: 'حذف',
+      cancelText: 'انصراف',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        const nextData = [...source];
+        const nextRow = { ...nextData[rowIndex] };
+        const pieces = Array.isArray(nextRow.pieces) ? [...nextRow.pieces] : [];
+        const remained = pieces.filter((piece: any) => !selectedKeys.has(String(piece?.key || '')));
+        nextRow.pieces = remained.length > 0 ? remained : [{ key: createPieceKey(), ...defaultPiece() }];
+        nextData[rowIndex] = applyCalculations(nextRow);
+        updateGrid(nextData);
+        setSelectedPieceKeys(rowKey, []);
+        closePieceActionPopover();
+      },
+    });
+  };
+
+  const applyPieceTransfer = async (rowIndex: number, action: 'copy' | 'move') => {
+    const source = getWorkingData();
+    const sourceRow = source[rowIndex];
+    if (!sourceRow) return;
+    const rowKey = getRowKeyValue(sourceRow, rowIndex);
+    const selectedKeys = getSelectedPieceKeys(rowKey);
+    if (!selectedKeys.length) {
+      message.warning('ابتدا یک یا چند قطعه را انتخاب کنید.');
+      return;
+    }
+
+    const selectedKeySet = new Set(selectedKeys);
+    const sourcePieces = Array.isArray(sourceRow.pieces) ? sourceRow.pieces : [];
+    const selectedPieces = sourcePieces.filter((piece: any) => selectedKeySet.has(String(piece?.key || '')));
+    if (!selectedPieces.length) {
+      message.warning('قطعات انتخاب‌شده معتبر نیستند.');
+      return;
+    }
+
+    const clonePieces = selectedPieces.map((piece: any) => ({
+      ...piece,
+      key: createPieceKey(),
+    }));
+
+    let nextData = [...source];
+    let targetRowIndex = -1;
+    let createdTargetRow = false;
+    const sourceCategory = sourceRow?.header?.category || null;
+
+    if (transferTargetMode === 'existing') {
+      if (!transferTargetRowKey) {
+        message.warning('محصول مقصد را انتخاب کنید.');
+        return;
+      }
+      targetRowIndex = nextData.findIndex((row: any, idx: number) => getRowKeyValue(row, idx) === transferTargetRowKey);
+      if (targetRowIndex < 0) {
+        message.warning('جدول مقصد یافت نشد.');
+        return;
+      }
+      if (!matchesCategory(nextData[targetRowIndex]?.header?.category, sourceCategory)) {
+        message.warning('محصول مقصد باید هم‌دسته با جدول فعلی باشد.');
+        return;
+      }
+    } else {
+      if (!transferTargetProductId) {
+        message.warning('محصول جدید را انتخاب کنید.');
+        return;
+      }
+      targetRowIndex = nextData.findIndex((row: any) => String(row?.header?.selected_product_id || '') === String(transferTargetProductId));
+      if (targetRowIndex < 0) {
+        try {
+          const product = await fetchProductById(String(transferTargetProductId));
+          if (!matchesCategory(product?.category, sourceCategory)) {
+            message.warning('محصول جدید باید در همان دسته‌بندی جدول فعلی باشد.');
+            return;
+          }
+          const category = sourceCategory || product?.category || null;
+          const specFields = getSpecFields(category);
+          const specs: Record<string, any> = {};
+          specFields.forEach((f: any) => {
+            if (product && product[f.key] !== undefined) specs[f.key] = product[f.key];
+          });
+          const newRow = applyCalculations({
+            key: createRowKey(),
+            collapsed: false,
+            header: {
+              category,
+              selected_product_id: product?.id || transferTargetProductId,
+              selected_product_name: product?.name || '',
+            },
+            specs,
+            specs_locked: true,
+            pieces: clonePieces,
+            totals: {},
+          });
+          nextData = [...nextData, newRow];
+          targetRowIndex = nextData.length - 1;
+          createdTargetRow = true;
+        } catch (err) {
+          console.error(err);
+          message.error('خطا در بارگذاری محصول جدید');
+          return;
+        }
+      }
+    }
+
+    if (targetRowIndex < 0) return;
+    if (action === 'move' && targetRowIndex === rowIndex) {
+      message.warning('برای جابجایی، مقصد باید متفاوت از مبدا باشد.');
+      return;
+    }
+
+    if (!createdTargetRow) {
+      const targetRow = { ...nextData[targetRowIndex] };
+      const targetPieces = Array.isArray(targetRow.pieces) ? [...targetRow.pieces] : [];
+      targetRow.pieces = [...targetPieces, ...clonePieces];
+      nextData[targetRowIndex] = applyCalculations(targetRow);
+    }
+
+    if (action === 'move') {
+      const updatedSourceRow = { ...nextData[rowIndex] };
+      const remained = (Array.isArray(updatedSourceRow.pieces) ? updatedSourceRow.pieces : [])
+        .filter((piece: any) => !selectedKeySet.has(String(piece?.key || '')));
+      updatedSourceRow.pieces = remained.length > 0 ? remained : [{ key: createPieceKey(), ...defaultPiece() }];
+      nextData[rowIndex] = applyCalculations(updatedSourceRow);
+    }
+
+    updateGrid(nextData);
+    setSelectedPieceKeys(rowKey, []);
+    closePieceActionPopover();
+    message.success(action === 'copy' ? 'قطعات کپی شدند.' : 'قطعات جابجا شدند.');
   };
 
   useEffect(() => {
@@ -541,6 +852,124 @@ const GridTable: React.FC<GridTableProps> = ({
           }
           const collapsed = row.collapsed === true;
           const isSpecsLocked = row.specs_locked === true;
+          const shouldShowSpecs = isProductionOrder
+            ? (rowCanEdit && !row.header?.selected_product_id)
+            : true;
+          const selectedPieceKeys = getSelectedPieceKeys(rowKey);
+          const selectedPieceCount = selectedPieceKeys.length;
+
+          const relationProductOptions = (productOptions.length ? productOptions : (relationOptions['products'] || []))
+            .map((item: any) => ({
+              label: String(item?.label || item?.value || ''),
+              value: String(item?.value || ''),
+              category: item?.category || null,
+            }))
+            .filter((item: any) => !!item.value);
+
+          const existingTargetRows = sourceData
+            .map((gridRow: any, idx: number) => {
+              const targetRowKey = getRowKeyValue(gridRow, idx);
+              const productId = gridRow?.header?.selected_product_id ? String(gridRow.header.selected_product_id) : '';
+              if (!productId) return null;
+              if (!matchesCategory(gridRow?.header?.category, categoryValue)) return null;
+              const productLabel = relationProductOptions.find((item: any) => item.value === productId)?.label
+                || gridRow?.header?.selected_product_name
+                || productId;
+              return {
+                value: targetRowKey,
+                label: productLabel,
+              };
+            })
+            .filter(Boolean) as Array<{ value: string; label: string }>;
+
+          const buildTransferPopoverContent = (action: 'copy' | 'move') => (
+            <div className="w-[92vw] sm:w-[360px] max-w-[92vw] space-y-3">
+              <div className="text-xs text-gray-600">به قطعات کدام محصول اضافه شود؟</div>
+              <Select
+                placeholder="انتخاب از محصولات موجود"
+                value={transferTargetMode === 'existing' ? transferTargetRowKey : null}
+                options={existingTargetRows}
+                disabled={transferTargetMode !== 'existing'}
+                onChange={(val) => {
+                  setTransferTargetMode('existing');
+                  setTransferTargetRowKey(val || null);
+                }}
+                className="w-full"
+                showSearch
+                optionFilterProp="label"
+                getPopupContainer={() => document.body}
+              />
+              <div className="text-xs text-gray-500">یا</div>
+              <Radio.Group
+                value={transferTargetMode}
+                onChange={(e) => setTransferTargetMode(e.target.value)}
+                className="flex flex-col gap-2"
+              >
+                <Radio value="existing">استفاده از محصولات موجود</Radio>
+                <Radio value="new">استفاده از محصول جدید</Radio>
+              </Radio.Group>
+              {transferTargetMode === 'new' && (
+                <div className="flex items-start gap-2">
+                  <Select
+                    placeholder="انتخاب محصول جدید"
+                    value={transferTargetProductId}
+                    options={transferProductOptions}
+                    onChange={(val) => setTransferTargetProductId(val || null)}
+                    className="flex-1 min-w-0"
+                    showSearch
+                    filterOption={false}
+                    onSearch={(value) => {
+                      void loadTransferProductOptions(categoryValue, value);
+                    }}
+                    loading={transferProductOptionsLoading}
+                    notFoundContent={transferProductOptionsLoading ? <Spin size="small" /> : undefined}
+                    getPopupContainer={() => document.body}
+                    onDropdownVisibleChange={(open) => {
+                      if (open) {
+                        void loadTransferProductOptions(categoryValue);
+                      }
+                    }}
+                  />
+                  <QrScanPopover
+                    label=""
+                    buttonClassName="shrink-0"
+                    onScan={async (scan) => {
+                      if (!scan.recordId || scan.moduleId !== 'products') return;
+                      try {
+                        const product = await fetchProductById(scan.recordId);
+                        if (!matchesCategory(product?.category, categoryValue)) {
+                          message.warning('محصول اسکن‌شده با دسته‌بندی این جدول همخوانی ندارد.');
+                          return;
+                        }
+                        setTransferTargetProductId(String(product.id));
+                        setTransferProductOptions((prev) => {
+                          const next = [...prev];
+                          if (!next.find((item) => item.value === String(product.id))) {
+                            next.unshift({
+                              value: String(product.id),
+                              label: product.system_code ? `${product.system_code} - ${product.name}` : product.name,
+                              category: product.category || null,
+                            });
+                          }
+                          return next;
+                        });
+                      } catch (err) {
+                        console.warn('Could not apply scanned product', err);
+                        message.error('خطا در انتخاب محصول');
+                      }
+                    }}
+                    buttonProps={{ size: 'small' }}
+                  />
+                </div>
+              )}
+              <div className="flex flex-col sm:flex-row sm:justify-end gap-2 pt-1">
+                <Button size="small" onClick={closePieceActionPopover}>انصراف</Button>
+                <Button size="small" type="primary" onClick={() => applyPieceTransfer(rowIndex, action)}>
+                  {action === 'copy' ? 'کپی' : 'جابجایی'}
+                </Button>
+              </div>
+            </div>
+          );
 
           const specCategories = specFields
             .map((f: any) => f.dynamicOptionsCategory)
@@ -577,7 +1006,7 @@ const GridTable: React.FC<GridTableProps> = ({
                   {rowCanEdit ? (
                     <Select
                       value={categoryValue}
-                      onChange={(val) => updateRow(rowIndex, { header: { ...row.header, category: val }, specs: {}, pieces: [defaultPiece()], collapsed: false })}
+                      onChange={(val) => updateRow(rowIndex, { header: { ...row.header, category: val }, specs: {}, pieces: [{ key: createPieceKey(), ...defaultPiece() }], collapsed: false })}
                       options={categories.map((c) => ({ label: c.label, value: c.value }))}
                       placeholder="انتخاب کنید"
                       className="min-w-[160px]"
@@ -585,7 +1014,7 @@ const GridTable: React.FC<GridTableProps> = ({
                       dropdownStyle={{ zIndex: 10050 }}
                     />
                   ) : (
-                    <span className="min-w-[160px] text-xs text-white truncate">
+                    <span className="min-w-[160px] text-xs text-white font-black truncate">
                       {categories.find((c) => c.value === categoryValue)?.label || '-'}
                     </span>
                   )}
@@ -617,7 +1046,7 @@ const GridTable: React.FC<GridTableProps> = ({
                         }
                         if (!rowCanEdit) {
                           return (
-                            <span className="min-w-[200px] w-full sm:w-auto text-xs text-white truncate">
+                            <span className="min-w-[200px] w-full sm:w-auto text-xs text-white font-black truncate">
                               {selectedFromRaw?.label || selectedName || '-'}
                             </span>
                           );
@@ -674,9 +1103,17 @@ const GridTable: React.FC<GridTableProps> = ({
                           type="text"
                           size="small"
                           className="p-0 !text-white hover:!text-white/90"
+                          icon={<CopyOutlined />}
+                          disabled={saving}
+                          onClick={() => duplicateGridRow(rowIndex, rowKey)}
+                        />
+                        <Button
+                          type="text"
+                          size="small"
+                          className="p-0 !text-white hover:!text-white/90"
                           icon={<DeleteOutlined />}
                           disabled={saving}
-                          onClick={() => removeGridRow(rowIndex)}
+                          onClick={() => confirmRemoveGridRow(rowIndex)}
                         />
                         <Button
                           type="text"
@@ -711,27 +1148,45 @@ const GridTable: React.FC<GridTableProps> = ({
                           className="p-0 !text-white hover:!text-white/90"
                           icon={<DeleteOutlined />}
                           disabled={saving}
-                          onClick={() => removeGridRow(rowIndex)}
+                          onClick={() => confirmRemoveGridRow(rowIndex)}
+                        />
+                        <Button
+                          type="text"
+                          size="small"
+                          className="p-0 !text-white hover:!text-white/90"
+                          icon={<CopyOutlined />}
+                          disabled={saving || (!!activeEditRowKey && activeEditRowKey !== rowKey)}
+                          onClick={() => duplicateGridRow(rowIndex, rowKey)}
                         />
                       </>
                     )
                   )}
                   {mode !== 'db' && !isReadOnly && (
-                    <Button
-                      type="text"
-                      size="small"
-                      className="p-0 !text-white hover:!text-white/90"
-                      icon={<DeleteOutlined />}
-                      disabled={saving}
-                      onClick={() => removeGridRow(rowIndex)}
-                    />
+                    <>
+                      <Button
+                        type="text"
+                        size="small"
+                        className="p-0 !text-white hover:!text-white/90"
+                        icon={<DeleteOutlined />}
+                        disabled={saving}
+                        onClick={() => confirmRemoveGridRow(rowIndex)}
+                      />
+                      <Button
+                        type="text"
+                        size="small"
+                        className="p-0 !text-white hover:!text-white/90"
+                        icon={<CopyOutlined />}
+                        disabled={saving}
+                        onClick={() => duplicateGridRow(rowIndex, rowKey)}
+                      />
+                    </>
                   )}
                 </div>
               </div>
 
               {!collapsed && (
                 <div className="p-4 space-y-4">
-                  {specFields.length > 0 && (
+                  {shouldShowSpecs && specFields.length > 0 && (
                     <>
                       {isSpecsLocked && (
                         <div className="flex items-center gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -782,21 +1237,79 @@ const GridTable: React.FC<GridTableProps> = ({
                     </div>
                   )}
 
+                  {rowCanEdit && selectedPieceCount > 0 && (
+                    <div className="flex items-center justify-end gap-1 text-xs border border-gray-200 dark:border-gray-800 rounded-lg px-2 py-1 bg-gray-50 dark:bg-[#111]">
+                      <span className="text-gray-500 ml-1">{toPersianNumber(selectedPieceCount)} مورد انتخاب شد</span>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        danger
+                        onClick={() => deleteSelectedPieces(rowIndex)}
+                      />
+                      <Popover
+                        trigger="click"
+                        placement="bottom"
+                        getPopupContainer={() => document.body}
+                        open={pieceActionPopover?.rowKey === rowKey && pieceActionPopover?.action === 'move'}
+                        onOpenChange={(open) => {
+                          if (open) {
+                            setPieceActionPopover({ rowKey, action: 'move' });
+                            setTransferTargetMode('existing');
+                            setTransferTargetRowKey(existingTargetRows[0]?.value || null);
+                            setTransferTargetProductId(null);
+                            void loadTransferProductOptions(categoryValue);
+                          } else {
+                            closePieceActionPopover();
+                          }
+                        }}
+                        content={buildTransferPopoverContent('move')}
+                      >
+                        <Button type="text" size="small" icon={<SwapOutlined />} />
+                      </Popover>
+                      <Popover
+                        trigger="click"
+                        placement="bottom"
+                        getPopupContainer={() => document.body}
+                        open={pieceActionPopover?.rowKey === rowKey && pieceActionPopover?.action === 'copy'}
+                        onOpenChange={(open) => {
+                          if (open) {
+                            setPieceActionPopover({ rowKey, action: 'copy' });
+                            setTransferTargetMode('existing');
+                            setTransferTargetRowKey(existingTargetRows[0]?.value || null);
+                            setTransferTargetProductId(null);
+                            void loadTransferProductOptions(categoryValue);
+                          } else {
+                            closePieceActionPopover();
+                          }
+                        }}
+                        content={buildTransferPopoverContent('copy')}
+                      >
+                        <Button type="text" size="small" icon={<CopyOutlined />} />
+                      </Popover>
+                    </div>
+                  )}
+
                   <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
                     <Table
                       dataSource={row.pieces || []}
                       rowKey={(record: any, idx?: number) => record.key || idx}
                       pagination={false}
                       size="small"
+                      className="custom-erp-table"
                       scroll={{ x: true }}
                       columns={[
                         {
                           title: 'نام قطعه',
                           dataIndex: 'name',
                           key: 'name',
-                          width: 205,
+                          width: 220,
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <Input className="font-medium" value={val} onChange={(e) => updatePiece(rowIndex, pieceIndex, { name: e.target.value })} disabled={!rowCanEdit} />
+                            rowCanEdit ? (
+                              <Input className="font-medium" style={{ minWidth: 170 }} value={val} onChange={(e) => updatePiece(rowIndex, pieceIndex, { name: e.target.value })} />
+                            ) : (
+                              <Text className="font-medium whitespace-nowrap inline-block">{val || '-'}</Text>
+                            )
                           ),
                         },
                         {
@@ -804,7 +1317,9 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'length',
                           key: 'length',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })} disabled={!rowCanEdit} />
+                            rowCanEdit
+                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })} />
+                              : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
                         {
@@ -812,7 +1327,9 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'width',
                           key: 'width',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })} disabled={!rowCanEdit} />
+                            rowCanEdit
+                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })} />
+                              : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
                         {
@@ -820,7 +1337,9 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'quantity',
                           key: 'quantity',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })} disabled={!rowCanEdit} />
+                            rowCanEdit
+                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })} />
+                              : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
                         {
@@ -829,7 +1348,9 @@ const GridTable: React.FC<GridTableProps> = ({
                           key: 'waste_rate',
                           width: 90,
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })} disabled={!rowCanEdit} />
+                            rowCanEdit
+                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })} />
+                              : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
                         {
@@ -837,16 +1358,19 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'main_unit',
                           key: 'main_unit',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <Select
-                              value={val}
-                              options={unitOptions}
-                              onChange={(v) => updatePiece(rowIndex, pieceIndex, { main_unit: v })}
-                              onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
-                              disabled={!rowCanEdit}
-                              style={{ minWidth: 120 }}
-                              getPopupContainer={() => document.body}
-                              dropdownStyle={{ zIndex: 10050 }}
-                            />
+                            rowCanEdit ? (
+                              <Select
+                                value={val}
+                                options={unitOptions}
+                                onChange={(v) => updatePiece(rowIndex, pieceIndex, { main_unit: v })}
+                                onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
+                                style={{ minWidth: 120 }}
+                                getPopupContainer={() => document.body}
+                                dropdownStyle={{ zIndex: 10050 }}
+                              />
+                            ) : (
+                              <Text className="font-medium whitespace-nowrap inline-block">{val || '-'}</Text>
+                            )
                           ),
                         },
                         {
@@ -854,16 +1378,19 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'sub_unit',
                           key: 'sub_unit',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <Select
-                              value={val}
-                              options={unitOptions}
-                              onChange={(v) => updatePiece(rowIndex, pieceIndex, { sub_unit: v })}
-                              onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
-                              disabled={!rowCanEdit}
-                              style={{ minWidth: 120 }}
-                              getPopupContainer={() => document.body}
-                              dropdownStyle={{ zIndex: 10050 }}
-                            />
+                            rowCanEdit ? (
+                              <Select
+                                value={val}
+                                options={unitOptions}
+                                onChange={(v) => updatePiece(rowIndex, pieceIndex, { sub_unit: v })}
+                                onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
+                                style={{ minWidth: 120 }}
+                                getPopupContainer={() => document.body}
+                                dropdownStyle={{ zIndex: 10050 }}
+                              />
+                            ) : (
+                              <Text className="font-medium whitespace-nowrap inline-block">{val || '-'}</Text>
+                            )
                           ),
                         },
                         {
@@ -885,15 +1412,25 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'formula_id',
                           key: 'formula_id',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <Select
-                              value={val}
-                              options={dynamicOptions['calculation_formulas'] || []}
-                              onChange={(v) => updatePiece(rowIndex, pieceIndex, { formula_id: v })}
-                              disabled={!rowCanEdit}
-                              style={{ minWidth: 150 }}
-                              getPopupContainer={() => document.body}
-                              dropdownStyle={{ zIndex: 10050 }}
-                            />
+                            rowCanEdit ? (
+                              <Select
+                                value={val}
+                                options={dynamicOptions['calculation_formulas'] || []}
+                                onChange={(v) => updatePiece(rowIndex, pieceIndex, { formula_id: v })}
+                                style={{ minWidth: 150 }}
+                                getPopupContainer={() => document.body}
+                                dropdownStyle={{ zIndex: 10050 }}
+                              />
+                            ) : (
+                              <Text className="font-medium whitespace-nowrap inline-block">
+                                {getSingleOptionLabel(
+                                  { key: 'formula_id', type: FieldType.SELECT, options: dynamicOptions['calculation_formulas'] || [] } as any,
+                                  val,
+                                  dynamicOptions,
+                                  relationOptions
+                                ) || '-'}
+                              </Text>
+                            )
                           ),
                         },
                         {
@@ -909,7 +1446,9 @@ const GridTable: React.FC<GridTableProps> = ({
                             dataIndex: 'unit_price',
                             key: 'unit_price',
                             render: (val: any, _record: any, pieceIndex: number) => (
-                              <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })} disabled={!rowCanEdit} />
+                              rowCanEdit
+                                ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })} />
+                                : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>
                             ),
                           },
                           {
@@ -926,6 +1465,22 @@ const GridTable: React.FC<GridTableProps> = ({
                             width: 140,
                             render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
                           },
+                          ...(showDeliveredQtyColumn ? [{
+                            title: 'مقدار مصرف تحویل شده کل',
+                            dataIndex: 'delivered_qty',
+                            key: 'delivered_qty',
+                            width: 140,
+                            render: (val: any) => {
+                              const orderQty = toNumber(orderQuantity);
+                              const deliveredPerItem = toNumber(val);
+                              const deliveredTotal = orderQty > 0 ? deliveredPerItem * orderQty : deliveredPerItem;
+                              return (
+                                <Text className="persian-number font-medium whitespace-nowrap inline-block">
+                                  {formatQuantity(deliveredTotal)}
+                                </Text>
+                              );
+                            },
+                          }] : []),
                           {
                             title: 'هزینه کل',
                             dataIndex: 'total_cost',
@@ -934,27 +1489,29 @@ const GridTable: React.FC<GridTableProps> = ({
                             render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>,
                           },
                         ] : []),
-                        {
-                          title: '',
-                          key: 'actions',
-                          width: 52,
-                          fixed: 'right' as const,
-                          render: (_val: any, _record: any, pieceIndex: number) => (
-                            <Button
-                              type="text"
-                              icon={<DeleteOutlined />}
-                              danger
-                              disabled={!rowCanEdit}
-                              onClick={() => removePiece(rowIndex, pieceIndex)}
-                            />
-                          ),
-                        },
+                        ...(rowCanEdit ? [
+                          {
+                            title: '',
+                            key: 'select',
+                            width: 56,
+                            fixed: 'right' as const,
+                            render: (_val: any, record: any, pieceIndex: number) => {
+                              const pieceKey = String(record?.key || pieceIndex);
+                              return (
+                                <Checkbox
+                                  checked={selectedPieceKeys.includes(pieceKey)}
+                                  onChange={(e) => togglePieceSelected(rowKey, pieceKey, e.target.checked)}
+                                />
+                              );
+                            },
+                          },
+                        ] : []),
                       ]}
-                      footer={() => (
-                        <Button type="dashed" block icon={<PlusOutlined />} onClick={() => addPiece(rowIndex)} disabled={!rowCanEdit}>
+                      footer={rowCanEdit ? () => (
+                        <Button type="dashed" block icon={<PlusOutlined />} onClick={() => addPiece(rowIndex)}>
                           افزودن قطعه {categories.find((c) => c.value === categoryValue)?.label || ''}
                         </Button>
-                      )}
+                      ) : undefined}
                     />
                   </div>
 

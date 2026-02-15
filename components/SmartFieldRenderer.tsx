@@ -18,6 +18,49 @@ import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 
+const normalizeDigitsToEnglish = (raw: any): string => {
+  if (raw === null || raw === undefined) return '';
+  return String(raw)
+    .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
+    .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660));
+};
+
+const normalizeNumericString = (raw: any): string => {
+  if (raw === null || raw === undefined) return '';
+  const englishDigits = normalizeDigitsToEnglish(raw)
+    .replace(/[\u066C\u060C]/g, ',')
+    .replace(/\s+/g, '')
+    .replace(/,/g, '');
+
+  const sign = englishDigits.startsWith('-') ? '-' : '';
+  const unsigned = englishDigits.replace(/-/g, '');
+  const cleaned = unsigned.replace(/[^0-9.]/g, '');
+  const parts = cleaned.split('.');
+  const integerPart = parts[0] ?? '';
+  const decimalPart = parts.slice(1).join('');
+  const hasDot = cleaned.includes('.');
+  return `${sign}${integerPart}${hasDot ? `.${decimalPart}` : ''}`;
+};
+
+const formatNumericForInput = (raw: any, withGrouping = false): string => {
+  const normalized = normalizeNumericString(raw);
+  if (!normalized) return '';
+  if (!withGrouping) return toPersianNumber(normalized);
+  if (normalized === '-' || normalized === '.' || normalized === '-.') return toPersianNumber(normalized);
+
+  const sign = normalized.startsWith('-') ? '-' : '';
+  const unsigned = sign ? normalized.slice(1) : normalized;
+  const [integerPart = '', decimalPart] = unsigned.split('.');
+  const grouped = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const output = decimalPart !== undefined ? `${sign}${grouped}.${decimalPart}` : `${sign}${grouped}`;
+  return toPersianNumber(output);
+};
+
+const formatTextForInput = (raw: any): string => {
+  if (raw === null || raw === undefined) return '';
+  return toPersianNumber(normalizeDigitsToEnglish(raw));
+};
+
 interface SmartFieldRendererProps {
   field: ModuleField;
   value: any;
@@ -414,10 +457,24 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
     switch (fieldType) {
       case FieldType.TEXT:
-        return <Input {...commonProps} onChange={e => onChange(e.target.value)} allowClear />;
+        return (
+          <Input
+            {...commonProps}
+            value={formatTextForInput(value)}
+            onChange={e => onChange(normalizeDigitsToEnglish(e.target.value))}
+            allowClear
+          />
+        );
       
       case FieldType.LONG_TEXT:
-        return <Input.TextArea {...commonProps} onChange={e => onChange(e.target.value)} rows={compactMode ? 1 : 4} />;
+        return (
+          <Input.TextArea
+            {...commonProps}
+            value={formatTextForInput(value)}
+            onChange={e => onChange(normalizeDigitsToEnglish(e.target.value))}
+            rows={compactMode ? 1 : 4}
+          />
+        );
       
       case FieldType.NUMBER:
       case FieldType.PRICE:
@@ -429,8 +486,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 {...commonProps}
                 className="w-full" 
                 controls={false}
-                formatter={fieldType === FieldType.PRICE ? val => `${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : undefined}
-                parser={fieldType === FieldType.PRICE ? val => val!.replace(/\$\s?|(,*)/g, '') : undefined}
+                stringMode
+                inputMode="decimal"
+                formatter={(val, info) => formatNumericForInput(info?.input ?? val, fieldType === FieldType.PRICE)}
+                parser={(val) => normalizeNumericString(val)}
             />
         );
       case FieldType.SELECT:
@@ -662,7 +721,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return <Switch checked={!!value} onChange={onChange} disabled={!forceEditMode || isReadonly} />;
 
       default:
-        return <Input {...commonProps} onChange={e => onChange(e.target.value)} />;
+        return (
+          <Input
+            {...commonProps}
+            value={formatTextForInput(value)}
+            onChange={e => onChange(normalizeDigitsToEnglish(e.target.value))}
+          />
+        );
     }
   };
 
@@ -779,6 +844,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   onOk,
 }) => {
   const renderQuickField = (field: ModuleField) => {
+    const isDisabled = (field as any)?.readonly === true;
     const baseSelectProps = {
       showSearch: true,
       allowClear: true,
@@ -786,19 +852,44 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       getPopupContainer: () => document.body,
       dropdownStyle: { zIndex: 5000 },
       className: 'w-full',
+      disabled: isDisabled,
     };
 
     switch (field.type) {
       case FieldType.TEXT:
-        return <Input allowClear />;
+        return (
+          <Input
+            allowClear
+            disabled={isDisabled}
+            value={formatTextForInput(form.getFieldValue(field.key))}
+            onChange={(e) => form.setFieldValue(field.key, normalizeDigitsToEnglish(e.target.value))}
+          />
+        );
       case FieldType.LONG_TEXT:
-        return <Input.TextArea rows={2} />;
+        return (
+          <Input.TextArea
+            rows={2}
+            disabled={isDisabled}
+            value={formatTextForInput(form.getFieldValue(field.key))}
+            onChange={(e) => form.setFieldValue(field.key, normalizeDigitsToEnglish(e.target.value))}
+          />
+        );
       case FieldType.NUMBER:
       case FieldType.PRICE:
       case FieldType.PERCENTAGE:
       case FieldType.PERCENTAGE_OR_AMOUNT:
       case FieldType.STOCK:
-        return <InputNumber className="w-full" controls={false} />;
+        return (
+          <InputNumber
+            className="w-full"
+            controls={false}
+            disabled={isDisabled}
+            stringMode
+            inputMode="decimal"
+            formatter={(val, info) => formatNumericForInput(info?.input ?? val, field.type === FieldType.PRICE)}
+            parser={(val) => normalizeNumericString(val)}
+          />
+        );
       case FieldType.SELECT:
       case FieldType.STATUS: {
         const opts = field.dynamicOptionsCategory
@@ -815,15 +906,22 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       case FieldType.RELATION:
         return <Select {...baseSelectProps} options={relationOptions[field.key] || []} />;
       case FieldType.DATE:
-        return <Input placeholder="YYYY-MM-DD" />;
+        return <Input placeholder="YYYY-MM-DD" disabled={isDisabled} />;
       case FieldType.TIME:
-        return <Input placeholder="HH:mm" />;
+        return <Input placeholder="HH:mm" disabled={isDisabled} />;
       case FieldType.DATETIME:
-        return <Input placeholder="YYYY-MM-DD HH:mm" />;
+        return <Input placeholder="YYYY-MM-DD HH:mm" disabled={isDisabled} />;
       case FieldType.CHECKBOX:
-        return <Switch />;
+        return <Switch disabled={isDisabled} />;
       default:
-        return <Input allowClear />;
+        return (
+          <Input
+            allowClear
+            disabled={isDisabled}
+            value={formatTextForInput(form.getFieldValue(field.key))}
+            onChange={(e) => form.setFieldValue(field.key, normalizeDigitsToEnglish(e.target.value))}
+          />
+        );
     }
   };
 

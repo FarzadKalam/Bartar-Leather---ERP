@@ -19,6 +19,9 @@ interface TablesSectionProps {
   onDataUpdate?: (patch: Record<string, any>) => void;
 }
 
+const shouldShowInvoiceSummary = (summaryConfig: any) =>
+  summaryConfig?.calculationType === SummaryCalculationType.INVOICE_FINANCIALS;
+
 const TablesSection: React.FC<TablesSectionProps> = ({
   module,
   data,
@@ -107,6 +110,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
       {module.blocks
         ?.filter((b: any) => b.type === 'table' || b.type === 'grid_table')
         .filter((b: any) => !(module.id === 'products' && b.id === 'product_stock_movements'))
+        .filter((b: any) => !(module.id === 'shelves' && b.id === 'shelf_stock_movements'))
         .filter((b: any) => (b.visibleIf ? checkVisibility(b.visibleIf) : true))
           .map((block: any) => (
         <div key={block.id}>
@@ -122,6 +126,8 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               canEditModule={canEditModule && !(productionLocked && String(block.id).startsWith('items_'))}
               canViewField={canViewField}
               orderQuantity={module.id === 'production_orders' ? (data?.quantity || 0) : 0}
+              showDeliveredQtyColumn={module.id === 'production_orders' && ['in_progress', 'completed'].includes(String(data?.status || ''))}
+              forceProductionOrderMode={module.id === 'products'}
               onSaveSuccess={(newData) => onDataUpdate?.({ [block.id]: newData })}
             />
           ) : (
@@ -140,7 +146,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
         </div>
       ))}
 
-      {summaryData && (
+      {summaryData && shouldShowInvoiceSummary(summaryConfig) && (
           <SummaryCard 
             type={summaryConfig.calculationType || SummaryCalculationType.SUM_ALL_ROWS} 
             data={summaryData} 

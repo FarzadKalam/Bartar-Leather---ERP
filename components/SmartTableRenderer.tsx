@@ -13,6 +13,7 @@ import type { InputRef } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
 import ProductionStagesField from './ProductionStagesField';
+import RelatedRecordPopover from './RelatedRecordPopover';
 
 interface SmartTableRendererProps {
   moduleConfig: ModuleDefinition | null | undefined;
@@ -303,7 +304,15 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
         }
         if (field.type === FieldType.RELATION) {
             const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions);
-            return <span className="text-xs text-leather-600 hover:underline font-medium">{label}</span>;
+            const targetModule = (field as any)?.relationConfig?.targetModule;
+            if (!targetModule || !value) {
+              return <span className="text-xs text-leather-600 hover:underline font-medium">{label}</span>;
+            }
+            return (
+              <RelatedRecordPopover moduleId={targetModule} recordId={String(value)} label={String(label || value)}>
+                <span className="text-xs text-leather-600 hover:underline font-medium">{label}</span>
+              </RelatedRecordPopover>
+            );
         }
         if (field.type === FieldType.USER) {
             if (!value) return '-';
@@ -312,7 +321,11 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
               relationOptions[field.key]?.find((o: any) => o.value === value)?.label ||
               relationOptions['profiles']?.find((o: any) => o.value === value)?.label || 
               value;
-            return <span className="text-xs text-leather-600 hover:underline font-medium">{userLabel}</span>;
+            return (
+              <RelatedRecordPopover moduleId="profiles" recordId={String(value)} label={String(userLabel)}>
+                <span className="text-xs text-leather-600 hover:underline font-medium">{userLabel}</span>
+              </RelatedRecordPopover>
+            );
         }
         if (field.type === FieldType.PROGRESS_STAGES) {
              return (

@@ -3,6 +3,7 @@ import { Popover, Spin, Button } from 'antd';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import { FieldType } from '../types';
+import SmartFieldRenderer from './SmartFieldRenderer';
 
 interface RelatedRecordPopoverProps {
   moduleId: string;
@@ -11,21 +12,28 @@ interface RelatedRecordPopoverProps {
   children?: React.ReactNode;
 }
 
+const isEmptyValue = (value: any) => (
+  value === null
+  || value === undefined
+  || value === ''
+  || (Array.isArray(value) && value.length === 0)
+);
+
 const RelatedRecordPopover: React.FC<RelatedRecordPopoverProps> = ({ moduleId, recordId, label, children }) => {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [record, setRecord] = useState<any>(null);
-  const [assigneeLabel, setAssigneeLabel] = useState<string | null>(null);
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, { label: string; value: string }[]>>({});
-  const [relationLabels, setRelationLabels] = useState<Record<string, string>>({});
+  const [relationOptions, setRelationOptions] = useState<Record<string, { label: string; value: string }[]>>({});
 
   const moduleConfig = MODULES[moduleId];
-
   const fields = useMemo(() => (moduleConfig?.fields || []).filter((f) => f.isTableColumn), [moduleConfig]);
 
   useEffect(() => {
-    const loadRecord = async () => {
-      if (!open || !moduleConfig || !recordId) return;
+    if (!open || !moduleConfig || !recordId) return;
+    let cancelled = false;
+
+    const loadData = async () => {
       setLoading(true);
       try {
         const { data, error } = await supabase
@@ -34,98 +42,144 @@ const RelatedRecordPopover: React.FC<RelatedRecordPopoverProps> = ({ moduleId, r
           .eq('id', recordId)
           .single();
         if (error) throw error;
+        if (cancelled) return;
         setRecord(data || null);
 
-        if (data?.assignee_id) {
-          if (data.assignee_type === 'role') {
-            const { data: role } = await supabase
-              .from('org_roles')
-              .select('title')
-              .eq('id', data.assignee_id)
-              .single();
-            setAssigneeLabel(role?.title || null);
-          } else {
-            const { data: user } = await supabase
-              .from('profiles')
-              .select('full_name')
-              .eq('id', data.assignee_id)
-              .single();
-            setAssigneeLabel(user?.full_name || null);
-          }
-        } else {
-          setAssigneeLabel(null);
-        }
-
-        const categories = new Set<string>();
-        fields.forEach((f: any) => {
-          if (f.dynamicOptionsCategory) categories.add(f.dynamicOptionsCategory);
+        const categorySet = new Set<string>();
+        fields.forEach((field: any) => {
+          if (field.dynamicOptionsCategory) categorySet.add(String(field.dynamicOptionsCategory));
         });
 
-        const dyn: Record<string, { label: string; value: string }[]> = {};
-        for (const cat of Array.from(categories)) {
-          const { data: options } = await supabase
-            .from('dynamic_options')
-            .select('label, value')
-            .eq('category', cat)
-            .eq('is_active', true)
-            .order('display_order', { ascending: true });
-          dyn[cat] = options || [];
+        const dynEntries = await Promise.all(
+          Array.from(categorySet).map(async (category) => {
+            const { data: options } = await supabase
+              .from('dynamic_options')
+              .select('label, value')
+              .eq('category', category)
+              .eq('is_active', true)
+              .order('display_order', { ascending: true });
+            return [category, (options || []).map((option: any) => ({
+              label: String(option?.label || ''),
+              value: String(option?.value || ''),
+            }))] as const;
+          })
+        );
+        if (!cancelled) {
+          setDynamicOptions(Object.fromEntries(dynEntries));
         }
-        setDynamicOptions(dyn);
 
-        const relLabels: Record<string, string> = {};
-        for (const f of fields) {
-          if (f.type !== FieldType.RELATION || !f.relationConfig?.targetModule || !data?.[f.key]) continue;
-          const targetField = f.relationConfig.targetField || 'name';
-          const { data: rel } = await supabase
-            .from(f.relationConfig.targetModule)
-            .select(targetField)
-            .eq('id', data[f.key])
-            .single();
-          if (rel && (rel as Record<string, any>)[targetField]) {
-            relLabels[f.key] = String((rel as Record<string, any>)[targetField]);
-          }
+        const relationEntries = await Promise.all(
+          fields
+            .filter((field: any) => field.type === FieldType.RELATION || field.type === FieldType.USER)
+            .map(async (field: any) => {
+              const rawValue = data?.[field.key];
+              if (isEmptyValue(rawValue)) return [field.key, []] as const;
+
+              const normalizedValues = Array.isArray(rawValue)
+                ? rawValue.map((item) => String(item))
+                : [String(rawValue)];
+
+              const targetModule = field.type === FieldType.USER
+                ? 'profiles'
+                : String(field?.relationConfig?.targetModule || '');
+              if (!targetModule) return [field.key, []] as const;
+
+              const targetField = field.type === FieldType.USER
+                ? 'full_name'
+                : String(field?.relationConfig?.targetField || 'name');
+
+              const targetModuleConfig = MODULES[targetModule];
+              const targetTable = targetModuleConfig?.table || targetModule;
+              const selectFields = Array.from(new Set(['id', targetField, 'system_code'])).join(', ');
+
+              const { data: relatedRows } = await supabase
+                .from(targetTable)
+                .select(selectFields)
+                .in('id', normalizedValues);
+
+              const byId = new Map<string, { label: string; value: string }>();
+              (relatedRows || []).forEach((row: any) => {
+                const id = String(row?.id || '');
+                if (!id) return;
+                const baseLabel = String(
+                  row?.[targetField]
+                  || row?.name
+                  || row?.title
+                  || row?.business_name
+                  || row?.full_name
+                  || row?.system_code
+                  || id
+                );
+                const systemCode = row?.system_code ? String(row.system_code) : '';
+                const finalLabel = systemCode && !baseLabel.includes(systemCode)
+                  ? `${baseLabel} (${systemCode})`
+                  : baseLabel;
+                byId.set(id, { label: finalLabel, value: id });
+              });
+
+              const options = normalizedValues.map((id) => byId.get(id) || { label: id, value: id });
+              return [field.key, options] as const;
+            })
+        );
+
+        if (!cancelled) {
+          setRelationOptions(Object.fromEntries(relationEntries));
         }
-        setRelationLabels(relLabels);
       } catch (err) {
         console.error(err);
-        setRecord(null);
-        setAssigneeLabel(null);
+        if (!cancelled) {
+          setRecord(null);
+          setDynamicOptions({});
+          setRelationOptions({});
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    loadRecord();
-  }, [open, moduleConfig, recordId, fields]);
+    loadData();
+    return () => {
+      cancelled = true;
+    };
+  }, [fields, moduleConfig, moduleId, open, recordId]);
 
-  const renderValue = (field: any, value: any) => {
-    if (value === null || value === undefined || value === '') return '-';
-    if (field?.type === FieldType.RELATION) {
-      return relationLabels[field.key] || '-';
+  const renderFieldValue = (field: any) => {
+    const value = record?.[field.key];
+    if (isEmptyValue(value)) {
+      return <span className="text-gray-400">-</span>;
     }
-    if ((field?.type === FieldType.SELECT || field?.type === FieldType.MULTI_SELECT) && field.dynamicOptionsCategory) {
-      const opts = dynamicOptions[field.dynamicOptionsCategory] || [];
-      if (Array.isArray(value)) {
-        return value
-          .map((v) => opts.find((o) => o.value === v)?.label)
-          .filter(Boolean)
-          .join('، ') || '-';
-      }
-      return opts.find((o) => o.value === value)?.label || '-';
+
+    if (typeof value === 'object' && !Array.isArray(value) && field.type !== FieldType.DATE && field.type !== FieldType.DATETIME && field.type !== FieldType.TIME) {
+      return <span className="font-medium">{JSON.stringify(value)}</span>;
     }
-    if (field?.options) {
-      if (Array.isArray(value)) {
-        return value
-          .map((v) => field.options?.find((o: any) => o.value === v)?.label)
-          .filter(Boolean)
-          .join('، ') || '-';
-      }
-      return field.options?.find((o: any) => o.value === value)?.label || '-';
-    }
-    if (Array.isArray(value)) return value.join('، ');
-    if (typeof value === 'object') return JSON.stringify(value);
-    return String(value);
+
+    const normalizedField = field.type === FieldType.USER
+      ? {
+          ...field,
+          type: FieldType.RELATION,
+          relationConfig: { targetModule: 'profiles', targetField: 'full_name' },
+        }
+      : field;
+
+    const fieldOptions = normalizedField.dynamicOptionsCategory
+      ? (dynamicOptions[normalizedField.dynamicOptionsCategory] || [])
+      : (normalizedField.type === FieldType.RELATION
+        ? (relationOptions[normalizedField.key] || [])
+        : (normalizedField.options || []));
+
+    return (
+      <SmartFieldRenderer
+        field={normalizedField}
+        value={value}
+        onChange={() => undefined}
+        forceEditMode={false}
+        compactMode
+        options={fieldOptions}
+        allValues={record || {}}
+        recordId={recordId}
+        moduleId={moduleId}
+      />
+    );
   };
 
   const content = (
@@ -134,18 +188,14 @@ const RelatedRecordPopover: React.FC<RelatedRecordPopoverProps> = ({ moduleId, r
         <div className="py-6 flex items-center justify-center"><Spin size="small" /></div>
       ) : (
         <div className="space-y-2 text-xs text-gray-700">
-          {fields.map((f) => (
-            <div key={f.key} className="flex items-start justify-between gap-3">
-              <span className="text-gray-500">{f.labels?.fa || f.key}</span>
-              <span className="text-gray-800 font-medium text-right">{renderValue(f, record?.[f.key])}</span>
+          {fields.map((field) => (
+            <div key={field.key} className="flex items-start justify-between gap-3">
+              <span className="text-gray-500 shrink-0">{field.labels?.fa || field.key}</span>
+              <div className="text-gray-800 font-medium text-right min-w-0 break-words">
+                {renderFieldValue(field)}
+              </div>
             </div>
           ))}
-          {assigneeLabel && (
-            <div className="flex items-start justify-between gap-3">
-              <span className="text-gray-500">مسئول</span>
-              <span className="text-gray-800 font-medium text-right">{assigneeLabel}</span>
-            </div>
-          )}
           <div className="pt-2 flex justify-end">
             <Button size="small" type="link" onClick={() => window.open(`/${moduleId}/${recordId}`, '_blank')}>
               نمایش کامل

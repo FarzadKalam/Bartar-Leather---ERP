@@ -246,16 +246,22 @@ ADD COLUMN IF NOT EXISTS items_accessory jsonb,
 ADD COLUMN IF NOT EXISTS items_labor jsonb;
 
 -- ذخیره جمع کل (برآورد هزینه) سفارش تولید
-ALTER TABLE public.production_orders
+ALTER TABLE IF EXISTS public.production_orders
 ADD COLUMN IF NOT EXISTS production_cost numeric;
 
 -- ستون‌های گردش کار تولید
-ALTER TABLE public.production_orders
+ALTER TABLE IF EXISTS public.production_orders
 ADD COLUMN IF NOT EXISTS production_shelf_id uuid REFERENCES public.shelves(id),
 ADD COLUMN IF NOT EXISTS production_moves jsonb,
 ADD COLUMN IF NOT EXISTS production_output_product_id uuid REFERENCES public.products(id),
 ADD COLUMN IF NOT EXISTS production_output_shelf_id uuid REFERENCES public.shelves(id),
 ADD COLUMN IF NOT EXISTS production_output_qty numeric;
+
+-- Production lifecycle timestamps
+ALTER TABLE IF EXISTS public.production_orders
+ADD COLUMN IF NOT EXISTS production_started_at timestamptz,
+ADD COLUMN IF NOT EXISTS production_stopped_at timestamptz,
+ADD COLUMN IF NOT EXISTS production_completed_at timestamptz;
 
 -- اضافه کردن فیلد تصویر به محصولات و مشتریان
 ALTER TABLE public.products ADD COLUMN image_url text;
