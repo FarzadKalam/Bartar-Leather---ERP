@@ -227,6 +227,34 @@ const ModuleShow: React.FC = () => {
       .filter((group: StartMaterialGroup) => group.pieces.length > 0);
   }, [categoryLabelMap, getRowSelectedProduct]);
 
+  const askStartWarning = useCallback((content: string) => {
+    return new Promise<boolean>((resolve) => {
+      modal.confirm({
+        title: 'تایید ادامه',
+        content,
+        okText: 'ادامه',
+        cancelText: 'انصراف',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+  }, [modal]);
+
+  const isConfiguredMaterialRow = useCallback((row: any) => {
+    const category = String(row?.header?.category || '').trim();
+    const { selectedProductId } = getRowSelectedProduct(row);
+    const pieces = Array.isArray(row?.pieces) ? row.pieces : [];
+    const hasPieceData = pieces.some((piece: any) => {
+      const name = String(piece?.name || '').trim();
+      const length = toNumber(piece?.length);
+      const width = toNumber(piece?.width);
+      const quantity = toNumber(piece?.quantity);
+      const usage = toNumber(piece?.final_usage ?? piece?.total_usage);
+      return name.length > 0 || length > 0 || width > 0 || usage > 0 || quantity > 1;
+    });
+    return !!category || !!selectedProductId || hasPieceData;
+  }, [getRowSelectedProduct]);
+
   const updateStartMaterialDelivered = useCallback((groupIndex: number, pieceIndex: number, value: number | null) => {
     setStartMaterials((prev) => {
       const next = [...prev];
@@ -545,6 +573,51 @@ const ModuleShow: React.FC = () => {
         } catch (err) {
           console.warn('Could not refresh production order before opening modal', err);
         }
+      }
+
+      const materialRows = Array.isArray(modalRecord?.grid_materials) ? modalRecord.grid_materials : [];
+      const configuredRows = materialRows.filter((row: any) => isConfiguredMaterialRow(row));
+      const missingProductCount = configuredRows.filter((row: any) => !getRowSelectedProduct(row).selectedProductId).length;
+      if (missingProductCount > 0) {
+        const shouldContinue = await askStartWarning(
+          `برای ${toPersianNumber(missingProductCount)} تعداد از مواد اولیه ای که ثبت کرده اید، محصول انتخاب نشده، آیا ادامه می دهید؟`
+        );
+        if (!shouldContinue) return;
+      }
+
+      const draftStages = Array.isArray(modalRecord?.production_stages_draft)
+        ? modalRecord.production_stages_draft.filter((stage: any) => String(stage?.name || stage?.title || '').trim() !== '')
+        : [];
+      let hasIncompleteTasks = false;
+      let hasProductionLine = true;
+      if (id) {
+        const [{ data: tasksData, error: tasksError }, { data: linesData, error: linesError }] = await Promise.all([
+          supabase
+            .from('tasks')
+            .select('id, status')
+            .eq('related_production_order', id),
+          supabase
+            .from('production_lines')
+            .select('id')
+            .eq('production_order_id', id)
+            .limit(1),
+        ]);
+        if (!tasksError) {
+          const pendingTasks = (tasksData || []).filter((task: any) => {
+            const normalized = String(task?.status || '').toLowerCase();
+            return normalized !== 'done' && normalized !== 'completed';
+          });
+          hasIncompleteTasks = pendingTasks.length > 0;
+        }
+        if (!linesError) {
+          hasProductionLine = Array.isArray(linesData) && linesData.length > 0;
+        }
+      }
+      if (draftStages.length > 0 || hasIncompleteTasks || !hasProductionLine) {
+        const shouldContinue = await askStartWarning(
+          'برای این سفارش، خط تولید تکمیل نشده و یک یا چند وظیفه در حالت پیش نویس هستند، آیا ادامه می دهید؟'
+        );
+        if (!shouldContinue) return;
       }
 
       const qtyFromLines = await fetchProductionQuantity();

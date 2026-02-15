@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, InputNumber, Select, Spin, Table, Typography, message } from 'antd';
-import { PlusOutlined, SaveOutlined, CloseOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined } from '@ant-design/icons';
+import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { BlockDefinition, FieldType } from '../types';
 import { MODULES } from '../moduleRegistry';
@@ -81,7 +81,7 @@ const GridTable: React.FC<GridTableProps> = ({
 }) => {
   const isReadOnly = readOnly === true || canEditModule === false || block?.readonly === true;
   const isProductionOrder = moduleId === 'production_orders';
-  const [isEditing, setIsEditing] = useState(mode === 'local' && !isReadOnly);
+  const [activeEditRowKey, setActiveEditRowKey] = useState<string | null>(null);
   const [data, setData] = useState<any[]>(Array.isArray(initialData) ? initialData : []);
   const [tempData, setTempData] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
@@ -116,7 +116,8 @@ const GridTable: React.FC<GridTableProps> = ({
     }));
     const next = normalized.length > 0 ? normalized : [createEmptyRow()];
     setData(next);
-    if (mode === 'local') setTempData(next);
+    setTempData(next);
+    setActiveEditRowKey(null);
   }, [initialData, mode]);
 
   const categories = block?.gridConfig?.categories || [];
@@ -128,9 +129,22 @@ const GridTable: React.FC<GridTableProps> = ({
   };
 
   const updateGrid = (nextData: any[]) => {
-    if (isEditing) setTempData(nextData);
-    else setData(nextData);
-    if (mode === 'local' && onChange) onChange(nextData);
+    setTempData(nextData);
+    if (mode === 'local') {
+      setData(nextData);
+      if (onChange) onChange(nextData);
+      return;
+    }
+    if (mode === 'db' && !activeEditRowKey) {
+      setData(nextData);
+    }
+  };
+
+  const getWorkingData = () => {
+    if (mode === 'db') {
+      return activeEditRowKey ? tempData : data;
+    }
+    return tempData;
   };
 
   const formatQuantity = (value: any, decimals = 2) => {
@@ -201,7 +215,7 @@ const GridTable: React.FC<GridTableProps> = ({
   };
 
   const updateRow = (rowIndex: number, patch: Record<string, any>) => {
-    const source = isEditing ? tempData : data;
+    const source = getWorkingData();
     const nextData = [...source];
     const row = { ...nextData[rowIndex], ...patch };
     if (patch.header || patch.specs) {
@@ -212,7 +226,7 @@ const GridTable: React.FC<GridTableProps> = ({
   };
 
   const updatePiece = (rowIndex: number, pieceIndex: number, patch: Record<string, any>) => {
-    const source = isEditing ? tempData : data;
+    const source = getWorkingData();
     const nextData = [...source];
     const row = { ...nextData[rowIndex] };
     const pieces = Array.isArray(row.pieces) ? [...row.pieces] : [];
@@ -223,7 +237,7 @@ const GridTable: React.FC<GridTableProps> = ({
   };
 
   const addPiece = (rowIndex: number) => {
-    const source = isEditing ? tempData : data;
+    const source = getWorkingData();
     const nextData = [...source];
     const row = { ...nextData[rowIndex] };
     const pieces = Array.isArray(row.pieces) ? [...row.pieces] : [];
@@ -236,42 +250,81 @@ const GridTable: React.FC<GridTableProps> = ({
   const addGridRow = () => {
     if (isReadOnly) return;
     const newRow = createEmptyRow();
-    const source = isEditing ? tempData : data;
+    const source = getWorkingData();
     const nextData = [...source, newRow];
     updateGrid(nextData);
   };
 
   const removeGridRow = (rowIndex: number) => {
     if (isReadOnly) return;
-    const source = isEditing ? tempData : data;
+    const source = getWorkingData();
     const nextData = [...source];
+    const removedKey = String(nextData[rowIndex]?.key || rowIndex);
     nextData.splice(rowIndex, 1);
+    if (mode === 'db' && !activeEditRowKey) {
+      setSaving(true);
+      void (async () => {
+        try {
+          await persistGridRows(nextData, 'حذف شد');
+        } catch (e: any) {
+          message.error(e.message || 'خطا در حذف');
+        } finally {
+          setSaving(false);
+        }
+      })();
+      return;
+    }
+    if (mode === 'db' && activeEditRowKey === removedKey) {
+      const nextRowKey = nextData[0] ? String(nextData[0].key || 0) : null;
+      setActiveEditRowKey(nextRowKey);
+    }
     updateGrid(nextData);
   };
 
-  const startEdit = () => {
-    if (isReadOnly) return;
-    setIsEditing(true);
-    setTempData(JSON.parse(JSON.stringify(data)));
+  const removePiece = (rowIndex: number, pieceIndex: number) => {
+    const source = getWorkingData();
+    const nextData = [...source];
+    const row = { ...nextData[rowIndex] };
+    const pieces = Array.isArray(row.pieces) ? [...row.pieces] : [];
+    pieces.splice(pieceIndex, 1);
+    row.pieces = pieces.length > 0 ? pieces : [{ key: Date.now(), ...defaultPiece() }];
+    nextData[rowIndex] = applyCalculations(row);
+    updateGrid(nextData);
   };
 
-  const cancelEdit = () => {
-    setIsEditing(false);
-    setTempData([]);
+  const startEditRow = (rowKey: string) => {
+    if (isReadOnly || mode !== 'db') return;
+    if (activeEditRowKey && activeEditRowKey !== rowKey) {
+      message.warning('ابتدا تغییرات ردیف در حال ویرایش را ثبت کنید.');
+      return;
+    }
+    setTempData(JSON.parse(JSON.stringify(data)));
+    setActiveEditRowKey(rowKey);
+  };
+
+  const cancelEditRow = () => {
+    setTempData(JSON.parse(JSON.stringify(data)));
+    setActiveEditRowKey(null);
+  };
+
+  const persistGridRows = async (rows: any[], successMessage = 'ذخیره شد') => {
+    if (!moduleId || !recordId) throw new Error('رکورد یافت نشد');
+    const payload = (rows || []).map(({ key, ...rest }: any) => rest);
+    const { error } = await supabase.from(moduleId).update({ [block.id]: payload }).eq('id', recordId);
+    if (error) throw error;
+    setData(payload);
+    setTempData(payload);
+    if (onSaveSuccess) onSaveSuccess(payload);
+    message.success(successMessage);
   };
 
   const handleSave = async () => {
     if (mode === 'local' || mode === 'external_view') return;
+    if (!activeEditRowKey) return;
     setSaving(true);
     try {
-      if (!moduleId || !recordId) throw new Error('رکورد یافت نشد');
-      const payload = (tempData || []).map(({ key, ...rest }: any) => rest);
-      const { error } = await supabase.from(moduleId).update({ [block.id]: payload }).eq('id', recordId);
-      if (error) throw error;
-      setData(payload);
-      setIsEditing(false);
-      if (onSaveSuccess) onSaveSuccess(payload);
-      message.success('ذخیره شد');
+      await persistGridRows(tempData, 'ذخیره شد');
+      setActiveEditRowKey(null);
     } catch (e: any) {
       message.error(e.message || 'خطا در ذخیره');
     } finally {
@@ -286,7 +339,7 @@ const GridTable: React.FC<GridTableProps> = ({
   };
 
   const applySelectedProduct = async (rowIndex: number, productId: string | null) => {
-    const source = isEditing ? tempData : data;
+    const source = getWorkingData();
     const nextData = [...source];
     const row = { ...nextData[rowIndex] };
 
@@ -358,7 +411,7 @@ const GridTable: React.FC<GridTableProps> = ({
 
   useEffect(() => {
     if (!isProductionOrder || productOptionsLoading) return;
-    const source = isEditing ? tempData : data;
+    const source = mode === 'db' ? (activeEditRowKey ? tempData : data) : tempData;
     const selectedIds = Array.from(
       new Set(
         (source || [])
@@ -396,7 +449,7 @@ const GridTable: React.FC<GridTableProps> = ({
       }
     };
     fetchMissingSelected();
-  }, [isProductionOrder, isEditing, tempData, data, productOptions, productOptionsLoading]);
+  }, [isProductionOrder, mode, activeEditRowKey, tempData, data, productOptions, productOptionsLoading]);
 
   const ensureDynamicOptions = async (categoriesToLoad: string[]) => {
     const missing = categoriesToLoad.filter(
@@ -456,7 +509,7 @@ const GridTable: React.FC<GridTableProps> = ({
 
   if (loading) return <div className="p-6 text-center"><Spin /></div>;
 
-  const sourceData = isEditing ? tempData : data;
+  const sourceData = mode === 'db' ? (activeEditRowKey ? tempData : data) : tempData;
   const rowHeaderBarStyle = { backgroundColor: '#8b5e3c' };
 
   return (
@@ -468,17 +521,6 @@ const GridTable: React.FC<GridTableProps> = ({
             {block.titles.fa}
           </h3>
         </div>
-        <div className="flex items-center gap-2">
-          {mode === 'db' && !isEditing && !isReadOnly && (
-            <Button size="small" icon={<EditOutlined />} onClick={startEdit}>ویرایش لیست</Button>
-          )}
-          {isEditing && mode !== 'local' && (
-            <>
-              <Button type="primary" onClick={handleSave} loading={saving} icon={<SaveOutlined />}>ذخیره</Button>
-              <Button onClick={cancelEdit} disabled={saving} icon={<CloseOutlined />}>انصراف</Button>
-            </>
-          )}
-        </div>
       </div>
 
       {sourceData.length === 0 && (
@@ -489,6 +531,9 @@ const GridTable: React.FC<GridTableProps> = ({
 
       <div className="space-y-4">
         {sourceData.map((row: any, rowIndex: number) => {
+          const rowKey = String(row.key || rowIndex);
+          const isRowEditing = mode === 'db' && activeEditRowKey === rowKey;
+          const rowCanEdit = !isReadOnly && (mode === 'local' || isRowEditing);
           const categoryValue = row.header?.category || null;
           let specFields = getSpecFields(categoryValue);
           if (moduleId === 'production_boms') {
@@ -505,7 +550,7 @@ const GridTable: React.FC<GridTableProps> = ({
           }
 
           return (
-            <div key={row.key || rowIndex} className="border border-gray-200 dark:border-gray-800 rounded-2xl overflow-hidden">
+            <div key={row.key || rowIndex} className="border border-[#8b5e3c] rounded-2xl overflow-hidden">
               <div
                 id={`grid-row-${row.key || rowIndex}`}
                 className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-white"
@@ -529,22 +574,30 @@ const GridTable: React.FC<GridTableProps> = ({
                     icon={<RightOutlined className={`transition-transform text-white ${collapsed ? '' : 'rotate-90'}`} />}
                   />
                   <span className="text-xs text-white">دسته‌بندی مواد اولیه</span>
-                  <Select
-                    value={categoryValue}
-                    onChange={(val) => updateRow(rowIndex, { header: { ...row.header, category: val }, specs: {}, pieces: [defaultPiece()], collapsed: false })}
-                    options={categories.map((c) => ({ label: c.label, value: c.value }))}
-                    placeholder="انتخاب کنید"
-                    className="min-w-[160px]"
-                    disabled={isReadOnly}
-                    getPopupContainer={() => document.body}
-                    dropdownStyle={{ zIndex: 10050 }}
-                  />
+                  {rowCanEdit ? (
+                    <Select
+                      value={categoryValue}
+                      onChange={(val) => updateRow(rowIndex, { header: { ...row.header, category: val }, specs: {}, pieces: [defaultPiece()], collapsed: false })}
+                      options={categories.map((c) => ({ label: c.label, value: c.value }))}
+                      placeholder="انتخاب کنید"
+                      className="min-w-[160px]"
+                      getPopupContainer={() => document.body}
+                      dropdownStyle={{ zIndex: 10050 }}
+                    />
+                  ) : (
+                    <span className="min-w-[160px] text-xs text-white truncate">
+                      {categories.find((c) => c.value === categoryValue)?.label || '-'}
+                    </span>
+                  )}
                   {isProductionOrder && (
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full">
                       {(() => {
                         const selectedId = row.header?.selected_product_id || null;
                         const selectedName = row.header?.selected_product_name || null;
                         const rawOptions = (productOptions.length ? productOptions : (relationOptions['products'] || []));
+                        const selectedFromRaw = selectedId
+                          ? rawOptions.find((o: any) => o.value === selectedId)
+                          : null;
                         const filteredOptions = rawOptions
                           .filter((o: any) => {
                             if (o.product_type && o.product_type !== 'raw') return false;
@@ -559,8 +612,15 @@ const GridTable: React.FC<GridTableProps> = ({
                         if (selectedId && !hasSelected) {
                           filteredOptions.unshift({
                             value: selectedId,
-                            label: selectedName || String(selectedId),
+                            label: selectedName || selectedFromRaw?.label || String(selectedId),
                           });
+                        }
+                        if (!rowCanEdit) {
+                          return (
+                            <span className="min-w-[200px] w-full sm:w-auto text-xs text-white truncate">
+                              {selectedFromRaw?.label || selectedName || '-'}
+                            </span>
+                          );
                         }
                         return (
                       <Select
@@ -575,23 +635,25 @@ const GridTable: React.FC<GridTableProps> = ({
                           if (open && productOptions.length === 0) loadProductOptions();
                         }}
                         onChange={(val) => applySelectedProduct(rowIndex, val)}
-                        disabled={isReadOnly}
+                        disabled={!rowCanEdit}
                         getPopupContainer={() => document.body}
                         dropdownStyle={{ zIndex: 10050 }}
                       />
                         );
                       })()}
-                      <QrScanPopover
-                        label=""
-                        buttonClassName="shrink-0 !text-white hover:!text-white/90"
-                        onScan={async (scan) => {
-                          if (scan.recordId && scan.moduleId === 'products') {
-                            await applySelectedProduct(rowIndex, scan.recordId);
-                          }
-                        }}
-                        buttonProps={{ type: 'text', size: 'small' }}
-                      />
-                      {row.header?.selected_product_id && (
+                      {rowCanEdit && (
+                        <QrScanPopover
+                          label=""
+                          buttonClassName="shrink-0 !text-white hover:!text-white/90"
+                          onScan={async (scan) => {
+                            if (scan.recordId && scan.moduleId === 'products') {
+                              await applySelectedProduct(rowIndex, scan.recordId);
+                            }
+                          }}
+                          buttonProps={{ type: 'text', size: 'small' }}
+                        />
+                      )}
+                      {rowCanEdit && row.header?.selected_product_id && (
                         <Button
                           type="text"
                           size="small"
@@ -604,9 +666,67 @@ const GridTable: React.FC<GridTableProps> = ({
                   )}
                 </div>
 
-                {!isReadOnly && (
-                  <Button type="text" size="small" className="!text-white hover:!text-white/90" onClick={() => removeGridRow(rowIndex)}>حذف</Button>
-                )}
+                <div className="flex items-center gap-1 shrink-0">
+                  {mode === 'db' && !isReadOnly && (
+                    isRowEditing ? (
+                      <>
+                        <Button
+                          type="text"
+                          size="small"
+                          className="p-0 !text-white hover:!text-white/90"
+                          icon={<DeleteOutlined />}
+                          disabled={saving}
+                          onClick={() => removeGridRow(rowIndex)}
+                        />
+                        <Button
+                          type="text"
+                          size="small"
+                          className="p-0 !text-white hover:!text-white/90"
+                          icon={<SaveOutlined />}
+                          loading={saving}
+                          onClick={handleSave}
+                        />
+                        <Button
+                          type="text"
+                          size="small"
+                          className="p-0 !text-white hover:!text-white/90"
+                          icon={<CloseOutlined />}
+                          disabled={saving}
+                          onClick={cancelEditRow}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          type="text"
+                          size="small"
+                          className="p-0 !text-white hover:!text-white/90"
+                          icon={<EditOutlined />}
+                          disabled={saving || (!!activeEditRowKey && activeEditRowKey !== rowKey)}
+                          onClick={() => startEditRow(rowKey)}
+                        />
+                        <Button
+                          type="text"
+                          size="small"
+                          className="p-0 !text-white hover:!text-white/90"
+                          icon={<DeleteOutlined />}
+                          disabled={saving}
+                          onClick={() => removeGridRow(rowIndex)}
+                        />
+                      </>
+                    )
+                  )}
+                  {mode !== 'db' && !isReadOnly && (
+                    <Button
+                      type="text"
+                      size="small"
+                      className="p-0 !text-white hover:!text-white/90"
+                      icon={<DeleteOutlined />}
+                      disabled={saving}
+                      onClick={() => removeGridRow(rowIndex)}
+                    />
+                  )}
+                </div>
               </div>
 
               {!collapsed && (
@@ -626,7 +746,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           if (field.dynamicOptionsCategory) {
                             options = dynamicOptions[field.dynamicOptionsCategory] || localDynamicOptions[field.dynamicOptionsCategory];
                           }
-                          const effectiveField = isSpecsLocked ? { ...field, readonly: true } : field;
+                          const effectiveField = (isSpecsLocked || !rowCanEdit) ? { ...field, readonly: true } : field;
                           return (
                             <div key={field.key} className={`space-y-1 ${isSpecsLocked ? 'opacity-75' : ''}`}>
                               <div className="text-[11px] text-gray-500 font-medium">{field.labels?.fa}</div>
@@ -637,7 +757,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                 compactMode={true}
                                 options={options}
                                 onChange={(val) => {
-                                  if (isSpecsLocked) return;
+                                  if (isSpecsLocked || !rowCanEdit) return;
                                   updateRow(rowIndex, { specs: { ...(row.specs || {}), [field.key]: val } });
                                 }}
                               />
@@ -648,7 +768,7 @@ const GridTable: React.FC<GridTableProps> = ({
                     </>
                   )}
 
-                  {isProductionOrder && !row.header?.selected_product_id && (
+                  {isProductionOrder && !row.header?.selected_product_id && rowCanEdit && (
                     <div className="border border-gray-200 dark:border-gray-800 rounded-xl p-3 bg-white dark:bg-[#141414]">
                       <div className="text-xs text-gray-500 mb-2">لیست محصولات مرتبط</div>
                       <ProductsPreview
@@ -676,7 +796,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           key: 'name',
                           width: 205,
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <Input className="font-medium" value={val} onChange={(e) => updatePiece(rowIndex, pieceIndex, { name: e.target.value })} disabled={isReadOnly} />
+                            <Input className="font-medium" value={val} onChange={(e) => updatePiece(rowIndex, pieceIndex, { name: e.target.value })} disabled={!rowCanEdit} />
                           ),
                         },
                         {
@@ -684,7 +804,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'length',
                           key: 'length',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })} disabled={isReadOnly} />
+                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })} disabled={!rowCanEdit} />
                           ),
                         },
                         {
@@ -692,7 +812,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'width',
                           key: 'width',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })} disabled={isReadOnly} />
+                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })} disabled={!rowCanEdit} />
                           ),
                         },
                         {
@@ -700,7 +820,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'quantity',
                           key: 'quantity',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })} disabled={isReadOnly} />
+                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })} disabled={!rowCanEdit} />
                           ),
                         },
                         {
@@ -709,7 +829,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           key: 'waste_rate',
                           width: 90,
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })} disabled={isReadOnly} />
+                            <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })} disabled={!rowCanEdit} />
                           ),
                         },
                         {
@@ -722,7 +842,7 @@ const GridTable: React.FC<GridTableProps> = ({
                               options={unitOptions}
                               onChange={(v) => updatePiece(rowIndex, pieceIndex, { main_unit: v })}
                               onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
-                              disabled={isReadOnly}
+                              disabled={!rowCanEdit}
                               style={{ minWidth: 120 }}
                               getPopupContainer={() => document.body}
                               dropdownStyle={{ zIndex: 10050 }}
@@ -739,7 +859,7 @@ const GridTable: React.FC<GridTableProps> = ({
                               options={unitOptions}
                               onChange={(v) => updatePiece(rowIndex, pieceIndex, { sub_unit: v })}
                               onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
-                              disabled={isReadOnly}
+                              disabled={!rowCanEdit}
                               style={{ minWidth: 120 }}
                               getPopupContainer={() => document.body}
                               dropdownStyle={{ zIndex: 10050 }}
@@ -769,7 +889,7 @@ const GridTable: React.FC<GridTableProps> = ({
                               value={val}
                               options={dynamicOptions['calculation_formulas'] || []}
                               onChange={(v) => updatePiece(rowIndex, pieceIndex, { formula_id: v })}
-                              disabled={isReadOnly}
+                              disabled={!rowCanEdit}
                               style={{ minWidth: 150 }}
                               getPopupContainer={() => document.body}
                               dropdownStyle={{ zIndex: 10050 }}
@@ -789,7 +909,7 @@ const GridTable: React.FC<GridTableProps> = ({
                             dataIndex: 'unit_price',
                             key: 'unit_price',
                             render: (val: any, _record: any, pieceIndex: number) => (
-                              <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })} disabled={isReadOnly} />
+                              <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })} disabled={!rowCanEdit} />
                             ),
                           },
                           {
@@ -814,9 +934,24 @@ const GridTable: React.FC<GridTableProps> = ({
                             render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>,
                           },
                         ] : []),
+                        {
+                          title: '',
+                          key: 'actions',
+                          width: 52,
+                          fixed: 'right' as const,
+                          render: (_val: any, _record: any, pieceIndex: number) => (
+                            <Button
+                              type="text"
+                              icon={<DeleteOutlined />}
+                              danger
+                              disabled={!rowCanEdit}
+                              onClick={() => removePiece(rowIndex, pieceIndex)}
+                            />
+                          ),
+                        },
                       ]}
                       footer={() => (
-                        <Button type="dashed" block icon={<PlusOutlined />} onClick={() => addPiece(rowIndex)} disabled={isReadOnly}>
+                        <Button type="dashed" block icon={<PlusOutlined />} onClick={() => addPiece(rowIndex)} disabled={!rowCanEdit}>
                           افزودن قطعه {categories.find((c) => c.value === categoryValue)?.label || ''}
                         </Button>
                       )}
@@ -842,7 +977,7 @@ const GridTable: React.FC<GridTableProps> = ({
         })}
       </div>
 
-      {(isEditing || mode === 'local') && !isReadOnly && (
+      {(!isReadOnly && (mode === 'local' || (mode === 'db' && !!activeEditRowKey))) && (
         <div className="mt-4">
           <Button type="dashed" block icon={<PlusOutlined />} onClick={addGridRow}>
             افزودن گروه جدید

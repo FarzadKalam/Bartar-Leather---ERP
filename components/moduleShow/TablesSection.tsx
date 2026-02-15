@@ -122,6 +122,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               canEditModule={canEditModule && !(productionLocked && String(block.id).startsWith('items_'))}
               canViewField={canViewField}
               orderQuantity={module.id === 'production_orders' ? (data?.quantity || 0) : 0}
+              onSaveSuccess={(newData) => onDataUpdate?.({ [block.id]: newData })}
             />
           ) : (
             <EditableTable
