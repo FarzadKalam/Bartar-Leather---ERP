@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Select, Input, Button, Space, Popconfirm, Divider, App } from 'antd';
+import React, { useMemo, useState } from 'react';
+import { Select, Input, Button, Popconfirm, Divider, App } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 
@@ -41,6 +41,28 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   const { message: msg } = App.useApp();
   const [newOptionValue, setNewOptionValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  const mergedDropdownStyle: React.CSSProperties = {
+    minWidth: isMobileViewport ? 220 : 280,
+    maxWidth: isMobileViewport ? '92vw' : 520,
+    width: isMobileViewport ? '92vw' : undefined,
+    ...dropdownStyle,
+  };
+  const normalizedOptions = useMemo(() => {
+    const next = Array.isArray(options) ? [...options] : [];
+    const currentValues = mode === 'multiple'
+      ? (Array.isArray(value) ? value : [])
+      : (value ? [value] : []);
+
+    currentValues.forEach((val) => {
+      if (val === undefined || val === null || val === '') return;
+      const exists = next.some((opt) => String(opt.value) === String(val));
+      if (!exists) {
+        next.unshift({ label: String(val), value: String(val) });
+      }
+    });
+    return next;
+  }, [options, value, mode]);
 
   // افزودن گزینه جدید
   const handleAddOption = async () => {
@@ -51,7 +73,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     }
 
     // بررسی تکراری بودن
-    if (options.find(opt => opt.value === trimmedValue)) {
+    if (normalizedOptions.find(opt => String(opt.value).trim().toLowerCase() === trimmedValue.toLowerCase())) {
       msg.warning('این گزینه قبلاً وجود دارد');
       return;
     }
@@ -131,9 +153,10 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       loading={loading}
       optionFilterProp="label"
       getPopupContainer={getPopupContainer}
-      dropdownStyle={dropdownStyle}
-      options={options}
+      options={normalizedOptions}
+      popupMatchSelectWidth={isMobileViewport}
       notFoundContent={loading ? "در حال بارگذاری..." : "موردی یافت نشد"}
+      dropdownStyle={mergedDropdownStyle}
       // رندر سفارشی برای هر آیتم با دکمه حذف
       optionRender={(option) => (
         <div 
@@ -179,24 +202,27 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         <>
           {menu}
           <Divider style={{ margin: '8px 0' }} />
-          <div style={{ padding: '4px 8px 8px' }}>
-            <Space.Compact style={{ width: '100%' }}>
+          <div style={{ padding: '8px 10px 10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <Input
                 placeholder="افزودن گزینه جدید..."
                 value={newOptionValue}
                 onChange={(e) => setNewOptionValue(e.target.value)}
                 onPressEnter={handleAddOption}
                 disabled={loading}
+                className="w-full"
               />
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={handleAddOption}
-                loading={loading}
-              >
-                افزودن
-              </Button>
-            </Space.Compact>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={handleAddOption}
+                  loading={loading}
+                >
+                  افزودن
+                </Button>
+              </div>
+            </div>
           </div>
         </>
       )}

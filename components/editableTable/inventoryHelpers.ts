@@ -20,6 +20,7 @@ export const fetchShelfOptions = async (supabase: SupabaseClient, productId: str
     .from('product_inventory')
     .select('product_id, shelf_id, stock, shelves(system_code, shelf_number, name, warehouses(name))')
     .eq('product_id', productId)
+    .gt('stock', 0)
     .order('stock', { ascending: false });
   if (error) throw error;
 

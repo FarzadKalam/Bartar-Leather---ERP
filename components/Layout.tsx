@@ -135,7 +135,15 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
         ] 
     },
     { key: '/suppliers', icon: <BankOutlined />, label: 'تامین کنندگان' },
-    { key: '/invoices', icon: <FileTextOutlined />, label: 'فاکتورها' },
+    {
+      key: 'invoices',
+      icon: <FileTextOutlined />,
+      label: 'فاکتورها',
+      children: [
+        { key: '/invoices', label: 'فاکتورهای فروش' },
+        { key: '/purchase_invoices', label: 'فاکتورهای خرید' },
+      ]
+    },
     { key: '/tasks', icon: <CheckSquareOutlined />, label: 'وظایف' },
     { key: '/customers', icon: <ShopOutlined />, label: 'مشتریان' },
     { key: '/hr', icon: <TeamOutlined />, label: 'منابع انسانی' },

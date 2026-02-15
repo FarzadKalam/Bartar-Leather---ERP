@@ -32,6 +32,7 @@ import {
   addFinishedGoods,
   syncProductStock,
 } from '../utils/productionWorkflow';
+import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -789,18 +790,23 @@ const ModuleShow: React.FC = () => {
           const dependsOnValue = recordData[field.relationConfig.dependsOn];
           if (dependsOnValue) {
             try {
+              const isShelvesTarget = dependsOnValue === 'shelves';
+              const extraSelect = isShelvesTarget ? ', shelf_number' : '';
               const { data: relData } = await supabase
                 .from(dependsOnValue)
-                .select(`id, ${targetField}, system_code`)
+                .select(`id, ${targetField}, system_code${extraSelect}`)
                 .limit(200);
               if (relData) {
-                const options = relData.map((i: any) => ({ 
-                  label: i.system_code ? `${i[targetField]} (${i.system_code})` : i[targetField], 
-                  value: i.id,
-                  module: dependsOnValue,
-                  name: i[targetField],
-                  system_code: i.system_code
-                }));
+                const options = relData.map((i: any) => {
+                  const baseLabel = i?.[targetField] || i?.shelf_number || i?.system_code || i?.id;
+                  return {
+                    label: i.system_code ? `${baseLabel} (${i.system_code})` : baseLabel,
+                    value: i.id,
+                    module: dependsOnValue,
+                    name: baseLabel,
+                    system_code: i.system_code
+                  };
+                });
                 relOpts[field.key] = options;
               }
             } catch (err) {
@@ -810,21 +816,26 @@ const ModuleShow: React.FC = () => {
         } else {
           const { targetModule, filter } = field.relationConfig;
           try {
+            const isShelvesTarget = targetModule === 'shelves';
+            const extraSelect = isShelvesTarget ? ', shelf_number' : '';
             const filterKeys = filter ? Object.keys(filter) : [];
             const filterSelect = filterKeys.length > 0 ? `, ${filterKeys.join(', ')}` : '';
             let query = supabase
               .from(targetModule)
-              .select(`id, ${targetField}, system_code${filterSelect}`)
+              .select(`id, ${targetField}, system_code${extraSelect}${filterSelect}`)
               .limit(200);
             if (filter) query = query.match(filter);
             const { data: relData } = await query;
             if (relData) {
-              const options = relData.map((i: any) => ({ 
-                label: i.system_code ? `${i[targetField]} (${i.system_code})` : i[targetField], 
-                value: i.id,
-                name: i[targetField],
-                system_code: i.system_code
-              }));
+              const options = relData.map((i: any) => {
+                const baseLabel = i?.[targetField] || i?.shelf_number || i?.system_code || i?.id;
+                return {
+                  label: i.system_code ? `${baseLabel} (${i.system_code})` : baseLabel,
+                  value: i.id,
+                  name: baseLabel,
+                  system_code: i.system_code
+                };
+              });
               relOpts[field.key] = options;
               if (field.key.includes('_')) relOpts[field.key.split('_').pop()!] = options;
             }
@@ -1206,6 +1217,19 @@ const ModuleShow: React.FC = () => {
     try {
       const { error } = await supabase.from(moduleId).update({ [key]: newValue }).eq('id', id);
       if (error) throw error;
+      if ((moduleId === 'invoices' || moduleId === 'purchase_invoices') && key === 'status') {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || null;
+        await applyInvoiceFinalizationInventory({
+          supabase: supabase as any,
+          moduleId,
+          recordId: id || '',
+          previousStatus: data?.status ?? null,
+          nextStatus: newValue,
+          invoiceItems: data?.invoiceItems || [],
+          userId,
+        });
+      }
       setData((prev: any) => ({ ...prev, [key]: newValue }));
       await insertChangelog({
         action: 'update',
@@ -1238,6 +1262,20 @@ const ModuleShow: React.FC = () => {
       const changedKeys = Object.keys(values).filter((k) => !areValuesEqual(values[k], previous[k]));
 
       await supabase.from(moduleId).update(values).eq('id', id);
+
+      if (moduleId === 'invoices' || moduleId === 'purchase_invoices') {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || null;
+        await applyInvoiceFinalizationInventory({
+          supabase: supabase as any,
+          moduleId,
+          recordId: id,
+          previousStatus: previous?.status || null,
+          nextStatus: values?.status ?? previous?.status ?? null,
+          invoiceItems: values?.invoiceItems ?? previous?.invoiceItems ?? [],
+          userId,
+        });
+      }
 
       for (const key of changedKeys) {
         await logFieldChange(key, previous[key], values[key]);
@@ -1485,6 +1523,27 @@ const ModuleShow: React.FC = () => {
 
       setStatusLoading(true);
       await applyProductionMoves(moves);
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const userId = authData?.user?.id || null;
+        const transferPayload = moves.map((move) => ({
+          transfer_type: 'production',
+          product_id: move.product_id,
+          delivered_qty: move.quantity,
+          required_qty: move.quantity,
+          invoice_id: null,
+          production_order_id: id || null,
+          from_shelf_id: move.from_shelf_id,
+          to_shelf_id: move.to_shelf_id,
+          sender_id: userId,
+          receiver_id: userId,
+        }));
+        if (transferPayload.length > 0) {
+          await supabase.from('stock_transfers').insert(transferPayload);
+        }
+      } catch (movementLogError) {
+        console.warn('Could not log production stock transfers', movementLogError);
+      }
       const firstProductionShelfId = moves[0]?.to_shelf_id || null;
       await finalizeStatusUpdate({
         status: 'in_progress',
@@ -1613,11 +1672,8 @@ const ModuleShow: React.FC = () => {
       product_type: outputProductType || 'final',
       product_category: data?.product_category || null,
       related_bom: data?.bom_id || null,
-      items_leather: data?.items_leather || [],
-      items_lining: data?.items_lining || [],
-      items_fitting: data?.items_fitting || [],
-      items_accessory: data?.items_accessory || [],
-      items_labor: data?.items_labor || [],
+      production_order_id: id || null,
+      grid_materials: data?.grid_materials || [],
       product_inventory: [inventoryRow],
       __requireInventoryShelf: true,
     } as any;

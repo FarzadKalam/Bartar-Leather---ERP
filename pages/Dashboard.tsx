@@ -5,6 +5,7 @@ import {
   FileTextOutlined,
   ExperimentOutlined,
   SkinOutlined,
+  UserOutlined,
   ArrowUpOutlined,
   CalendarOutlined,
   ClockCircleOutlined,
@@ -437,7 +438,7 @@ const Dashboard: React.FC = () => {
           }
         >
           <Row gutter={[16, 16]}>
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={12} lg={6}>
               <Button
                 type="primary"
                 icon={<FileTextOutlined />}
@@ -447,11 +448,11 @@ const Dashboard: React.FC = () => {
                 className="h-auto py-4"
               >
                 <div className="text-center">
-                  <div className="font-bold">فاکتور جدید</div>
+                  <div className="font-bold">فاکتور فروش جدید</div>
                 </div>
               </Button>
             </Col>
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={12} lg={6}>
               <Button
                 type="default"
                 icon={<ExperimentOutlined />}
@@ -461,11 +462,11 @@ const Dashboard: React.FC = () => {
                 className="h-auto py-4 border-leather-500 text-leather-500 hover:bg-leather-500 hover:text-white"
               >
                 <div className="text-center">
-                  <div className="font-bold">سفارش تولید</div>
+                  <div className="font-bold">سفارش تولید جدید</div>
                 </div>
               </Button>
             </Col>
-            <Col xs={24} sm={8}>
+            <Col xs={24} sm={12} lg={6}>
               <Button
                 type="default"
                 icon={<SkinOutlined />}
@@ -476,6 +477,20 @@ const Dashboard: React.FC = () => {
               >
                 <div className="text-center">
                   <div className="font-bold">محصول جدید</div>
+                </div>
+              </Button>
+            </Col>
+            <Col xs={24} sm={12} lg={6}>
+              <Button
+                type="default"
+                icon={<UserOutlined />}
+                size="large"
+                block
+                onClick={() => navigate('/customers/create')}
+                className="h-auto py-4"
+              >
+                <div className="text-center">
+                  <div className="font-bold">مشتری جدید</div>
                 </div>
               </Button>
             </Col>

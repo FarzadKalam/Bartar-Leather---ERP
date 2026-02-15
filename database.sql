@@ -762,3 +762,132 @@ ALTER TABLE public.production_lines ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Access Production Lines" ON public.production_lines FOR SELECT USING (true);
 CREATE POLICY "Public Insert Production Lines" ON public.production_lines FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public Update Production Lines" ON public.production_lines FOR UPDATE USING (true) WITH CHECK (true);
+
+-- ==========================================================
+-- مهاجرت تکمیلی: محصولات + فاکتور خرید + گردش موجودی (2026-02-15)
+-- ==========================================================
+BEGIN;
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- 1) ستون‌های جدید محصولات
+ALTER TABLE public.products
+  ADD COLUMN IF NOT EXISTS production_order_id uuid REFERENCES public.production_orders(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS grid_materials jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS sub_stock numeric NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_products_production_order_id
+  ON public.products(production_order_id);
+
+-- 2) سازگاری جدول فاکتور فروش با ساختار فعلی فرانت
+ALTER TABLE public.invoices
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS invoice_date date,
+  ADD COLUMN IF NOT EXISTS system_code text,
+  ADD COLUMN IF NOT EXISTS sale_source text,
+  ADD COLUMN IF NOT EXISTS marketer_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS "invoiceItems" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS total_invoice_amount numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_received_amount numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS remaining_balance numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+-- 3) ماژول جدید فاکتورهای خرید
+CREATE TABLE IF NOT EXISTS public.purchase_invoices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid()
+);
+
+ALTER TABLE public.purchase_invoices
+  ADD COLUMN IF NOT EXISTS name text,
+  ADD COLUMN IF NOT EXISTS invoice_date date,
+  ADD COLUMN IF NOT EXISTS system_code text,
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'created',
+  ADD COLUMN IF NOT EXISTS supplier_id uuid REFERENCES public.suppliers(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS buyer_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS purchase_source text,
+  ADD COLUMN IF NOT EXISTS "invoiceItems" jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS total_invoice_amount numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_received_amount numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS remaining_balance numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS assignee_id uuid,
+  ADD COLUMN IF NOT EXISTS assignee_type text NOT NULL DEFAULT 'user',
+  ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_status
+  ON public.purchase_invoices(status);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_supplier
+  ON public.purchase_invoices(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_created_at
+  ON public.purchase_invoices(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_purchase_invoices_system_code
+  ON public.purchase_invoices(system_code);
+
+DROP TRIGGER IF EXISTS update_purchase_invoices_modtime ON public.purchase_invoices;
+CREATE TRIGGER update_purchase_invoices_modtime
+BEFORE UPDATE ON public.purchase_invoices
+FOR EACH ROW
+EXECUTE PROCEDURE public.update_updated_at_column();
+
+-- 4) تکمیل ستون‌ها/ایندکس‌های گردش موجودی
+ALTER TABLE public.stock_transfers
+  ADD COLUMN IF NOT EXISTS transfer_type text,
+  ADD COLUMN IF NOT EXISTS product_id uuid REFERENCES public.products(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS delivered_qty numeric,
+  ADD COLUMN IF NOT EXISTS required_qty numeric,
+  ADD COLUMN IF NOT EXISTS invoice_id uuid,
+  ADD COLUMN IF NOT EXISTS production_order_id uuid,
+  ADD COLUMN IF NOT EXISTS from_shelf_id uuid REFERENCES public.shelves(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS to_shelf_id uuid REFERENCES public.shelves(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS sender_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS receiver_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_product_created_at
+  ON public.stock_transfers(product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_invoice
+  ON public.stock_transfers(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_production_order
+  ON public.stock_transfers(production_order_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_from_shelf
+  ON public.stock_transfers(from_shelf_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_to_shelf
+  ON public.stock_transfers(to_shelf_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_type
+  ON public.stock_transfers(transfer_type);
+
+-- 5) RLS ماژول فاکتورهای خرید (هم‌راستا با سایر ماژول‌ها)
+ALTER TABLE public.purchase_invoices ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Assignee access purchase_invoices" ON public.purchase_invoices;
+DROP POLICY IF EXISTS "Assignee update purchase_invoices" ON public.purchase_invoices;
+DROP POLICY IF EXISTS "Assignee delete purchase_invoices" ON public.purchase_invoices;
+DROP POLICY IF EXISTS "Authenticated insert purchase_invoices" ON public.purchase_invoices;
+
+CREATE POLICY "Assignee access purchase_invoices"
+ON public.purchase_invoices
+FOR SELECT
+USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Assignee update purchase_invoices"
+ON public.purchase_invoices
+FOR UPDATE
+USING (public.has_assignee_access(assignee_id, assignee_type, created_by))
+WITH CHECK (public.has_assignee_access(assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Assignee delete purchase_invoices"
+ON public.purchase_invoices
+FOR DELETE
+USING (public.has_assignee_access(assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Authenticated insert purchase_invoices"
+ON public.purchase_invoices
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated');
+
+COMMIT;

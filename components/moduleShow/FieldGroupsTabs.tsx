@@ -61,9 +61,28 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
                     recordId={recordId}
                     relationOptions={relationOptions}
                     dynamicOptions={dynamicOptions}
+                    readOnly={moduleId === 'products' && block.id === 'product_inventory'}
                   />
                 </div>
               )}
+              {moduleId === 'products' && block.id === 'product_inventory' && (() => {
+                const stockMovementsBlock = moduleConfig?.blocks?.find((b: any) => b.id === 'product_stock_movements');
+                if (!stockMovementsBlock) return null;
+                if (stockMovementsBlock.visibleIf && !checkVisibility(stockMovementsBlock.visibleIf)) return null;
+                return (
+                  <div className="mt-6">
+                    <EditableTable
+                      block={stockMovementsBlock}
+                      initialData={data?.[stockMovementsBlock.id] || []}
+                      mode="db"
+                      moduleId={moduleId}
+                      recordId={recordId}
+                      relationOptions={relationOptions}
+                      dynamicOptions={dynamicOptions}
+                    />
+                  </div>
+                );
+              })()}
             </div>
           ),
         }))}

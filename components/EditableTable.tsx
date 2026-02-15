@@ -5,6 +5,8 @@ import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
 import { calculateRow } from '../utils/calculations';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
+import { convertArea } from '../utils/unitConversions';
+import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import SmartTableRenderer from './SmartTableRenderer';
 import QrScanPopover from './QrScanPopover';
@@ -53,11 +55,16 @@ const EditableTable: React.FC<EditableTableProps> = ({
 }) => {
   const isReadOnly = block?.readonly === true || readOnly === true || canEditModule === false;
   const isProductInventory = moduleId === 'products' && block?.id === 'product_inventory';
+  const isProductStockMovements = moduleId === 'products' && block?.id === 'product_stock_movements';
   const isShelfInventory = moduleId === 'shelves' && block?.id === 'shelf_inventory';
   const isProductionOrder = moduleId === 'production_orders';
   const isBomItemBlock = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'].includes(block?.id);
   const isInvoiceItems = moduleId === 'invoices' && block?.id === 'invoiceItems';
+  const isPurchaseInvoiceItems = moduleId === 'purchase_invoices' && block?.id === 'invoiceItems';
+  const isAnyInvoiceItems = isInvoiceItems || isPurchaseInvoiceItems;
   const isInvoicePayments = moduleId === 'invoices' && block?.id === 'payments';
+  const isPurchaseInvoicePayments = moduleId === 'purchase_invoices' && block?.id === 'payments';
+  const isAnyInvoicePayments = isInvoicePayments || isPurchaseInvoicePayments;
   const isShelfInventoryBlock = block?.id === 'product_inventory' || block?.id === 'shelf_inventory';
 
   const [isEditing, setIsEditing] = useState(mode === 'local' && !isReadOnly);
@@ -70,9 +77,11 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const [shelfOptionsByRow, setShelfOptionsByRow] = useState<Record<string, { loading: boolean; options: { label: string; value: string }[] }>>({});
   const [localDynamicOptions, setLocalDynamicOptions] = useState<Record<string, any[]>>({});
   const [rowReloadVersion, setRowReloadVersion] = useState<Record<string, number>>({});
+  const [currentProductUnits, setCurrentProductUnits] = useState<{ mainUnit: string | null; subUnit: string | null }>({ mainUnit: null, subUnit: null });
+  const [currentProductStock, setCurrentProductStock] = useState<number>(0);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const empty = !Array.isArray(initialData) || initialData.length === 0;
-    if (isInvoiceItems || isShelfInventoryBlock) return false;
+    if (isAnyInvoiceItems || isShelfInventoryBlock || isProductStockMovements) return false;
     return empty;
   });
   const [userToggledCollapse, setUserToggledCollapse] = useState(false);
@@ -81,12 +90,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
     if (userToggledCollapse) return;
     const source = isEditing ? tempData : data;
     const empty = !Array.isArray(source) || source.length === 0;
-    if (isInvoiceItems || isShelfInventoryBlock) {
+    if (isAnyInvoiceItems || isShelfInventoryBlock || isProductStockMovements) {
       setIsCollapsed(false);
       return;
     }
     setIsCollapsed(empty);
-  }, [data, tempData, isEditing, isInvoiceItems, isShelfInventoryBlock, userToggledCollapse]);
+  }, [data, tempData, isEditing, isAnyInvoiceItems, isShelfInventoryBlock, isProductStockMovements, userToggledCollapse]);
 
   const productsModule = MODULES['products'];
   const editableAfterSelection = new Set(['buy_price', 'length', 'width', 'usage', 'waste_rate', 'main_unit']);
@@ -158,7 +167,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   // --- مقداردهی اولیه ---
   useEffect(() => {
-    if (mode !== 'external_view' && !populateSource?.recordId && !isProductInventory && !isShelfInventory) {
+    if (mode !== 'external_view' && !populateSource?.recordId && !isProductInventory && !isShelfInventory && !isProductStockMovements) {
       const safeData = Array.isArray(initialData) ? initialData : [];
       const dataWithKey = safeData.map((item, index) => ({
         ...item,
@@ -180,39 +189,121 @@ const EditableTable: React.FC<EditableTableProps> = ({
       setData(lockedData);
       if (mode === 'local') setTempData(lockedData);
     }
-  }, [initialData, mode, isProductInventory, isShelfInventory, populateSource?.recordId]);
+  }, [initialData, mode, isProductInventory, isShelfInventory, isProductStockMovements, populateSource?.recordId]);
 
   // --- دریافت موجودی از جدول product_inventory ---
   useEffect(() => {
     const fetchInventoryRows = async () => {
-      if (mode !== 'db' || !recordId || (!isProductInventory && !isShelfInventory)) return;
+      if (mode !== 'db' || !recordId || (!isProductInventory && !isShelfInventory && !isProductStockMovements)) return;
       setLoadingData(true);
       try {
-        let query = supabase.from('product_inventory').select('id, product_id, shelf_id, warehouse_id, stock, created_at, products(main_unit)');
+        if (isProductStockMovements) {
+          const { data: productMeta } = await supabase
+            .from('products')
+            .select('main_unit, sub_unit, stock')
+            .eq('id', recordId)
+            .maybeSingle();
+
+          const mainUnit = productMeta?.main_unit || null;
+          const subUnit = productMeta?.sub_unit || null;
+          const productStock = parseFloat(productMeta?.stock) || 0;
+          setCurrentProductUnits({ mainUnit, subUnit });
+          setCurrentProductStock(productStock);
+
+          const { data: rows, error } = await supabase
+            .from('stock_transfers')
+            .select('id, transfer_type, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at')
+            .eq('product_id', recordId)
+            .order('created_at', { ascending: true });
+          if (error) throw error;
+
+          const userIds = Array.from(
+            new Set((rows || []).flatMap((row: any) => [row?.sender_id, row?.receiver_id]).filter(Boolean))
+          );
+          let userMap = new Map<string, string>();
+          if (userIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('id, full_name')
+              .in('id', userIds);
+            userMap = new Map((profiles || []).map((item: any) => [String(item.id), item.full_name || String(item.id)]));
+          }
+
+          const mappedRows = (rows || []).map((row: any, index: number) => {
+            const source = String(row?.transfer_type || '').trim() || 'inventory_count';
+            const fromShelf = row?.from_shelf_id ? String(row.from_shelf_id) : null;
+            const toShelf = row?.to_shelf_id ? String(row.to_shelf_id) : null;
+            const voucherType = fromShelf && toShelf ? 'transfer' : toShelf ? 'incoming' : 'outgoing';
+            const creatorId = row?.sender_id || row?.receiver_id || null;
+            const autoSource = ['sales_invoice', 'purchase_invoice', 'production'].includes(source);
+            const isPurchaseSource = source === 'purchase_invoice';
+            return {
+              id: row.id,
+              key: row.id || `move_${index}`,
+              voucher_type: voucherType,
+              source,
+              main_unit: mainUnit,
+              main_quantity: Math.abs(parseFloat(row?.delivered_qty) || 0),
+              sub_unit: subUnit,
+              sub_quantity: Math.abs(parseFloat(row?.required_qty) || 0),
+              from_shelf_id: fromShelf,
+              to_shelf_id: toShelf,
+              invoice_id: isPurchaseSource ? null : (row?.invoice_id || null),
+              purchase_invoice_id: isPurchaseSource ? (row?.invoice_id || null) : null,
+              production_order_id: row?.production_order_id || null,
+              created_by_name: creatorId ? (userMap.get(String(creatorId)) || String(creatorId)) : '-',
+              created_at: row?.created_at || null,
+              _readonly: autoSource || !!row?.invoice_id || !!row?.production_order_id,
+            };
+          });
+          setData(mappedRows);
+          return;
+        }
+
+        let query = supabase
+          .from('product_inventory')
+          .select('id, product_id, shelf_id, warehouse_id, stock, created_at, products(main_unit,sub_unit), shelves(system_code,shelf_number,name,warehouses(name))');
         if (isProductInventory) query = query.eq('product_id', recordId);
         if (isShelfInventory) query = query.eq('shelf_id', recordId);
         const { data: rows, error } = await query.order('created_at', { ascending: true });
         if (error) throw error;
 
-        let productUnit: string | null = null;
+        let productUnits: { mainUnit: string | null; subUnit: string | null } = { mainUnit: null, subUnit: null };
         if (isProductInventory) {
           try {
             const { data: productRow } = await supabase
               .from('products')
-              .select('main_unit')
+              .select('main_unit, sub_unit')
               .eq('id', recordId)
               .single();
-            productUnit = productRow?.main_unit || null;
+            productUnits = {
+              mainUnit: productRow?.main_unit || null,
+              subUnit: productRow?.sub_unit || null,
+            };
+            setCurrentProductUnits(productUnits);
           } catch (e) {
-            console.warn('Could not load product unit', e);
+            console.warn('Could not load product units', e);
           }
         }
 
-        const dataWithKeys = (rows || []).map((row: any, idx: number) => ({
-          ...row,
-          main_unit: row?.products?.main_unit ?? row.main_unit ?? productUnit ?? null,
-          key: row.id || row.key || `inv_${idx}`,
-        }));
+        const dataWithKeys = (rows || []).map((row: any, idx: number) => {
+          const mainUnit = row?.products?.main_unit ?? row.main_unit ?? productUnits.mainUnit ?? null;
+          const subUnit = row?.products?.sub_unit ?? row.sub_unit ?? productUnits.subUnit ?? null;
+          const shelfName = row?.shelves?.name || row?.shelves?.shelf_number || row?.shelf_id || '-';
+          const shelfCode = row?.shelves?.system_code || '';
+          const stockValue = parseFloat(row?.stock) || 0;
+          const subStock = mainUnit && subUnit
+            ? convertArea(stockValue, mainUnit as any, subUnit as any)
+            : 0;
+          return {
+            ...row,
+            main_unit: mainUnit,
+            sub_unit: subUnit,
+            sub_stock: Number.isFinite(subStock) ? subStock : 0,
+            shelf_display: shelfCode ? `${shelfName} (${shelfCode})` : shelfName,
+            key: row.id || row.key || `inv_${idx}`,
+          };
+        });
         setData(dataWithKeys);
       } catch (err) {
         console.error(err);
@@ -223,7 +314,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     };
 
     fetchInventoryRows();
-  }, [mode, recordId, isProductInventory, isShelfInventory]);
+  }, [mode, recordId, isProductInventory, isShelfInventory, isProductStockMovements]);
 
   useEffect(() => {
     const categories = new Set<string>();
@@ -260,10 +351,53 @@ const EditableTable: React.FC<EditableTableProps> = ({
     load();
   }, [block.tableColumns, dynamicOptions]);
 
+  useEffect(() => {
+    if (!isInvoiceItems) return;
+    const sourceRows = isEditing ? tempData : data;
+    sourceRows.forEach((row: any, index: number) => {
+      const productId = row?.product_id ? String(row.product_id) : null;
+      if (!productId) return;
+      const rowKey = String(row?.key || row?.id || index);
+      const existing = shelfOptionsByRow[rowKey];
+      if (!existing || (!(existing.options || []).length && !existing.loading)) {
+        loadShelvesForRow(rowKey, productId);
+      }
+    });
+  }, [isInvoiceItems, isEditing, tempData, data, shelfOptionsByRow]);
+
   const updateRow = (index: number, key: string, value: any) => {
     const source = isEditing ? tempData : data;
     const newData = [...source];
     newData[index] = { ...newData[index], [key]: value };
+    const row = newData[index] || {};
+
+    if (isProductStockMovements) {
+      if (key === 'voucher_type') {
+        if (value === 'incoming') newData[index]['from_shelf_id'] = null;
+        if (value === 'outgoing') newData[index]['to_shelf_id'] = null;
+      }
+      if (key === 'source' && value === 'waste') {
+        newData[index]['voucher_type'] = 'outgoing';
+        newData[index]['to_shelf_id'] = null;
+      }
+      if (['main_quantity', 'main_unit', 'sub_unit'].includes(key)) {
+        const qtyMain = parseFloat(newData[index]?.main_quantity) || 0;
+        const mainUnit = String(newData[index]?.main_unit || '');
+        const subUnit = String(newData[index]?.sub_unit || '');
+        const converted = mainUnit && subUnit
+          ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+          : 0;
+        newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
+      }
+    }
+
+    if (isInvoiceItems && key === 'product_id') {
+      newData[index]['source_shelf_id'] = null;
+      const rowKey = String(row.key || row.id || index);
+      if (value) {
+        loadShelvesForRow(rowKey, String(value));
+      }
+    }
 
     if (key === 'selected_product_id' && !value) {
       newData[index]['selected_shelf_id'] = null;
@@ -278,7 +412,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       }
     }
 
-    if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'length', 'width'].includes(key)) {
+    if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'length', 'width', 'main_quantity'].includes(key)) {
       newData[index]['total_price'] = calculateRow(newData[index], block.rowCalculationType);
     }
 
@@ -331,7 +465,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const handleRelationChange = async (index: number, key: string, value: any, relationConfig: any) => {
     updateRow(index, key, value);
 
-    if (isInvoicePayments && key === 'responsible_id') {
+    if (isAnyInvoicePayments && key === 'responsible_id') {
       return;
     }
 
@@ -344,7 +478,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
           .single();
 
         if (!error && record) {
-          const newData = [...tempData];
+          const sourceRows = isEditing ? tempData : data;
+          const newData = [...sourceRows];
           const currentRow = { ...newData[index], [key]: value };
 
           block.tableColumns?.forEach((col: any) => {
@@ -354,16 +489,26 @@ const EditableTable: React.FC<EditableTableProps> = ({
             if (col.key === 'buy_price' && record['buy_price']) {
               currentRow[col.key] = record['buy_price'];
             }
-            if (isInvoiceItems && col.key === 'unit' && record['main_unit']) {
+            if (isAnyInvoiceItems && col.key === 'unit' && record['main_unit']) {
               currentRow[col.key] = record['main_unit'];
             }
           });
 
+          if (isInvoiceItems && key === 'product_id') {
+            currentRow.source_shelf_id = null;
+          }
+
           currentRow['total_price'] = calculateRow(currentRow, block.rowCalculationType);
 
           newData[index] = currentRow;
-          setTempData(newData);
+          if (isEditing) setTempData(newData);
+          else setData(newData);
           if (mode === 'local' && onChange) onChange(newData);
+
+          if (isInvoiceItems && key === 'product_id' && value) {
+            const rowKey = String(currentRow.key || currentRow.id || index);
+            loadShelvesForRow(rowKey, String(value));
+          }
           message.success('اطلاعات بارگذاری شد');
         }
       } catch (e) {
@@ -389,7 +534,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     if (colKeys.has('discount')) numericDefaults.discount = 0;
     if (colKeys.has('vat')) numericDefaults.vat = 0;
     if (colKeys.has('total_price')) numericDefaults.total_price = 0;
-    if (isInvoiceItems) {
+    if (isAnyInvoiceItems) {
       numericDefaults.discount_type = 'amount';
       numericDefaults.vat_type = 'percent';
     }
@@ -399,6 +544,16 @@ const EditableTable: React.FC<EditableTableProps> = ({
       ...numericDefaults,
       ...defaults,
     };
+
+    if (isProductStockMovements) {
+      newRow.voucher_type = newRow.voucher_type || 'incoming';
+      newRow.source = newRow.source || 'opening_balance';
+      newRow.main_unit = newRow.main_unit || currentProductUnits.mainUnit || null;
+      newRow.sub_unit = newRow.sub_unit || currentProductUnits.subUnit || null;
+      newRow.main_quantity = parseFloat(newRow.main_quantity) || 0;
+      newRow.sub_quantity = parseFloat(newRow.sub_quantity) || 0;
+    }
+
     const newData = [...tempData, newRow];
     setTempData(newData);
     if (mode === 'local' && onChange) onChange(newData);
@@ -406,6 +561,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   const removeRow = (index: number) => {
     if (isReadOnly) return;
+    if (isProductStockMovements && tempData[index]?._readonly) return;
     const newData = [...tempData];
     newData.splice(index, 1);
     setTempData(newData);
@@ -429,9 +585,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
           nextRow[col.key] = col.defaultValue;
         }
       });
-      if (isInvoiceItems) {
+      if (isAnyInvoiceItems) {
         if (!nextRow.discount_type) nextRow.discount_type = 'amount';
         if (!nextRow.vat_type) nextRow.vat_type = 'percent';
+      }
+      if (isProductStockMovements) {
+        if (!nextRow.voucher_type) nextRow.voucher_type = 'incoming';
+        if (!nextRow.source) nextRow.source = 'opening_balance';
+        if (!nextRow.main_unit) nextRow.main_unit = currentProductUnits.mainUnit || null;
+        if (!nextRow.sub_unit) nextRow.sub_unit = currentProductUnits.subUnit || null;
       }
       return nextRow;
     });
@@ -448,6 +610,158 @@ const EditableTable: React.FC<EditableTableProps> = ({
     setSaving(true);
     try {
       if (!moduleId || !recordId) throw new Error('رکورد یافت نشد');
+      if (isProductStockMovements) {
+        const editableRows = (tempData || []).filter((row: any) => !row?._readonly);
+        const previousManualRows = (data || []).filter((row: any) => !row?._readonly);
+        const allowedManualSources = new Set(['opening_balance', 'inventory_count', 'waste']);
+        const toQty = (value: any) => Math.abs(parseFloat(value) || 0);
+
+        const buildDeltas = (rows: any[], multiplier = 1) => {
+          const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
+          rows.forEach((row: any) => {
+            const voucherType = String(row?.voucher_type || '');
+            const qty = toQty(row?.main_quantity);
+            if (!qty) return;
+            const fromShelfId = row?.from_shelf_id ? String(row.from_shelf_id) : null;
+            const toShelfId = row?.to_shelf_id ? String(row.to_shelf_id) : null;
+            if (voucherType === 'incoming' && toShelfId) {
+              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier });
+            } else if (voucherType === 'outgoing' && fromShelfId) {
+              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier });
+            } else if (voucherType === 'transfer' && fromShelfId && toShelfId) {
+              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier });
+              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier });
+            }
+          });
+          return deltas;
+        };
+
+        editableRows.forEach((row: any) => {
+          const voucherType = String(row?.voucher_type || '');
+          const source = String(row?.source || '');
+          const qty = toQty(row?.main_quantity);
+          if (!voucherType) throw new Error('نوع حواله انتخاب نشده است.');
+          if (!source) throw new Error('منبع حواله انتخاب نشده است.');
+          if (!allowedManualSources.has(source)) {
+            throw new Error('برای ثبت دستی، فقط منابع "موجودی اول دوره"، "انبارگردانی" و "ضایعات" مجاز هستند.');
+          }
+          if (qty <= 0) throw new Error('مقدار واحد اصلی باید بیشتر از صفر باشد.');
+          if (voucherType === 'incoming' && !row?.to_shelf_id) throw new Error('برای حواله ورود، قفسه ورود الزامی است.');
+          if (voucherType === 'outgoing' && !row?.from_shelf_id) throw new Error('برای حواله خروج، قفسه برداشت الزامی است.');
+          if (voucherType === 'transfer') {
+            if (!row?.from_shelf_id || !row?.to_shelf_id) throw new Error('برای حواله جابجایی، قفسه برداشت و قفسه ورود الزامی است.');
+            if (String(row?.from_shelf_id) === String(row?.to_shelf_id)) throw new Error('قفسه برداشت و قفسه ورود نباید یکسان باشند.');
+          }
+        });
+
+        const reversePrevious = buildDeltas(previousManualRows, -1);
+        const nextDeltas = buildDeltas(editableRows, 1);
+        await applyInventoryDeltas(supabase as any, [...reversePrevious, ...nextDeltas]);
+
+        const { data: authData } = await supabase.auth.getUser();
+        const currentUserId = authData?.user?.id || null;
+
+        const payload = editableRows.map((row: any) => ({
+          id: row?.id || undefined,
+          product_id: recordId,
+          transfer_type: row?.source || 'inventory_count',
+          delivered_qty: toQty(row?.main_quantity),
+          required_qty: toQty(row?.sub_quantity),
+          invoice_id: null,
+          production_order_id: null,
+          from_shelf_id: row?.from_shelf_id || null,
+          to_shelf_id: row?.to_shelf_id || null,
+          sender_id: currentUserId,
+          receiver_id: currentUserId,
+        }));
+
+        const oldManualIds = previousManualRows.map((row: any) => row?.id).filter(Boolean);
+        const nextManualIds = new Set(payload.map((row: any) => row?.id).filter(Boolean));
+        const removeIds = oldManualIds.filter((id: string) => !nextManualIds.has(id));
+        if (removeIds.length > 0) {
+          const { error: deleteError } = await supabase
+            .from('stock_transfers')
+            .delete()
+            .in('id', removeIds);
+          if (deleteError) throw deleteError;
+        }
+
+        if (payload.length > 0) {
+          const { error: upsertError } = await supabase
+            .from('stock_transfers')
+            .upsert(payload, { onConflict: 'id' });
+          if (upsertError) throw upsertError;
+        }
+
+        await syncMultipleProductsStock(supabase as any, [recordId]);
+
+        const { data: productMeta } = await supabase
+          .from('products')
+          .select('main_unit, sub_unit, stock')
+          .eq('id', recordId)
+          .maybeSingle();
+        const mainUnit = productMeta?.main_unit || null;
+        const subUnit = productMeta?.sub_unit || null;
+        setCurrentProductUnits({ mainUnit, subUnit });
+        setCurrentProductStock(parseFloat(productMeta?.stock) || 0);
+
+        const { data: refreshedRows, error: rowsError } = await supabase
+          .from('stock_transfers')
+          .select('id, transfer_type, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at')
+          .eq('product_id', recordId)
+          .order('created_at', { ascending: true });
+        if (rowsError) throw rowsError;
+
+        const userIds = Array.from(
+          new Set((refreshedRows || []).flatMap((row: any) => [row?.sender_id, row?.receiver_id]).filter(Boolean))
+        );
+        let userMap = new Map<string, string>();
+        if (userIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', userIds);
+          userMap = new Map((profiles || []).map((item: any) => [String(item.id), item.full_name || String(item.id)]));
+        }
+
+        const mappedRows = (refreshedRows || []).map((row: any, index: number) => {
+          const source = String(row?.transfer_type || '').trim() || 'inventory_count';
+          const fromShelf = row?.from_shelf_id ? String(row.from_shelf_id) : null;
+          const toShelf = row?.to_shelf_id ? String(row.to_shelf_id) : null;
+          const voucherType = fromShelf && toShelf ? 'transfer' : toShelf ? 'incoming' : 'outgoing';
+          const creatorId = row?.sender_id || row?.receiver_id || null;
+          const autoSource = ['sales_invoice', 'purchase_invoice', 'production'].includes(source);
+          const isPurchaseSource = source === 'purchase_invoice';
+          return {
+            id: row.id,
+            key: row.id || `move_${index}`,
+            voucher_type: voucherType,
+            source,
+            main_unit: mainUnit,
+            main_quantity: Math.abs(parseFloat(row?.delivered_qty) || 0),
+            sub_unit: subUnit,
+            sub_quantity: Math.abs(parseFloat(row?.required_qty) || 0),
+            from_shelf_id: fromShelf,
+            to_shelf_id: toShelf,
+            invoice_id: isPurchaseSource ? null : (row?.invoice_id || null),
+            purchase_invoice_id: isPurchaseSource ? (row?.invoice_id || null) : null,
+            production_order_id: row?.production_order_id || null,
+            created_by_name: creatorId ? (userMap.get(String(creatorId)) || String(creatorId)) : '-',
+            created_at: row?.created_at || null,
+            _readonly: autoSource || !!row?.invoice_id || !!row?.production_order_id,
+          };
+        });
+
+        const oldValue = data.map(({ key, ...rest }) => rest);
+        const newValue = mappedRows.map(({ key, ...rest }) => rest);
+        await insertChangelog(supabase, moduleId, recordId, block, oldValue, newValue);
+
+        setData(mappedRows);
+        if (onSaveSuccess) onSaveSuccess(mappedRows);
+        message.success('ذخیره شد');
+        setIsEditing(false);
+        return;
+      }
 
       if (isProductInventory || isShelfInventory) {
         const baseRows = tempData.map(({ key, ...rest }) => ({ ...rest }));
@@ -571,11 +885,13 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   const getColWidth = (col: any) => {
     if (col.width) return col.width;
-    if (col.type === FieldType.RELATION) return 180;
-    if (col.type === FieldType.NUMBER || col.type === FieldType.PERCENTAGE_OR_AMOUNT) return 80;
-    if (col.type === FieldType.PRICE) return 110;
+    if (col.type === FieldType.RELATION) return 240;
+    if (col.type === FieldType.SELECT || col.type === FieldType.MULTI_SELECT || col.type === FieldType.STATUS) return 170;
+    if (col.type === FieldType.NUMBER || col.type === FieldType.PERCENTAGE_OR_AMOUNT) return 120;
+    if (col.type === FieldType.PRICE) return 140;
+    if (col.type === FieldType.DATETIME) return 170;
     if (col.type === FieldType.DATE) return 100;
-    return 125;
+    return 160;
   };
 
   const getRowKey = (row: any) => String(row.key || row.id || '');
@@ -841,6 +1157,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
       key: col.key,
       width: getColWidth(col),
       render: (text: any, record: any, index: number) => {
+        const rowKey = getRowKey(record);
+
         const fieldConfig: ModuleField = {
           key: col.key,
           type: col.type,
@@ -849,8 +1167,14 @@ const EditableTable: React.FC<EditableTableProps> = ({
           relationConfig: col.relationConfig,
           dynamicOptionsCategory: col.dynamicOptionsCategory,
           readonly: col.readonly
+            || (isProductStockMovements && (record as any)?._readonly)
+            || (isProductStockMovements && ['invoice_id', 'production_order_id', 'created_by_name', 'created_at', 'main_unit', 'sub_unit'].includes(col.key))
+            || (isProductStockMovements && col.key === 'source' && (record as any)?._readonly)
+            || (isProductStockMovements && col.key === 'from_shelf_id' && String((record as any)?.voucher_type || '') === 'incoming')
+            || (isProductStockMovements && col.key === 'to_shelf_id' && String((record as any)?.voucher_type || '') === 'outgoing')
             || ((record as any)?._lockedFields || []).includes(col.key)
-            || (isProductionOrder && isBomItemBlock && (record as any)?.selected_product_id && !editableAfterSelection.has(col.key)),
+            || (isProductionOrder && isBomItemBlock && (record as any)?.selected_product_id && !editableAfterSelection.has(col.key))
+            || (isInvoiceItems && col.key === 'source_shelf_id' && !record?.product_id),
         };
 
         let options = col.options;
@@ -858,9 +1182,17 @@ const EditableTable: React.FC<EditableTableProps> = ({
           options = dynamicOptions[col.dynamicOptionsCategory] || localDynamicOptions[col.dynamicOptionsCategory];
           if (Array.isArray(options)) options = dedupeOptionsByLabel(options);
         }
+        if (isProductStockMovements && col.key === 'source' && Array.isArray(options) && !(record as any)?._readonly) {
+          const allowed = new Set(['opening_balance', 'inventory_count', 'waste']);
+          options = options.filter((opt: any) => allowed.has(String(opt?.value || '')));
+        }
         if (col.type === FieldType.RELATION) {
           const specificKey = `${block.id}_${col.key}`;
           options = relationOptions[specificKey] || relationOptions[col.key] || [];
+          if (isInvoiceItems && col.key === 'source_shelf_id') {
+            const shelvesState = shelfOptionsByRow[rowKey];
+            options = shelvesState?.options || [];
+          }
         }
 
         const handleChange = (val: any) => {
@@ -873,10 +1205,17 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
         const typeKey = col.key === 'discount' ? 'discount_type' : col.key === 'vat' ? 'vat_type' : null;
         const typeValue = typeKey ? (record as any)[typeKey] : null;
+        const isMovementQty = isProductStockMovements && col.key === 'main_quantity' && !isEditing;
+        const movementType = String((record as any)?.voucher_type || '');
+        const movementColor = movementType === 'incoming' ? 'text-green-600' : movementType === 'outgoing' ? 'text-red-600' : 'text-blue-600';
+
+        if (isMovementQty) {
+          return <span className={`persian-number font-bold ${movementColor}`}>{toPersianNumber(text || 0)}</span>;
+        }
 
         return (
-          <div style={{ minWidth: '100%' }} className="flex items-center gap-1">
-            <div className="flex-1">
+          <div className="flex items-center gap-1 w-full min-w-0 max-w-full overflow-hidden">
+            <div className="flex-1 min-w-0 overflow-hidden">
               <SmartFieldRenderer
                 field={fieldConfig}
                 value={text}
@@ -897,7 +1236,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
                 title={typeValue === 'percent' ? 'درصد' : 'مبلغ'}
                 className="px-1"
               >
-                {typeValue === 'percent' ? '٪' : 'ریال'}
+                {typeValue === 'percent' ? '٪' : (isAnyInvoiceItems ? 'تومان' : 'ریال')}
               </Button>
             )}
           </div>
@@ -910,8 +1249,14 @@ const EditableTable: React.FC<EditableTableProps> = ({
             title: '',
             key: 'actions',
             width: 50,
-            render: (_: any, __: any, i: number) => (
-              <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeRow(i)} />
+            render: (_: any, row: any, i: number) => (
+              <Button
+                danger
+                type="text"
+                icon={<DeleteOutlined />}
+                onClick={() => removeRow(i)}
+                disabled={isProductStockMovements && row?._readonly}
+              />
             ),
           },
         ]
@@ -959,8 +1304,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
           rowKey={(record: any) => record.key || record.id || Math.random()}
           locale={{ emptyText: <Empty description="لیست خالی است" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
           className="custom-erp-table font-medium editable-table-main"
-          tableLayout="fixed"
-          scroll={{ x: '100%' }}
+          tableLayout="auto"
+          scroll={{ x: 'max-content' }}
           expandable={isProductionOrder && isBomItemBlock ? {
             expandedRowKeys,
             onExpandedRowsChange: (keys) => setExpandedRowKeys(keys as React.Key[]),
@@ -1030,6 +1375,34 @@ const EditableTable: React.FC<EditableTableProps> = ({
             <Button type="dashed" block icon={<PlusOutlined />} onClick={addRow}>افزودن ردیف جدید</Button>
           ) : undefined}
           summary={(pageData) => {
+            if (isProductStockMovements) {
+              const incoming = pageData.reduce((sum: number, row: any) => {
+                const qty = Math.abs(parseFloat(row?.main_quantity) || 0);
+                const type = String(row?.voucher_type || '');
+                if (type === 'incoming' || type === 'transfer') return sum + qty;
+                return sum;
+              }, 0);
+              const outgoing = pageData.reduce((sum: number, row: any) => {
+                const qty = Math.abs(parseFloat(row?.main_quantity) || 0);
+                const type = String(row?.voucher_type || '');
+                if (type === 'outgoing' || type === 'transfer') return sum + qty;
+                return sum;
+              }, 0);
+              return (
+                <Table.Summary fixed>
+                  <Table.Summary.Row className="bg-gray-50 dark:bg-gray-800 font-bold">
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div className="flex flex-wrap gap-4 text-xs md:text-sm">
+                        <span>جمع ورود: <span className="text-green-600 persian-number">{toPersianNumber(incoming)}</span></span>
+                        <span>جمع خروج: <span className="text-red-600 persian-number">{toPersianNumber(outgoing)}</span></span>
+                        <span>موجودی فعلی: <span className="text-leather-600 persian-number">{toPersianNumber(currentProductStock)}</span></span>
+                      </div>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              );
+            }
+
             let cellIndex = 0;
             const cells: React.ReactNode[] = [];
 
@@ -1057,12 +1430,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
               if (col.showTotal || ['total_price', 'amount', 'quantity', 'usage', 'stock'].includes(col.key)) {
                 let total = 0;
-                if (isInvoiceItems && (col.key === 'discount' || col.key === 'vat')) {
+                if (isAnyInvoiceItems && (col.key === 'discount' || col.key === 'vat')) {
                   total = pageData.reduce((prev: number, current: any) => {
                     const amounts = getInvoiceAmounts(current);
                     return prev + (col.key === 'discount' ? amounts.discountAmount : amounts.vatAmount);
                   }, 0);
-                } else if (isInvoicePayments && col.key === 'amount') {
+                } else if (isAnyInvoicePayments && col.key === 'amount') {
                   total = pageData.reduce((prev: number, current: any) =>
                     current?.status === 'received' ? prev + (parseFloat(current[col.key]) || 0) : prev,
                   0);
@@ -1144,10 +1517,25 @@ const EditableTable: React.FC<EditableTableProps> = ({
         .editable-table-main .ant-table-cell {
           padding: 10px 12px !important;
           font-size: 12px !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis;
         }
         .editable-table-main .ant-table-thead > tr > th {
           padding: 10px 10px !important;
           font-size: 12px !important;
+        }
+        .editable-table-main .ant-table-cell .ant-form-item {
+          margin-bottom: 0 !important;
+          min-width: 0 !important;
+        }
+        .editable-table-main .ant-table-cell .ant-select,
+        .editable-table-main .ant-table-cell .ant-input,
+        .editable-table-main .ant-table-cell .ant-input-number,
+        .editable-table-main .ant-table-cell .ant-picker {
+          max-width: 100% !important;
+        }
+        .editable-table-main .ant-table-cell .ant-select-selector {
+          min-width: 0 !important;
         }
         .custom-erp-table .ant-table-expanded-row > td {
           overflow-x: auto !important;

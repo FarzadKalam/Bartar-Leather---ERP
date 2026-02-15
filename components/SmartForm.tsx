@@ -12,6 +12,7 @@ import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, S
 import { convertArea } from '../utils/unitConversions';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
+import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -158,15 +159,19 @@ const SmartForm: React.FC<SmartFormProps> = ({
         if (!targetModule || !targetField || !key) return;
 
         try {
+            const isShelvesTarget = targetModule === 'shelves';
+            const extraSelect = isShelvesTarget ? ', shelf_number' : '';
             // تلاش برای گرفتن نام + کد سیستمی
             const { data, error } = await supabase
                 .from(targetModule)
-                .select(`id, ${targetField}, system_code`)
+                .select(`id, ${targetField}, system_code${extraSelect}`)
                 .limit(100);
             
             if (!error && data) {
                 options[key] = data.map((item: any) => ({
-                    label: item.system_code ? `${item[targetField]} (${item.system_code})` : item[targetField],
+                    label: item.system_code
+                      ? `${item[targetField] || item.shelf_number || item.system_code || item.id} (${item.system_code})`
+                      : (item[targetField] || item.shelf_number || item.system_code || item.id),
                     value: item.id
                 }));
                 return;
@@ -516,6 +521,18 @@ const SmartForm: React.FC<SmartFormProps> = ({
         if (recordId) {
           await supabase.from(module.table).update(values).eq('id', recordId);
 
+          if (module.id === 'invoices' || module.id === 'purchase_invoices') {
+            await applyInvoiceFinalizationInventory({
+              supabase: supabase as any,
+              moduleId: module.id,
+              recordId,
+              previousStatus: initialRecord?.status ?? null,
+              nextStatus: values?.status ?? initialRecord?.status ?? null,
+              invoiceItems: values?.invoiceItems ?? initialRecord?.invoiceItems ?? [],
+              userId,
+            });
+          }
+
           const changes: any[] = [];
           const compareKeys = new Set<string>([...Object.keys(values || {}), ...Object.keys(initialRecord || {})]);
           compareKeys.forEach((key) => {
@@ -556,6 +573,17 @@ const SmartForm: React.FC<SmartFormProps> = ({
           if (error) throw error;
 
           if (inserted?.id) {
+            if (module.id === 'invoices' || module.id === 'purchase_invoices') {
+              await applyInvoiceFinalizationInventory({
+                supabase: supabase as any,
+                moduleId: module.id,
+                recordId: inserted.id,
+                previousStatus: null,
+                nextStatus: values?.status ?? null,
+                invoiceItems: values?.invoiceItems ?? [],
+                userId,
+              });
+            }
             if (module.id === 'production_orders') {
               const postPayload: any = {};
               if (values?.grid_materials !== undefined) postPayload.grid_materials = values.grid_materials;
@@ -801,6 +829,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
               {/* Blocks */}
               {sortedBlocks.map(block => {
                 if (block.visibleIf && !checkVisibility(block.visibleIf, currentValues)) return null;
+                if (module.id === 'products' && block.id === 'product_stock_movements') return null;
 
                 if (module.id === 'production_orders' && !recordId && block.type === BlockType.GRID_TABLE) {
                   return null;
@@ -859,6 +888,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                               dynamicOptions={dynamicOptions}
                               canEditModule={canEditModule}
                               canViewField={canViewField}
+                              readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
                               onChange={(newData: any[]) => {
                                 const newFormData = { ...formData, [block.id]: newData };
                                 setFormData(newFormData);

@@ -4,6 +4,8 @@ import { MODULES } from "../moduleRegistry";
 import SmartForm from "../components/SmartForm";
 import { Button, Result } from "antd";
 import { ArrowRightOutlined, SaveOutlined } from "@ant-design/icons";
+import { supabase } from "../supabaseClient";
+import { applyInvoiceFinalizationInventory } from "../utils/invoiceInventoryWorkflow";
 
 export const ModuleCreate = () => {
   const { moduleId } = useParams();
@@ -70,6 +72,31 @@ export const ModuleCreate = () => {
                 onSave={async (values) => {
                     console.log("📤 Submitting to Refine:", values);
                     try {
+                        if (moduleId === "invoices" || moduleId === "purchase_invoices") {
+                            const { data: inserted, error } = await supabase
+                                .from(moduleConfig.table)
+                                .insert(values)
+                                .select("id")
+                                .single();
+                            if (error) throw error;
+                            if (!inserted?.id) throw new Error("ثبت فاکتور ناموفق بود");
+
+                            const { data: authData } = await supabase.auth.getUser();
+                            const userId = authData?.user?.id || null;
+                            await applyInvoiceFinalizationInventory({
+                                supabase: supabase as any,
+                                moduleId,
+                                recordId: inserted.id,
+                                previousStatus: null,
+                                nextStatus: values?.status ?? null,
+                                invoiceItems: values?.invoiceItems ?? [],
+                                userId,
+                            });
+
+                            navigate(`/${moduleId}/${inserted.id}`);
+                            return;
+                        }
+
                         // استفاده از onFinish که Refine فراهم کرده
                         await formProps.onFinish?.(values);
                         console.log("✅ Submit successful!");

@@ -6,6 +6,7 @@ import { customerModule } from './modules/customerConfig';
 import { supplierModule } from './modules/supplierConfig';
 import { tasksModule } from './modules/tasksConfig';
 import { invoicesConfig } from './modules/invoicesConfig';
+import { purchaseInvoicesConfig } from './modules/purchaseInvoicesConfig';
 import { warehousesConfig } from './modules/warehousesConfig';
 import { shelvesConfig } from './modules/shelvesConfig';
 import { calculationFormulasModule } from './modules/calculationFormulasConfig';
@@ -20,6 +21,7 @@ export const MODULES: Record<string, ModuleDefinition> = {
   customers: customerModule,
   suppliers: supplierModule,
   invoices: invoicesConfig,
+  purchase_invoices: purchaseInvoicesConfig,
   tasks: tasksModule,
   calculation_formulas: calculationFormulasModule,
 };

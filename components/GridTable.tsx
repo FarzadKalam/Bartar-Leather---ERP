@@ -4,7 +4,7 @@ import { PlusOutlined, SaveOutlined, CloseOutlined, EditOutlined, RightOutlined,
 import { supabase } from '../supabaseClient';
 import { BlockDefinition, FieldType } from '../types';
 import { MODULES } from '../moduleRegistry';
-import { convertArea } from '../utils/unitConversions';
+import { convertArea, HARD_CODED_UNIT_OPTIONS } from '../utils/unitConversions';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 import SmartFieldRenderer from './SmartFieldRenderer';
@@ -49,14 +49,7 @@ const defaultPiece = () => ({
   image_url: null,
 });
 
-const unitOptions = [
-  { label: 'عدد', value: 'عدد' },
-  { label: 'بسته', value: 'بسته' },
-  { label: 'فوت مربع', value: 'فوت مربع' },
-  { label: 'سانتیمتر مربع', value: 'سانتیمتر مربع' },
-  { label: 'میلیمتر مربع', value: 'میلیمتر مربع' },
-  { label: 'متر مربع', value: 'متر مربع' },
-];
+const unitOptions = HARD_CODED_UNIT_OPTIONS;
 
 const createEmptyRow = () => ({
   key: Date.now(),

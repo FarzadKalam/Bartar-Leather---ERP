@@ -346,11 +346,14 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
             if (field.relationConfig) {
               const { targetModule, targetField, filter } = field.relationConfig;
               const selectFields = ["id", "system_code"].concat(targetField ? [targetField] : []);
+              if (targetModule === "shelves" && !selectFields.includes("shelf_number")) {
+                selectFields.push("shelf_number");
+              }
               let query = supabase.from(targetModule).select(selectFields.join(", "));
               if (filter) Object.keys(filter).forEach((k) => (query = query.eq(k, filter[k])));
               const { data: relData } = await query.limit(200);
               const options = (relData || []).map((i: any) => {
-                const labelValue = targetField ? (i as any)[targetField] : i.id;
+                const labelValue = (targetField ? (i as any)[targetField] : null) || i.shelf_number || i.system_code || i.id;
                 const sys = (i as any).system_code ? ` (${(i as any).system_code})` : "";
                 return { label: `${labelValue}${sys}`, value: i.id };
               });

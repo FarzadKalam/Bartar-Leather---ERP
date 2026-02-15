@@ -106,6 +106,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
 
       {module.blocks
         ?.filter((b: any) => b.type === 'table' || b.type === 'grid_table')
+        .filter((b: any) => !(module.id === 'products' && b.id === 'product_stock_movements'))
         .filter((b: any) => (b.visibleIf ? checkVisibility(b.visibleIf) : true))
           .map((block: any) => (
         <div key={block.id}>

@@ -1,4 +1,5 @@
 import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, LogicOperator, FieldNature, RowCalculationType } from '../types';
+import { HARD_CODED_UNIT_OPTIONS } from '../utils/unitConversions';
 
 // ====== 1. تعریف تمام فیلدها ======
 const fieldsArray: any[] = [
@@ -33,27 +34,13 @@ const fieldsArray: any[] = [
   },
   {
     key: 'main_unit', labels: { fa: 'واحد اصلی', en: 'Main Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/5,
-    options: [
-      { label: 'عدد', value: 'عدد' },
-      { label: 'بسته', value: 'بسته' },
-      { label: 'فوت مربع', value: 'فوت مربع' },
-      { label: 'سانتیمتر مربع', value: 'سانتیمتر مربع' },
-      { label: 'میلیمتر مربع', value: 'میلیمتر مربع' },
-      { label: 'متر مربع', value: 'متر مربع' },
-    ],
+    options: HARD_CODED_UNIT_OPTIONS,
     nature: FieldNature.PREDEFINED,
     isKey: false
   },
   {
     key: 'sub_unit', labels: { fa: 'واحد فرعی', en: 'Sub Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/4,
-    options: [
-      { label: 'فوت مربع', value: 'فوت مربع' },
-      { label: 'سانتیمتر مربع', value: 'سانتیمتر مربع' },
-      { label: 'میلیمتر مربع', value: 'میلیمتر مربع' },
-      { label: 'متر مربع', value: 'متر مربع' },
-      { label: 'عدد', value: 'عدد' },
-      { label: 'بسته', value: 'بسته' },
-    ],
+    options: HARD_CODED_UNIT_OPTIONS,
     nature: FieldNature.PREDEFINED,
     isKey: false
   },
@@ -84,6 +71,17 @@ const fieldsArray: any[] = [
     logic: { visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' } }
   },
   {
+    key: 'production_order_id',
+    labels: { fa: 'سفارش تولید این محصول', en: 'Production Order' },
+    type: FieldType.RELATION,
+    location: FieldLocation.BLOCK,
+    blockId: 'baseInfo',
+    order: 3.25,
+    relationConfig: { targetModule: 'production_orders', targetField: 'name' },
+    nature: FieldNature.STANDARD,
+    logic: { visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' } }
+  },
+  {
     key: 'related_supplier',
     labels: { fa: 'تامین‌کننده مرتبط', en: 'Related Supplier' },
     type: FieldType.RELATION,
@@ -102,6 +100,14 @@ const fieldsArray: any[] = [
   { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 9, nature: FieldNature.PREDEFINED, isTableColumn: true },
   { key: 'production_cost', labels: { fa: 'بهای تمام شده تولید', en: 'Production Cost' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 10, nature: FieldNature.SYSTEM, readonly: true, description: 'محاسبه خودکار از شناسنامه تولید' },
   { key: 'auto_name_enabled', labels: { fa: 'نامگذاری خودکار', en: 'Auto Name' }, type: FieldType.CHECKBOX, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 999, nature: FieldNature.PREDEFINED, readonly: false },
+  {
+    key: 'grid_materials',
+    labels: { fa: 'مواد اولیه', en: 'Materials' },
+    type: FieldType.JSON,
+    location: FieldLocation.BLOCK,
+    order: 1000,
+    nature: FieldNature.STANDARD
+  },
 
   // فیلدهای اختصاصی چرم
   {
@@ -212,7 +218,7 @@ export const createShelfInventoryTableColumns = () => {
       key: 'shelf_id',
       title: 'نام قفسه',
       type: FieldType.RELATION,
-      relationConfig: { targetModule: 'shelves', targetField: 'shelf_number' }
+      relationConfig: { targetModule: 'shelves', targetField: 'name' }
     },
     {
       key: 'warehouse_id',
@@ -223,12 +229,99 @@ export const createShelfInventoryTableColumns = () => {
     },
     {
       key: 'main_unit',
-      title: 'واحد',
+      title: 'واحد اصلی',
       type: FieldType.SELECT,
-      dynamicOptionsCategory: 'main_unit',
+      options: HARD_CODED_UNIT_OPTIONS,
       readonly: true
     },
-    { key: 'stock', title: 'موجودی در قفسه', type: FieldType.NUMBER, showTotal: true }
+    {
+      key: 'sub_unit',
+      title: 'واحد فرعی',
+      type: FieldType.SELECT,
+      options: HARD_CODED_UNIT_OPTIONS,
+      readonly: true
+    },
+    { key: 'stock', title: 'موجودی در قفسه (اصلی)', type: FieldType.NUMBER, showTotal: true, readonly: true },
+    { key: 'sub_stock', title: 'موجودی در قفسه (فرعی)', type: FieldType.NUMBER, showTotal: true, readonly: true }
+  ];
+};
+
+export const createProductStockMovementsTableColumns = () => {
+  return [
+    {
+      key: 'voucher_type',
+      title: 'نوع حواله',
+      type: FieldType.SELECT,
+      options: [
+        { label: 'ورود', value: 'incoming' },
+        { label: 'خروج', value: 'outgoing' },
+        { label: 'جابجایی', value: 'transfer' },
+      ],
+    },
+    {
+      key: 'source',
+      title: 'منبع',
+      type: FieldType.SELECT,
+      options: [
+        { label: 'موجودی اول دوره', value: 'opening_balance' },
+        { label: 'انبارگردانی', value: 'inventory_count' },
+        { label: 'ضایعات', value: 'waste' },
+        { label: 'فاکتور فروش', value: 'sales_invoice' },
+        { label: 'فاکتور خرید', value: 'purchase_invoice' },
+        { label: 'تولید', value: 'production' },
+      ],
+    },
+    {
+      key: 'main_unit',
+      title: 'واحد اصلی',
+      type: FieldType.SELECT,
+      options: HARD_CODED_UNIT_OPTIONS,
+      readonly: true
+    },
+    { key: 'main_quantity', title: 'مقدار واحد اصلی', type: FieldType.NUMBER, showTotal: true },
+    {
+      key: 'sub_unit',
+      title: 'واحد فرعی',
+      type: FieldType.SELECT,
+      options: HARD_CODED_UNIT_OPTIONS,
+      readonly: true
+    },
+    { key: 'sub_quantity', title: 'مقدار واحد فرعی', type: FieldType.NUMBER, showTotal: true },
+    {
+      key: 'from_shelf_id',
+      title: 'قفسه برداشت',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'shelves', targetField: 'name' }
+    },
+    {
+      key: 'to_shelf_id',
+      title: 'قفسه ورود',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'shelves', targetField: 'name' }
+    },
+    {
+      key: 'invoice_id',
+      title: 'فاکتور مرتبط',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'invoices', targetField: 'name' },
+      readonly: true
+    },
+    {
+      key: 'purchase_invoice_id',
+      title: 'فاکتور خرید مرتبط',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'purchase_invoices', targetField: 'name' },
+      readonly: true
+    },
+    {
+      key: 'production_order_id',
+      title: 'سفارش تولید مرتبط',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'production_orders', targetField: 'name' },
+      readonly: true
+    },
+    { key: 'created_by_name', title: 'ایجادکننده', type: FieldType.TEXT, readonly: true },
+    { key: 'created_at', title: 'زمان ایجاد', type: FieldType.DATETIME, readonly: true }
   ];
 };
 
@@ -274,6 +367,20 @@ const BLOCKS = {
   yaraghSpec: { 
     id: 'yaraghSpec', titles: { fa: 'ویژگی های یراق', en: 'Fittings Specs' }, icon: 'ToolOutlined', order: 8, type: BlockType.FIELD_GROUP,
     visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' }
+  },
+  grid_materials: {
+    id: 'grid_materials',
+    titles: { fa: 'مواد اولیه', en: 'Materials' },
+    type: BlockType.GRID_TABLE,
+    order: 10,
+    gridConfig: {
+      categories: [
+        { value: 'leather', label: 'چرم', specBlockId: 'leatherSpec' },
+        { value: 'lining', label: 'آستر', specBlockId: 'liningSpec' },
+        { value: 'accessory', label: 'خرجکار', specBlockId: 'kharjkarSpec' },
+        { value: 'fitting', label: 'یراق', specBlockId: 'yaraghSpec' },
+      ],
+    },
   },
 
   // بلوک‌های جدول (BOM-like) - با ستون‌های دینامیک
@@ -345,6 +452,15 @@ const BLOCKS = {
     rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
     tableColumns: createShelfInventoryTableColumns()
   },
+  product_stock_movements: {
+    id: 'product_stock_movements',
+    titles: { fa: 'ورود و خروج کالا', en: 'Inventory Movements' },
+    icon: 'SwapOutlined',
+    order: 9.5,
+    type: BlockType.TABLE,
+    rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
+    tableColumns: createProductStockMovementsTableColumns()
+  },
 };
 
 export const BOM_TABLE_BLOCKS = {
@@ -381,22 +497,11 @@ export const productsConfig: ModuleDefinition = {
         ...BLOCKS.yaraghSpec, 
         visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } 
       },
-          
+      
       BLOCKS.product_inventory,
+      BLOCKS.product_stock_movements,
       { 
-        ...BLOCKS.items_leather,
-        visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
-      },
-      { 
-        ...BLOCKS.items_lining,
-        visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
-      },
-      { 
-        ...BLOCKS.items_fitting,
-        visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
-      },
-      { 
-        ...BLOCKS.items_accessory,
+        ...BLOCKS.grid_materials,
         visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' }
       }
     ], 
