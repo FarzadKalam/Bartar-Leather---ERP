@@ -253,6 +253,10 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
     { key: 'more', icon: <MenuFoldOutlined />, label: 'بیشتر', isMenu: true },
   ];
 
+  const toggleSidebar = () => {
+    setCollapsed((prev) => !prev);
+  };
+
   return (
     <AntLayout className="min-h-screen bg-gray-100 dark:bg-[#141414] transition-colors duration-300">
       
@@ -269,7 +273,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
         collapsed={collapsed}
         collapsedWidth={isMobile ? 0 : 80}
         zeroWidthTriggerStyle={{ display: 'none' }}
-        className={`border-l border-gray-200 dark:border-gray-800 shadow-2xl transition-all duration-300 z-[1100] ${isMobile && collapsed ? '!hidden w-0 !min-w-0 !max-w-0 overflow-hidden' : ''}`}
+        className={`app-main-sider border-l border-gray-200 dark:border-gray-800 shadow-2xl transition-all duration-300 z-[1100] ${isMobile && collapsed ? 'mobile-collapsed !hidden w-0 !min-w-0 !max-w-0 overflow-hidden' : ''}`}
         style={{ 
           height: '100vh', 
           position: 'fixed', 
@@ -308,7 +312,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
                 <Button 
                     type="text"
                     icon={collapsed ? <MenuUnfoldOutlined className="text-xl" /> : <MenuFoldOutlined className="text-xl" />}
-                    onClick={() => setCollapsed(!collapsed)}
+                    onClick={toggleSidebar}
                     className="w-full h-full text-gray-500 dark:text-gray-400 hover:text-leather-500 hover:bg-gray-50 dark:hover:bg-white/5 rounded-none transition-all"
                 />
             </div>
@@ -455,7 +459,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
                return (
                  <div 
                    key={item.key} 
-                   onClick={() => item.isMenu ? setCollapsed(!collapsed) : navigate(item.key)} 
+                   onClick={() => item.isMenu ? toggleSidebar() : navigate(item.key)} 
                    className={`flex flex-col items-center gap-1 w-12 cursor-pointer ${isActive ? 'text-leather-500' : 'text-gray-400 dark:text-gray-500'}`}
                  >
                     <div className="text-xl">{item.icon}</div>

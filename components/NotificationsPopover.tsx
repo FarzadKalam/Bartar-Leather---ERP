@@ -1,17 +1,44 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Badge, Button, Drawer, Empty, Input, List, Select, Skeleton, Tabs } from 'antd';
-import { BellOutlined, PlusOutlined, UserOutlined, TeamOutlined, MessageOutlined, CloseOutlined, EditOutlined, DeleteOutlined, RollbackOutlined, CheckOutlined } from '@ant-design/icons';
+import { Badge, Button, Drawer, Empty, Input, InputNumber, List, Select, Skeleton, Tabs } from 'antd';
+import { BellOutlined, PlusOutlined, UserOutlined, TeamOutlined, MessageOutlined, CloseOutlined, EditOutlined, DeleteOutlined, RollbackOutlined, CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import { safeJalaliFormat, toPersianNumber } from '../utils/persianNumberFormatter';
 import QrScanPopover from './QrScanPopover';
+import ProductionStagesField from './ProductionStagesField';
 
 interface NotificationsPopoverProps {
   isMobile: boolean;
 }
 
 const MAX_ITEMS = 10;
+const SEEN_NOTES_STORAGE_KEY = 'notif_seen_notes_v1';
+const SEEN_TASKS_STORAGE_KEY = 'notif_seen_tasks_v1';
+const SEEN_RESP_STORAGE_KEY = 'notif_seen_responsibilities_v1';
+const SEEN_COMPLETED_TASKS_STORAGE_KEY = 'notif_seen_completed_tasks_v1';
+
+const loadSeenSet = (key: string) => {
+  if (typeof window === 'undefined') return new Set<string>();
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return new Set<string>();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.map((item: any) => String(item)));
+  } catch {
+    return new Set<string>();
+  }
+};
+
+const persistSeenSet = (key: string, values: Set<string>) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(Array.from(values)));
+  } catch {
+    // ignore storage errors
+  }
+};
 
 const resolveOptionLabel = (value: any, options?: { label: string; value: any }[]) => {
   if (!options?.length) return null;
@@ -70,12 +97,14 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
   const [mentionValues, setMentionValues] = useState<string[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [editingNoteValue, setEditingNoteValue] = useState('');
-  const [seenNoteIds, setSeenNoteIds] = useState<Set<string>>(new Set());
-  const [seenTaskIds, setSeenTaskIds] = useState<Set<string>>(new Set());
-  const [seenResponsibilityIds, setSeenResponsibilityIds] = useState<Set<string>>(new Set());
+  const [seenNoteIds, setSeenNoteIds] = useState<Set<string>>(() => loadSeenSet(SEEN_NOTES_STORAGE_KEY));
+  const [seenTaskIds, setSeenTaskIds] = useState<Set<string>>(() => loadSeenSet(SEEN_TASKS_STORAGE_KEY));
+  const [seenResponsibilityIds, setSeenResponsibilityIds] = useState<Set<string>>(() => loadSeenSet(SEEN_RESP_STORAGE_KEY));
+  const [seenCompletedTaskIds, setSeenCompletedTaskIds] = useState<Set<string>>(() => loadSeenSet(SEEN_COMPLETED_TASKS_STORAGE_KEY));
   const [loadingNotes, setLoadingNotes] = useState(false);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [loadingResponsibilities, setLoadingResponsibilities] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const prevNotesRef = useRef<Set<string>>(new Set());
   const prevTasksRef = useRef<Set<string>>(new Set());
   const prevResponsibilitiesRef = useRef<Set<string>>(new Set());
@@ -84,6 +113,10 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
   const tasksConfig = MODULES['tasks'];
   const statusOptions = tasksConfig?.fields?.find((f: any) => f.key === 'status')?.options || [];
   const priorityOptions = tasksConfig?.fields?.find((f: any) => f.key === 'priority')?.options || [];
+  const toNumber = (value: any) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   const moduleOptions = Object.values(MODULES)
     .filter((mod: any) => mod?.id && (mod?.table || mod?.id))
     .map((mod: any) => ({ label: mod.titles?.fa || mod.id, value: mod.id }));
@@ -105,6 +138,22 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
       Notification.requestPermission();
     }
   }, []);
+
+  useEffect(() => {
+    persistSeenSet(SEEN_NOTES_STORAGE_KEY, seenNoteIds);
+  }, [seenNoteIds]);
+
+  useEffect(() => {
+    persistSeenSet(SEEN_TASKS_STORAGE_KEY, seenTaskIds);
+  }, [seenTaskIds]);
+
+  useEffect(() => {
+    persistSeenSet(SEEN_RESP_STORAGE_KEY, seenResponsibilityIds);
+  }, [seenResponsibilityIds]);
+
+  useEffect(() => {
+    persistSeenSet(SEEN_COMPLETED_TASKS_STORAGE_KEY, seenCompletedTaskIds);
+  }, [seenCompletedTaskIds]);
 
   useEffect(() => {
     const loadMentions = async () => {
@@ -300,11 +349,14 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
     if (!profile.id) return [];
     const userId = profile.id;
     const roleId = profile.role_id;
+    const requestedStatuses = (Array.isArray(statuses) ? statuses : []).map((item) => String(item));
+    const queryStatuses = Array.from(new Set([...requestedStatuses, 'done']));
+    const fallbackStatuses = ['todo', 'in_progress', 'review', 'done'];
 
     let query = supabase
       .from('tasks')
-      .select('id, name, status, priority, created_at, due_date, assignee_id, assignee_type, related_to_module, related_product, related_customer, related_supplier, related_production_order, related_invoice')
-      .in('status', statuses)
+      .select('id, name, status, priority, produced_qty, created_at, due_date, assignee_id, assignee_type, production_line_id, related_to_module, related_product, related_customer, related_supplier, related_production_order, related_invoice')
+      .in('status', queryStatuses.length ? queryStatuses : fallbackStatuses)
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -315,7 +367,17 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
     }
 
     const { data } = await query;
-    const tasksList = data || [];
+    const tasksList = (data || []).filter((task: any) => {
+      const normalizedStatus = String(task?.status || '').toLowerCase();
+      const isCompleted = normalizedStatus === 'done' || normalizedStatus === 'completed';
+      if (isCompleted && seenCompletedTaskIds.has(String(task?.id || ''))) {
+        return false;
+      }
+      if (!requestedStatuses.length) {
+        return normalizedStatus !== 'canceled';
+      }
+      return requestedStatuses.includes(normalizedStatus) || isCompleted;
+    });
 
     const relatedPairs: { module_id: string; record_id: string }[] = [];
     tasksList.forEach((task) => {
@@ -404,12 +466,27 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
     setLoadingResponsibilities(true);
     const [notesData, tasksData, responsibilitiesData] = await Promise.all([
       fetchNotes(),
-      fetchTasks(statusFilter.length ? statusFilter : statusOptions.map((o: any) => o.value)),
+      fetchTasks(
+        statusFilter.length
+          ? statusFilter
+          : statusOptions
+              .map((o: any) => String(o.value))
+              .filter((val: string) => val !== 'done' && val !== 'canceled')
+      ),
       fetchResponsibilities(),
     ]);
     setNotes(notesData);
     setTasks(tasksData);
     setResponsibilities(responsibilitiesData);
+    const completedTaskIds = tasksData
+      .filter((task: any) => {
+        const normalizedStatus = String(task?.status || '').toLowerCase();
+        return normalizedStatus === 'done' || normalizedStatus === 'completed';
+      })
+      .map((task: any) => String(task.id));
+    if (completedTaskIds.length) {
+      setSeenCompletedTaskIds((prev) => new Set([...prev, ...completedTaskIds]));
+    }
     await buildRecordTitleMap(responsibilitiesData.map((r: any) => ({ module_id: r.module_id, record_id: r.id })));
     await loadPeopleMaps(responsibilitiesData);
     setLoadingNotes(false);
@@ -444,16 +521,18 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
     }
   };
 
+  const handleManualRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshAll(true);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   useEffect(() => {
     if (open) refreshAll(true);
   }, [open, profile.id]);
-
-  useEffect(() => {
-    if (!open) return;
-    setSeenNoteIds((prev) => new Set([...prev, ...notes.map((n: any) => n.id)]));
-    setSeenTaskIds((prev) => new Set([...prev, ...tasks.map((t: any) => t.id)]));
-    setSeenResponsibilityIds((prev) => new Set([...prev, ...responsibilities.map((r: any) => r.id)]));
-  }, [open, notes, tasks, responsibilities]);
 
   useEffect(() => {
     if (!profile.id) return;
@@ -466,16 +545,50 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
   useEffect(() => {
     if (!open) return;
     if (statusFilter.length) {
-      fetchTasks(statusFilter).then(setTasks);
+      fetchTasks(statusFilter).then((nextTasks) => {
+        setTasks(nextTasks);
+        const completedTaskIds = (nextTasks || [])
+          .filter((task: any) => {
+            const normalizedStatus = String(task?.status || '').toLowerCase();
+            return normalizedStatus === 'done' || normalizedStatus === 'completed';
+          })
+          .map((task: any) => String(task.id));
+        if (completedTaskIds.length) {
+          setSeenCompletedTaskIds((prev) => new Set([...prev, ...completedTaskIds]));
+        }
+      });
     }
   }, [statusFilter, open]);
 
-  const notesCount = notes.filter((n: any) => !seenNoteIds.has(n.id)).length;
-  const tasksCount = tasks.filter((t: any) => !seenTaskIds.has(t.id)).length;
-  const responsibilitiesCount = responsibilities.filter((r: any) => !seenResponsibilityIds.has(r.id)).length;
+  const notesCount = notes.filter((n: any) => !seenNoteIds.has(String(n.id))).length;
+  const tasksCount = tasks.filter((t: any) => !seenTaskIds.has(String(t.id))).length;
+  const responsibilitiesCount = responsibilities.filter((r: any) => !seenResponsibilityIds.has(String(r.id))).length;
   const totalCount = notesCount + tasksCount + responsibilitiesCount;
 
-  const handleClose = () => setOpen(false);
+  const handleClose = () => {
+    setSeenNoteIds((prev) => new Set([...prev, ...notes.map((n: any) => String(n.id))]));
+    setSeenTaskIds((prev) => new Set([...prev, ...tasks.map((t: any) => String(t.id))]));
+    setSeenResponsibilityIds((prev) => new Set([...prev, ...responsibilities.map((r: any) => String(r.id))]));
+    setOpen(false);
+  };
+
+  const handleTaskProducedQtyChange = async (taskId: string, value: number | null) => {
+    try {
+      const nextProducedQty = Math.max(0, toNumber(value));
+      const { error } = await supabase
+        .from('tasks')
+        .update({ produced_qty: nextProducedQty })
+        .eq('id', taskId);
+      if (error) throw error;
+      setTasks((prev) => prev.map((item: any) => (
+        String(item?.id) === String(taskId)
+          ? { ...item, produced_qty: nextProducedQty }
+          : item
+      )));
+    } catch (err) {
+      console.warn('Could not save produced quantity for notification task', err);
+    }
+  };
 
   const renderNotes = () => {
     const data = showMore.notes ? notes : notes.slice(0, MAX_ITEMS);
@@ -729,6 +842,12 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
               const recordKey = moduleId && recordId ? `${moduleId}:${recordId}` : null;
               const recordTitle = recordKey ? recordTitleMap[recordKey] : null;
               const statusColor = task.status === 'done' ? 'border-green-300' : task.status === 'canceled' ? 'border-red-300' : task.status === 'review' ? 'border-orange-300' : 'border-gray-200';
+              const isProductionTask = (
+                String(task?.related_to_module || '') === 'production_orders'
+                && task?.related_production_order
+                && task?.production_line_id
+              );
+              const canEditProducedQty = !['todo', 'pending'].includes(String(task?.status || '').toLowerCase());
               return (
                 <div className="mb-2">
                   <div className={`bg-white dark:bg-white/5 border ${statusColor} dark:border-gray-700 rounded-xl p-3`}>
@@ -757,6 +876,21 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
                       </span>
                     )}
                   </div>
+                  {isProductionTask && (
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-gray-600">مقدار تولید شده:</span>
+                      <InputNumber
+                        size="small"
+                        min={0}
+                        value={toNumber(task?.produced_qty)}
+                        disabled={!canEditProducedQty}
+                        className="w-28 persian-number"
+                        onChange={(val) => {
+                          void handleTaskProducedQtyChange(String(task.id), val);
+                        }}
+                      />
+                    </div>
+                  )}
                   <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
                     {recordTitle && moduleId && recordId && (
                       <span>
@@ -770,6 +904,18 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
                         : (assigneeNameMap[task.assignee_id] || 'کاربر')}
                     </span>
                   </div>
+                  {isProductionTask && (
+                    <div className="mt-3 rounded-lg border border-[#d6c2ab] bg-[#faf5ef] p-2">
+                      <ProductionStagesField
+                        recordId={String(task.related_production_order)}
+                        moduleId="production_orders"
+                        readOnly
+                        compact
+                        lazyLoad
+                        onlyLineId={String(task.production_line_id)}
+                      />
+                    </div>
+                  )}
                   </div>
                 </div>
               );
@@ -859,15 +1005,16 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
   };
 
   const contentDesktop = (
-    <div className="w-[880px] max-w-[90vw] h-[90vh] grid grid-cols-3 gap-4 p-4">
-      <div className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-2xl bg-white/60 dark:bg-white/5 h-[calc(90vh-2rem)] overflow-hidden">
+    <div className="w-[880px] max-w-[90vw] h-[90vh] p-4">
+      <div className="grid grid-cols-3 gap-4 h-full min-h-0">
+      <div className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-2xl bg-white/60 dark:bg-white/5 h-full overflow-hidden">
         <div className="flex items-center justify-between px-4 pt-4 pb-2 sticky top-0 z-10 bg-white/90 dark:bg-[#1f1f1f]">
           <div className="font-bold text-gray-700">یادداشت‌ها</div>
           <Badge count={formatBadgeCount(notesCount)} color="#ef4444" />
         </div>
         {renderNotes()}
       </div>
-      <div className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-2xl bg-white/60 dark:bg-white/5 h-[calc(90vh-2rem)] overflow-hidden">
+      <div className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-2xl bg-white/60 dark:bg-white/5 h-full overflow-hidden">
         <div className="flex items-center justify-between px-4 pt-4 pb-2 sticky top-0 z-10 bg-white/90 dark:bg-[#1f1f1f]">
           <div className="font-bold text-gray-700">وظایف من</div>
           <Badge count={formatBadgeCount(tasksCount)} color="#ef4444" />
@@ -876,7 +1023,7 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
           {renderTasks()}
         </div>
       </div>
-      <div className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-2xl bg-white/60 dark:bg-white/5 h-[calc(90vh-2rem)] overflow-hidden">
+      <div className="flex flex-col border border-gray-200 dark:border-gray-700 rounded-2xl bg-white/60 dark:bg-white/5 h-full overflow-hidden">
         <div className="flex items-center justify-between px-4 pt-4 pb-2 sticky top-0 z-10 bg-white/90 dark:bg-[#1f1f1f]">
           <div className="font-bold text-gray-700">مسئولیت‌های من</div>
           <Badge count={formatBadgeCount(responsibilitiesCount)} color="#ef4444" />
@@ -885,29 +1032,33 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
           {renderResponsibilities()}
         </div>
       </div>
+      </div>
     </div>
   );
 
   const contentMobile = (
-    <Tabs
-      items={[
-        {
-          key: 'notes',
-          label: <Badge count={formatBadgeCount(notesCount)} color="#ef4444">یادداشت‌ها</Badge>,
-          children: <div className="h-[calc(90vh-56px)] flex flex-col">{renderNotes()}</div>,
-        },
-        {
-          key: 'tasks',
-          label: <Badge count={formatBadgeCount(tasksCount)} color="#ef4444">وظایف من</Badge>,
-          children: <div className="h-[calc(90vh-56px)] flex flex-col overflow-hidden">{renderTasks()}</div>,
-        },
-        {
-          key: 'resp',
-          label: <Badge count={formatBadgeCount(responsibilitiesCount)} color="#ef4444">مسئولیت‌های من</Badge>,
-          children: <div className="h-[calc(90vh-56px)] flex flex-col overflow-hidden">{renderResponsibilities()}</div>,
-        },
-      ]}
-    />
+    <div className="h-full flex flex-col">
+      <Tabs
+        defaultActiveKey="tasks"
+        items={[
+          {
+            key: 'notes',
+            label: <Badge count={formatBadgeCount(notesCount)} color="#ef4444">یادداشت‌ها</Badge>,
+            children: <div className="h-[calc(90vh-56px)] flex flex-col">{renderNotes()}</div>,
+          },
+          {
+            key: 'tasks',
+            label: <Badge count={formatBadgeCount(tasksCount)} color="#ef4444">وظایف من</Badge>,
+            children: <div className="h-[calc(90vh-56px)] flex flex-col overflow-hidden">{renderTasks()}</div>,
+          },
+          {
+            key: 'resp',
+            label: <Badge count={formatBadgeCount(responsibilitiesCount)} color="#ef4444">مسئولیت‌های من</Badge>,
+            children: <div className="h-[calc(90vh-56px)] flex flex-col overflow-hidden">{renderResponsibilities()}</div>,
+          },
+        ]}
+      />
+    </div>
   );
 
   return (
@@ -923,11 +1074,21 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
 
       {isMobile ? (
         <Drawer
-          title={<span className="text-white">اعلانات</span>}
+          title={(
+            <div className="flex items-center justify-between w-full pr-2">
+              <span className="text-white">اعلانات</span>
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined spin={refreshing} className="text-white" />}
+                onClick={handleManualRefresh}
+              />
+            </div>
+          )}
           placement="top"
           height="90vh"
           open={open}
-          onClose={() => setOpen(false)}
+          onClose={handleClose}
           bodyStyle={{ padding: 16 }}
           headerStyle={{ background: '#8b5a2b' }}
           closeIcon={<CloseOutlined className="text-white" />}
@@ -936,11 +1097,21 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
         </Drawer>
       ) : (
         <Drawer
-          title={<span className="text-white">نوتیفیکیشن‌ها</span>}
+          title={(
+            <div className="flex items-center justify-between w-full pr-2">
+              <span className="text-white">نوتیفیکیشن‌ها</span>
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined spin={refreshing} className="text-white" />}
+                onClick={handleManualRefresh}
+              />
+            </div>
+          )}
           placement="left"
           width={900}
           open={open}
-          onClose={() => setOpen(false)}
+          onClose={handleClose}
           bodyStyle={{ padding: 0 }}
           headerStyle={{ background: '#8b5a2b' }}
           closeIcon={<CloseOutlined className="text-white" />}

@@ -487,6 +487,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
       if (module.id === 'shelves') {
         delete values.shelf_inventory;
         delete values.shelf_stock_movements;
+        delete values.task_shelf_inventory;
+        delete values.task_shelf_stock_movements;
       }
       if (module.id === 'production_orders') {
         if (values.grid_materials === undefined) {
@@ -831,8 +833,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
               {/* Blocks */}
               {sortedBlocks.map(block => {
                 if (block.visibleIf && !checkVisibility(block.visibleIf, currentValues)) return null;
+                if (canViewField(String(block.id)) === false) return null;
                 if (module.id === 'products' && block.id === 'product_stock_movements') return null;
                 if (module.id === 'shelves' && block.id === 'shelf_stock_movements') return null;
+                if (module.id === 'tasks' && block.id === 'task_shelf_stock_movements') return null;
 
                 if (module.id === 'production_orders' && !recordId && block.type === BlockType.GRID_TABLE) {
                   return null;
@@ -917,7 +921,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                 relationOptions={relationOptions}
                                 dynamicOptions={dynamicOptions}
                                 canEditModule={canEditModule}
-                                canViewField={canViewField}
+                                canViewField={(fieldKey) =>
+                                  canViewField(`${block.id}.${fieldKey}`) && canViewField(fieldKey)
+                                }
                                 readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
                                 onChange={(newData: any[]) => {
                                   const newFormData = { ...formData, [block.id]: newData };
@@ -945,7 +951,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
                           relationOptions={relationOptions}
                           dynamicOptions={dynamicOptions}
                           canEditModule={canEditModule}
-                          canViewField={canViewField}
+                          canViewField={(fieldKey) =>
+                            canViewField(`${block.id}.${fieldKey}`) && canViewField(fieldKey)
+                          }
                           onChange={(newData: any[]) => {
                             const newFormData = { ...formData, [block.id]: newData };
                             setFormData(newFormData);
@@ -969,7 +977,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                     relationOptions={relationOptions}
                                     dynamicOptions={dynamicOptions}
                                   canEditModule={canEditModule}
-                                  canViewField={canViewField}
+                                  canViewField={(fieldKey) =>
+                                    canViewField(`${block.id}.${fieldKey}`) && canViewField(fieldKey)
+                                  }
                                     onChange={(newData: any[]) => {
                                         const newFormData = { ...formData, [block.id]: newData };
                                         setFormData(newFormData);

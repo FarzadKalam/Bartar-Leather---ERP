@@ -216,6 +216,8 @@ CREATE TABLE public.tasks (
 
 -- اتصال وظیفه به خط تولید
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS production_line_id uuid REFERENCES public.production_lines(id) ON DELETE SET NULL;
+ALTER TABLE IF EXISTS public.tasks ADD COLUMN IF NOT EXISTS production_shelf_id uuid REFERENCES public.shelves(id) ON DELETE SET NULL;
+ALTER TABLE IF EXISTS public.tasks ADD COLUMN IF NOT EXISTS produced_qty numeric DEFAULT 0;
 
 -- ۱۵. حواله‌های کالا
 CREATE TABLE public.stock_transfers (
@@ -266,6 +268,7 @@ ADD COLUMN IF NOT EXISTS production_completed_at timestamptz;
 -- اضافه کردن فیلد تصویر به محصولات و مشتریان
 ALTER TABLE public.products ADD COLUMN image_url text;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS lead_source text;
 ALTER TABLE public.customers ADD COLUMN image_url text;
 
 -- اضافه کردن فیلد موقعیت مکانی (لینک نقشه یا مختصات)
@@ -895,5 +898,490 @@ CREATE POLICY "Authenticated insert purchase_invoices"
 ON public.purchase_invoices
 FOR INSERT
 WITH CHECK (auth.role() = 'authenticated');
+
+COMMIT;
+
+-- ==========================================================
+-- Migration: Integration settings (SMS/Email/Site)
+-- ==========================================================
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.integration_settings (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  connection_type text NOT NULL,
+  provider text,
+  settings jsonb NOT NULL DEFAULT '{}'::jsonb,
+  is_active boolean NOT NULL DEFAULT true,
+  updated_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT integration_settings_connection_type_check
+    CHECK (connection_type IN ('sms', 'email', 'site'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_settings_connection_type
+  ON public.integration_settings(connection_type);
+
+DROP TRIGGER IF EXISTS update_integration_settings_modtime ON public.integration_settings;
+CREATE TRIGGER update_integration_settings_modtime
+BEFORE UPDATE ON public.integration_settings
+FOR EACH ROW
+EXECUTE PROCEDURE public.update_updated_at_column();
+
+CREATE OR REPLACE FUNCTION public.has_module_permission(
+  module_name text,
+  permission_key text DEFAULT 'view'
+)
+RETURNS boolean AS $$
+  SELECT COALESCE(
+    (
+      SELECT
+        CASE
+          WHEN r.permissions IS NULL THEN true
+          WHEN NOT (r.permissions ? module_name) THEN true
+          WHEN jsonb_typeof(r.permissions -> module_name -> permission_key) = 'boolean'
+            THEN (r.permissions -> module_name ->> permission_key)::boolean
+          ELSE true
+        END
+      FROM public.profiles p
+      JOIN public.org_roles r ON r.id = p.role_id
+      WHERE p.id = auth.uid()
+      LIMIT 1
+    ),
+    true
+  );
+$$ LANGUAGE sql STABLE;
+
+ALTER TABLE public.integration_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Role view integration_settings" ON public.integration_settings;
+DROP POLICY IF EXISTS "Role edit integration_settings" ON public.integration_settings;
+DROP POLICY IF EXISTS "Role delete integration_settings" ON public.integration_settings;
+DROP POLICY IF EXISTS "Role create integration_settings" ON public.integration_settings;
+
+CREATE POLICY "Role view integration_settings"
+ON public.integration_settings
+FOR SELECT
+USING (public.has_module_permission('__settings_tabs', 'view'));
+
+CREATE POLICY "Role edit integration_settings"
+ON public.integration_settings
+FOR UPDATE
+USING (public.has_module_permission('__settings_tabs', 'edit'))
+WITH CHECK (public.has_module_permission('__settings_tabs', 'edit'));
+
+CREATE POLICY "Role delete integration_settings"
+ON public.integration_settings
+FOR DELETE
+USING (public.has_module_permission('__settings_tabs', 'delete'));
+
+CREATE POLICY "Role create integration_settings"
+ON public.integration_settings
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('__settings_tabs', 'edit'));
+
+COMMIT;
+
+-- ==========================================================
+-- Migration: Role-aware RLS for module visibility/actions (2026-02-16)
+-- ==========================================================
+BEGIN;
+
+CREATE OR REPLACE FUNCTION public.has_assignee_access(
+  assignee_id uuid,
+  assignee_type text,
+  created_by uuid
+)
+RETURNS boolean AS $$
+  SELECT (
+    created_by = auth.uid()
+    OR (assignee_type = 'user' AND assignee_id = auth.uid())
+    OR (assignee_type = 'role' AND assignee_id = public.get_current_user_role_id())
+  );
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION public.has_module_permission(
+  module_name text,
+  permission_key text DEFAULT 'view'
+)
+RETURNS boolean AS $$
+  SELECT COALESCE(
+    (
+      SELECT
+        CASE
+          WHEN r.permissions IS NULL THEN true
+          WHEN NOT (r.permissions ? module_name) THEN true
+          WHEN jsonb_typeof(r.permissions -> module_name -> permission_key) = 'boolean'
+            THEN (r.permissions -> module_name ->> permission_key)::boolean
+          ELSE true
+        END
+      FROM public.profiles p
+      JOIN public.org_roles r ON r.id = p.role_id
+      WHERE p.id = auth.uid()
+      LIMIT 1
+    ),
+    true
+  );
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION public.has_view_access(
+  module_name text,
+  assignee_id uuid,
+  assignee_type text,
+  created_by uuid
+)
+RETURNS boolean AS $$
+  SELECT (
+    public.has_module_permission(module_name, 'view')
+    OR public.has_assignee_access(assignee_id, assignee_type, created_by)
+  );
+$$ LANGUAGE sql STABLE;
+
+-- products
+DROP POLICY IF EXISTS "Assignee access products" ON public.products;
+DROP POLICY IF EXISTS "Assignee update products" ON public.products;
+DROP POLICY IF EXISTS "Assignee delete products" ON public.products;
+DROP POLICY IF EXISTS "Authenticated insert products" ON public.products;
+
+CREATE POLICY "Role/assignee view products"
+ON public.products
+FOR SELECT
+USING (public.has_view_access('products', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit products"
+ON public.products
+FOR UPDATE
+USING (public.has_module_permission('products', 'edit'))
+WITH CHECK (public.has_module_permission('products', 'edit'));
+
+CREATE POLICY "Role delete products"
+ON public.products
+FOR DELETE
+USING (public.has_module_permission('products', 'delete'));
+
+CREATE POLICY "Role create products"
+ON public.products
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('products', 'edit'));
+
+-- production_boms
+DROP POLICY IF EXISTS "Assignee access production_boms" ON public.production_boms;
+DROP POLICY IF EXISTS "Assignee update production_boms" ON public.production_boms;
+DROP POLICY IF EXISTS "Assignee delete production_boms" ON public.production_boms;
+DROP POLICY IF EXISTS "Authenticated insert production_boms" ON public.production_boms;
+
+CREATE POLICY "Role/assignee view production_boms"
+ON public.production_boms
+FOR SELECT
+USING (public.has_view_access('production_boms', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit production_boms"
+ON public.production_boms
+FOR UPDATE
+USING (public.has_module_permission('production_boms', 'edit'))
+WITH CHECK (public.has_module_permission('production_boms', 'edit'));
+
+CREATE POLICY "Role delete production_boms"
+ON public.production_boms
+FOR DELETE
+USING (public.has_module_permission('production_boms', 'delete'));
+
+CREATE POLICY "Role create production_boms"
+ON public.production_boms
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('production_boms', 'edit'));
+
+-- production_orders
+DROP POLICY IF EXISTS "Assignee access production_orders" ON public.production_orders;
+DROP POLICY IF EXISTS "Assignee update production_orders" ON public.production_orders;
+DROP POLICY IF EXISTS "Assignee delete production_orders" ON public.production_orders;
+DROP POLICY IF EXISTS "Authenticated insert production_orders" ON public.production_orders;
+
+CREATE POLICY "Role/assignee view production_orders"
+ON public.production_orders
+FOR SELECT
+USING (public.has_view_access('production_orders', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit production_orders"
+ON public.production_orders
+FOR UPDATE
+USING (public.has_module_permission('production_orders', 'edit'))
+WITH CHECK (public.has_module_permission('production_orders', 'edit'));
+
+CREATE POLICY "Role delete production_orders"
+ON public.production_orders
+FOR DELETE
+USING (public.has_module_permission('production_orders', 'delete'));
+
+CREATE POLICY "Role create production_orders"
+ON public.production_orders
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('production_orders', 'edit'));
+
+-- product_bundles
+DROP POLICY IF EXISTS "Assignee access product_bundles" ON public.product_bundles;
+DROP POLICY IF EXISTS "Assignee update product_bundles" ON public.product_bundles;
+DROP POLICY IF EXISTS "Assignee delete product_bundles" ON public.product_bundles;
+DROP POLICY IF EXISTS "Authenticated insert product_bundles" ON public.product_bundles;
+
+CREATE POLICY "Role/assignee view product_bundles"
+ON public.product_bundles
+FOR SELECT
+USING (public.has_view_access('product_bundles', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit product_bundles"
+ON public.product_bundles
+FOR UPDATE
+USING (public.has_module_permission('product_bundles', 'edit'))
+WITH CHECK (public.has_module_permission('product_bundles', 'edit'));
+
+CREATE POLICY "Role delete product_bundles"
+ON public.product_bundles
+FOR DELETE
+USING (public.has_module_permission('product_bundles', 'delete'));
+
+CREATE POLICY "Role create product_bundles"
+ON public.product_bundles
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('product_bundles', 'edit'));
+
+-- warehouses
+DROP POLICY IF EXISTS "Assignee access warehouses" ON public.warehouses;
+DROP POLICY IF EXISTS "Assignee update warehouses" ON public.warehouses;
+DROP POLICY IF EXISTS "Assignee delete warehouses" ON public.warehouses;
+DROP POLICY IF EXISTS "Authenticated insert warehouses" ON public.warehouses;
+
+CREATE POLICY "Role/assignee view warehouses"
+ON public.warehouses
+FOR SELECT
+USING (public.has_view_access('warehouses', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit warehouses"
+ON public.warehouses
+FOR UPDATE
+USING (public.has_module_permission('warehouses', 'edit'))
+WITH CHECK (public.has_module_permission('warehouses', 'edit'));
+
+CREATE POLICY "Role delete warehouses"
+ON public.warehouses
+FOR DELETE
+USING (public.has_module_permission('warehouses', 'delete'));
+
+CREATE POLICY "Role create warehouses"
+ON public.warehouses
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('warehouses', 'edit'));
+
+-- shelves
+DROP POLICY IF EXISTS "Assignee access shelves" ON public.shelves;
+DROP POLICY IF EXISTS "Assignee update shelves" ON public.shelves;
+DROP POLICY IF EXISTS "Assignee delete shelves" ON public.shelves;
+DROP POLICY IF EXISTS "Authenticated insert shelves" ON public.shelves;
+
+CREATE POLICY "Role/assignee view shelves"
+ON public.shelves
+FOR SELECT
+USING (public.has_view_access('shelves', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit shelves"
+ON public.shelves
+FOR UPDATE
+USING (public.has_module_permission('shelves', 'edit'))
+WITH CHECK (public.has_module_permission('shelves', 'edit'));
+
+CREATE POLICY "Role delete shelves"
+ON public.shelves
+FOR DELETE
+USING (public.has_module_permission('shelves', 'delete'));
+
+CREATE POLICY "Role create shelves"
+ON public.shelves
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('shelves', 'edit'));
+
+-- customers
+DROP POLICY IF EXISTS "Assignee access customers" ON public.customers;
+DROP POLICY IF EXISTS "Assignee update customers" ON public.customers;
+DROP POLICY IF EXISTS "Assignee delete customers" ON public.customers;
+DROP POLICY IF EXISTS "Authenticated insert customers" ON public.customers;
+DROP POLICY IF EXISTS "Public insert customers" ON public.customers;
+
+CREATE POLICY "Role/assignee view customers"
+ON public.customers
+FOR SELECT
+USING (public.has_view_access('customers', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit customers"
+ON public.customers
+FOR UPDATE
+USING (public.has_module_permission('customers', 'edit'))
+WITH CHECK (public.has_module_permission('customers', 'edit'));
+
+CREATE POLICY "Role delete customers"
+ON public.customers
+FOR DELETE
+USING (public.has_module_permission('customers', 'delete'));
+
+CREATE POLICY "Role create customers"
+ON public.customers
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('customers', 'edit'));
+
+-- suppliers
+DROP POLICY IF EXISTS "Assignee access suppliers" ON public.suppliers;
+DROP POLICY IF EXISTS "Assignee update suppliers" ON public.suppliers;
+DROP POLICY IF EXISTS "Assignee delete suppliers" ON public.suppliers;
+DROP POLICY IF EXISTS "Authenticated insert suppliers" ON public.suppliers;
+
+CREATE POLICY "Role/assignee view suppliers"
+ON public.suppliers
+FOR SELECT
+USING (public.has_view_access('suppliers', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit suppliers"
+ON public.suppliers
+FOR UPDATE
+USING (public.has_module_permission('suppliers', 'edit'))
+WITH CHECK (public.has_module_permission('suppliers', 'edit'));
+
+CREATE POLICY "Role delete suppliers"
+ON public.suppliers
+FOR DELETE
+USING (public.has_module_permission('suppliers', 'delete'));
+
+CREATE POLICY "Role create suppliers"
+ON public.suppliers
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('suppliers', 'edit'));
+
+-- invoices
+DROP POLICY IF EXISTS "Assignee access invoices" ON public.invoices;
+DROP POLICY IF EXISTS "Assignee update invoices" ON public.invoices;
+DROP POLICY IF EXISTS "Assignee delete invoices" ON public.invoices;
+DROP POLICY IF EXISTS "Authenticated insert invoices" ON public.invoices;
+
+CREATE POLICY "Role/assignee view invoices"
+ON public.invoices
+FOR SELECT
+USING (public.has_view_access('invoices', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit invoices"
+ON public.invoices
+FOR UPDATE
+USING (public.has_module_permission('invoices', 'edit'))
+WITH CHECK (public.has_module_permission('invoices', 'edit'));
+
+CREATE POLICY "Role delete invoices"
+ON public.invoices
+FOR DELETE
+USING (public.has_module_permission('invoices', 'delete'));
+
+CREATE POLICY "Role create invoices"
+ON public.invoices
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('invoices', 'edit'));
+
+-- tasks
+DROP POLICY IF EXISTS "Assignee access tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Assignee update tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Assignee delete tasks" ON public.tasks;
+DROP POLICY IF EXISTS "Authenticated insert tasks" ON public.tasks;
+
+CREATE POLICY "Role/assignee view tasks"
+ON public.tasks
+FOR SELECT
+USING (public.has_view_access('tasks', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit tasks"
+ON public.tasks
+FOR UPDATE
+USING (public.has_module_permission('tasks', 'edit'))
+WITH CHECK (public.has_module_permission('tasks', 'edit'));
+
+CREATE POLICY "Role delete tasks"
+ON public.tasks
+FOR DELETE
+USING (public.has_module_permission('tasks', 'delete'));
+
+CREATE POLICY "Role create tasks"
+ON public.tasks
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('tasks', 'edit'));
+
+-- purchase_invoices
+DROP POLICY IF EXISTS "Assignee access purchase_invoices" ON public.purchase_invoices;
+DROP POLICY IF EXISTS "Assignee update purchase_invoices" ON public.purchase_invoices;
+DROP POLICY IF EXISTS "Assignee delete purchase_invoices" ON public.purchase_invoices;
+DROP POLICY IF EXISTS "Authenticated insert purchase_invoices" ON public.purchase_invoices;
+
+CREATE POLICY "Role/assignee view purchase_invoices"
+ON public.purchase_invoices
+FOR SELECT
+USING (public.has_view_access('purchase_invoices', assignee_id, assignee_type, created_by));
+
+CREATE POLICY "Role edit purchase_invoices"
+ON public.purchase_invoices
+FOR UPDATE
+USING (public.has_module_permission('purchase_invoices', 'edit'))
+WITH CHECK (public.has_module_permission('purchase_invoices', 'edit'));
+
+CREATE POLICY "Role delete purchase_invoices"
+ON public.purchase_invoices
+FOR DELETE
+USING (public.has_module_permission('purchase_invoices', 'delete'));
+
+CREATE POLICY "Role create purchase_invoices"
+ON public.purchase_invoices
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('purchase_invoices', 'edit'));
+
+-- workflows
+CREATE TABLE IF NOT EXISTS public.workflows (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  module_id text NOT NULL,
+  name text NOT NULL,
+  description text,
+  trigger_type text NOT NULL DEFAULT 'on_create',
+  interval_value int4,
+  interval_unit text,
+  interval_at time,
+  batch_size int4,
+  conditions_all jsonb DEFAULT '[]'::jsonb,
+  conditions_any jsonb DEFAULT '[]'::jsonb,
+  actions jsonb DEFAULT '[]'::jsonb,
+  is_active boolean DEFAULT true,
+  created_by uuid REFERENCES public.profiles(id),
+  updated_by uuid REFERENCES public.profiles(id),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.workflows ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Role view workflows" ON public.workflows;
+DROP POLICY IF EXISTS "Role edit workflows" ON public.workflows;
+DROP POLICY IF EXISTS "Role delete workflows" ON public.workflows;
+DROP POLICY IF EXISTS "Role create workflows" ON public.workflows;
+
+CREATE POLICY "Role view workflows"
+ON public.workflows
+FOR SELECT
+USING (public.has_module_permission('workflows', 'view'));
+
+CREATE POLICY "Role edit workflows"
+ON public.workflows
+FOR UPDATE
+USING (public.has_module_permission('workflows', 'edit'))
+WITH CHECK (public.has_module_permission('workflows', 'edit'));
+
+CREATE POLICY "Role delete workflows"
+ON public.workflows
+FOR DELETE
+USING (public.has_module_permission('workflows', 'delete'));
+
+CREATE POLICY "Role create workflows"
+ON public.workflows
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('workflows', 'edit'));
 
 COMMIT;

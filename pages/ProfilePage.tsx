@@ -14,7 +14,7 @@ import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
-import { profilesModule } from '../modules/profilesConfig'; // Ú©Ø§Ù†ÙÛŒÚ¯ Ø¬Ø¯ÛŒØ¯ Ø±Ø§ Ø§ÛŒÙ…Ù¾ÙˆØ±Øª Ú©Ù†ÛŒØ¯
+import { profilesModule } from '../modules/profilesConfig'; // کانفیگ جدید را ایمپورت کنید
 import { FieldType, ModuleField } from '../types';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 
@@ -70,7 +70,7 @@ const ProfilePage: React.FC = () => {
     let userId = id;
     let userEmail = '';
 
-    // 1. Ø¯Ø±ÛŒØ§ÙØª Ø´Ù†Ø§Ø³Ù‡ Ùˆ Ø§ÛŒÙ…ÛŒÙ„ Ú©Ø§Ø±Ø¨Ø± (Ú†Ù‡ Ù„Ø§Ú¯ÛŒÙ† Ø´Ø¯Ù‡ Ú†Ù‡ Ø§Ø² Ù¾Ø§Ø±Ø§Ù…ØªØ±)
+    // 1. دریافت شناسه و ایمیل کاربر (چه لاگین شده چه از پارامتر)
     if (!userId) {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -78,12 +78,12 @@ const ProfilePage: React.FC = () => {
             userEmail = user.email || '';
         }
     } else {
-        // Ø§Ú¯Ø± Ø¯Ø§Ø±ÛŒÙ… Ù¾Ø±ÙˆÙØ§ÛŒÙ„ Ú©Ø³ Ø¯ÛŒÚ¯Ø±ÛŒ Ø±Ø§ Ù…ÛŒâ€ŒØ¨ÛŒÙ†ÛŒÙ…ØŒ Ø¨Ø§ÛŒØ¯ Ø§ÛŒÙ…ÛŒÙ„Ø´ Ø±Ø§ Ø¬Ø¯Ø§Ú¯Ø§Ù†Ù‡ Ø¨Ú¯ÛŒØ±ÛŒÙ… (Ø§Ú¯Ø± Ø§Ø¯Ù…ÛŒÙ† Ø¨Ø§Ø´ÛŒÙ…)
-        // ÙØ¹Ù„Ø§ ÙØ±Ø¶ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… Ø§ÛŒÙ…ÛŒÙ„ ÙÙ‚Ø· Ø¨Ø±Ø§ÛŒ Ø®ÙˆØ¯ Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Ø¯Ø³ØªØ±Ø³ Ø§Ø³Øª ÛŒØ§ Ø¯Ø± Ù¾Ø±ÙˆÙØ§ÛŒÙ„ Ø°Ø®ÛŒØ±Ù‡ Ø´Ø¯Ù‡
+        // اگر داریم پروفایل کس دیگری را می‌بینیم، باید ایمیلش را جداگانه بگیریم (اگر ادمین باشیم)
+        // فعلا فرض می‌کنیم ایمیل فقط برای خود کاربر در دسترس است یا در پروفایل ذخیره شده
     }
 
     if (userId) {
-        // 2. Ø¯Ø±ÛŒØ§ÙØª Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø§Ø² Ø¬Ø¯ÙˆÙ„ Ù¾Ø±ÙˆÙØ§ÛŒÙ„ + Ø³Ø§Ø²Ù…Ø§Ù†
+        // 2. دریافت اطلاعات از جدول پروفایل + سازمان
         const { data, error } = await supabase
             .from(profilesModule.table)
             .select(`
@@ -95,13 +95,13 @@ const ProfilePage: React.FC = () => {
 
         if (error) {
             console.error('Error fetching profile:', error);
-            message.error('Ø®Ø·Ø§ Ø¯Ø± Ø¯Ø±ÛŒØ§ÙØª Ù¾Ø±ÙˆÙØ§ÛŒÙ„');
+            message.error('خطا در دریافت پروفایل');
         } else {
-            // 3. ØªØ±Ú©ÛŒØ¨ Ø¯Ø§Ø¯Ù‡â€ŒÙ‡Ø§ (Ø§ÛŒÙ…ÛŒÙ„ Ø±Ø§ Ø¨Ù‡ Ø¯ÛŒØªØ§ÛŒ Ù¾Ø±ÙˆÙØ§ÛŒÙ„ Ø§Ø¶Ø§ÙÙ‡ Ù…ÛŒâ€ŒÚ©Ù†ÛŒÙ… ØªØ§ Ù…Ø§Ú˜ÙˆÙ„Ø§Ø± Ù†Ù…Ø§ÛŒØ´ Ø¯Ø§Ø¯Ù‡ Ø´ÙˆØ¯)
+            // 3. ترکیب داده‌ها (ایمیل را به دیتای پروفایل اضافه می‌کنیم تا ماژولار نمایش داده شود)
             setRecord({
                 ...data,
-                email: userEmail || data.email, // Ø§ÙˆÙ„ÙˆÛŒØª Ø¨Ø§ Ø§ÛŒÙ…ÛŒÙ„ Ø¬Ø¯ÙˆÙ„ Auth
-                // Ù‡Ù†Ø¯Ù„ Ú©Ø±Ø¯Ù† Ø±Ø§Ø¨Ø·Ù‡â€ŒÙ‡Ø§ Ø¨Ø±Ø§ÛŒ Ø¯Ø³ØªØ±Ø³ÛŒ Ø±Ø§Ø­Øªâ€ŒØªØ±
+                email: userEmail || data.email, // اولویت با ایمیل جدول Auth
+                // هندل کردن رابطه‌ها برای دسترسی راحت‌تر
                 organizations: Array.isArray(data.organizations) ? data.organizations[0] : data.organizations
             });
         }
@@ -121,7 +121,7 @@ const ProfilePage: React.FC = () => {
 
     const handleOpenEdit = () => {
         if (!record || !canEditRecord(record)) {
-            message.error('Ø¯Ø³ØªØ±Ø³ÛŒ Ú©Ø§ÙÛŒ Ù†Ø¯Ø§Ø±ÛŒØ¯');
+            message.error('دسترسی کافی ندارید');
             return;
         }
         setDrawerMode('edit');
@@ -140,7 +140,7 @@ const ProfilePage: React.FC = () => {
 
     const handleOpenCreate = () => {
         if (!canManageUsers) {
-            message.error('Ø¯Ø³ØªØ±Ø³ÛŒ Ú©Ø§ÙÛŒ Ù†Ø¯Ø§Ø±ÛŒØ¯');
+            message.error('دسترسی کافی ندارید');
             return;
         }
         setDrawerMode('create');
@@ -158,33 +158,33 @@ const ProfilePage: React.FC = () => {
             setAvatarUrl(data.publicUrl);
             return false;
         } catch {
-            message.error('Ø®Ø·Ø§ Ø¯Ø± Ø¢Ù¾Ù„ÙˆØ¯ Ø¹Ú©Ø³');
+            message.error('خطا در آپلود عکس');
             return false;
         }
     };
 
     const handleResetPassword = async (email?: string | null) => {
         if (!email) {
-            message.error('Ø§ÛŒÙ…ÛŒÙ„ Ú©Ø§Ø±Ø¨Ø± Ø«Ø¨Øª Ù†Ø´Ø¯Ù‡ Ø§Ø³Øª');
+            message.error('ایمیل کاربر ثبت نشده است');
             return;
         }
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
             redirectTo: `${window.location.origin}/login`,
         });
         if (error) {
-            message.error('Ø®Ø·Ø§ Ø¯Ø± Ø§Ø±Ø³Ø§Ù„ Ø§ÛŒÙ…ÛŒÙ„: ' + error.message);
+            message.error('خطا در ارسال ایمیل: ' + error.message);
         } else {
-            message.success('Ù„ÛŒÙ†Ú© Ø¨Ø§Ø²ÛŒØ§Ø¨ÛŒ Ø±Ù…Ø² Ø¨Ù‡ Ø§ÛŒÙ…ÛŒÙ„ Ø§Ø±Ø³Ø§Ù„ Ø´Ø¯');
+            message.success('لینک بازیابی رمز به ایمیل ارسال شد');
         }
     };
 
     const handleSendSms = () => {
-        message.info('Ø§Ø±Ø³Ø§Ù„ Ù¾ÛŒØ§Ù…Ú© Ù†ÛŒØ§Ø²Ù…Ù†Ø¯ Ø§ØªØµØ§Ù„ Ø¨Ù‡ Ø³Ø±ÙˆÛŒØ³ Ù¾ÛŒØ§Ù…Ú©ÛŒ Ø§Ø³Øª.');
+        message.info('ارسال پیامک نیازمند اتصال به سرویس پیامکی است.');
     };
 
     const handleSave = async (values: any) => {
         if (!canManageUsers && drawerMode === 'create') {
-            message.error('Ø¯Ø³ØªØ±Ø³ÛŒ Ú©Ø§ÙÛŒ Ù†Ø¯Ø§Ø±ÛŒØ¯');
+            message.error('دسترسی کافی ندارید');
             return;
         }
         if (drawerMode === 'create' && values.password !== values.password_confirm) {
@@ -213,7 +213,7 @@ const ProfilePage: React.FC = () => {
                         if (passError) throw passError;
                     }
                 }
-                message.success('Ù¾Ø±ÙˆÙØ§ÛŒÙ„ Ø¨Ø±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ Ø´Ø¯');
+                message.success('پروفایل بروزرسانی شد');
                 await fetchProfile();
             }
 
@@ -227,7 +227,7 @@ const ProfilePage: React.FC = () => {
                 });
                 if (signUpError) throw signUpError;
                 const newUserId = signUpData.user?.id;
-                if (!newUserId) throw new Error('Ø³Ø§Ø®Øª Ú©Ø§Ø±Ø¨Ø± Ø¯Ø± Auth Ù†Ø§Ù…ÙˆÙÙ‚ Ø¨ÙˆØ¯');
+                if (!newUserId) throw new Error('ساخت کاربر در Auth ناموفق بود');
 
                 const { error } = await supabase.from('profiles').insert([{
                     id: newUserId,
@@ -240,20 +240,20 @@ const ProfilePage: React.FC = () => {
                     is_active: true
                 }]);
                 if (error) throw error;
-                message.success('Ú©Ø§Ø±Ø¨Ø± Ø§ÛŒØ¬Ø§Ø¯ Ø´Ø¯');
+                message.success('کاربر ایجاد شد');
             }
 
             setIsDrawerOpen(false);
             form.resetFields();
             setAvatarUrl(null);
         } catch (err: any) {
-            message.error('Ø®Ø·Ø§: ' + err.message);
+            message.error('خطا: ' + err.message);
         } finally {
             setSubmitting(false);
         }
     };
 
-  // --- ØªØ§Ø¨Ø¹ Ø±Ù†Ø¯Ø± Ú©Ù†Ù†Ø¯Ù‡ Ù‡ÙˆØ´Ù…Ù†Ø¯ ÙÛŒÙ„Ø¯Ù‡Ø§ ---
+  // --- تابع رندر کننده هوشمند فیلدها ---
     const renderFieldValue = (field: ModuleField, value: any, allData: any) => {
     if (value === null || value === undefined || value === '') return <span className="text-gray-400">---</span>;
 
@@ -278,8 +278,8 @@ const ProfilePage: React.FC = () => {
     switch (field.type) {
         case FieldType.CHECKBOX:
             return value ? 
-                <Tag color="green" icon={<CheckCircleOutlined />}>ÙØ¹Ø§Ù„</Tag> : 
-                <Tag color="red" icon={<CloseCircleOutlined />}>ØºÛŒØ±ÙØ¹Ø§Ù„</Tag>;
+                <Tag color="green" icon={<CheckCircleOutlined />}>فعال</Tag> : 
+                <Tag color="red" icon={<CloseCircleOutlined />}>غیرفعال</Tag>;
         
         case FieldType.DATE:
             return formatPersianDate(value, 'YYYY/MM/DD');
@@ -305,12 +305,12 @@ const ProfilePage: React.FC = () => {
   if (loading) return <div className="flex h-screen items-center justify-center"><Spin size="large" /></div>;
   if (!record) return null;
 
-    // Ø¨Ù‚ÛŒÙ‡ ÙÛŒÙ„Ø¯Ù‡Ø§ Ø¨Ø±Ø§ÛŒ Ù†Ù…Ø§ÛŒØ´ Ø¯Ø± ØªØ¨ Ø¬Ø²Ø¦ÛŒØ§Øª
+    // بقیه فیلدها برای نمایش در تب جزئیات
     const detailFields = profilesModule.fields.filter((f: any) => !['full_name', 'job_title', 'is_active'].includes(f.key));
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 animate-fadeIn">
-      {/* Ù‡Ø¯Ø± Ùˆ Ø¯Ú©Ù…Ù‡ Ø¨Ø§Ø²Ú¯Ø´Øª */}
+      {/* هدر و دکمه بازگشت */}
       <div className="flex items-center justify-between mb-6">
         <Button 
             icon={<ArrowRightOutlined />} 
@@ -318,12 +318,12 @@ const ProfilePage: React.FC = () => {
             className="text-gray-600 dark:text-gray-300" 
             onClick={() => navigate(-1)}
         >
-            Ø¨Ø§Ø²Ú¯Ø´Øª
+            بازگشت
         </Button>
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* --- Ø³ØªÙˆÙ† Ø³Ù…Øª Ú†Ù¾: Ø®Ù„Ø§ØµÙ‡ Ù¾Ø±ÙˆÙØ§ÛŒÙ„ --- */}
+        {/* --- ستون سمت چپ: خلاصه پروفایل --- */}
         <div className="lg:col-span-1">
             <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] text-center shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden sticky top-24 pb-8">
                 <div className="h-32 bg-gradient-to-br from-leather-600 to-leather-800 relative"></div>
@@ -338,9 +338,9 @@ const ProfilePage: React.FC = () => {
                         {record.full_name?.[0]?.toUpperCase()}
                     </Avatar>
 
-                    {/* Ù†Ù…Ø§ÛŒØ´ ÙÛŒÙ„Ø¯Ù‡Ø§ÛŒ Ø§ØµÙ„ÛŒ (Ù†Ø§Ù…ØŒ Ø´ØºÙ„ØŒ ÙˆØ¶Ø¹ÛŒØª) */}
+                    {/* نمایش فیلدهای اصلی (نام، شغل، وضعیت) */}
                     <h1 className="text-2xl font-black text-gray-800 dark:text-white mb-1">
-                        {record.full_name || 'Ú©Ø§Ø±Ø¨Ø±'}
+                        {record.full_name || 'کاربر'}
                     </h1>
                     <p className="text-leather-500 font-medium mb-2">
                         {record.job_title}
@@ -350,21 +350,21 @@ const ProfilePage: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Button type="primary" icon={<EditOutlined />} className="bg-leather-500 rounded-xl" onClick={handleOpenEdit} disabled={!canEditRecord(record)}>ÙˆÛŒØ±Ø§ÛŒØ´</Button>
-                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={() => handleResetPassword(record.email)}>ØªØºÛŒÛŒØ± Ø±Ù…Ø²</Button>
+                        <Button type="primary" icon={<EditOutlined />} className="bg-leather-500 rounded-xl" onClick={handleOpenEdit} disabled={!canEditRecord(record)}>ویرایش</Button>
+                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={() => handleResetPassword(record.email)}>تغییر رمز</Button>
                     </div>
                     <div className="grid grid-cols-2 gap-3 mt-3">
-                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={handleSendSms}>Ø§Ø±Ø³Ø§Ù„ Ù¾ÛŒØ§Ù…Ú©</Button>
-                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={handleOpenCreate} disabled={!canManageUsers}>Ø§ÛŒØ¬Ø§Ø¯ Ú©Ø§Ø±Ø¨Ø±</Button>
+                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={handleSendSms}>ارسال پیامک</Button>
+                        <Button className="rounded-xl dark:bg-white/5 dark:text-gray-300" onClick={handleOpenCreate} disabled={!canManageUsers}>ایجاد کاربر</Button>
                     </div>
                 </div>
             </div>
         </div>
 
-        {/* --- Ø³ØªÙˆÙ† Ø³Ù…Øª Ø±Ø§Ø³Øª: Ø¬Ø²Ø¦ÛŒØ§Øª Ú©Ø§Ù…Ù„ (Ø±Ù†Ø¯Ø± Ø¯Ø§ÛŒÙ†Ø§Ù…ÛŒÚ©) --- */}
+        {/* --- ستون سمت راست: جزئیات کامل (رندر داینامیک) --- */}
         <div className="lg:col-span-2 space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <StatisticCard title="Ø³Ø§Ø¨Ù‚Ù‡ ÙØ¹Ø§Ù„ÛŒØª" value={(() => {
+                                <StatisticCard title="سابقه فعالیت" value={(() => {
                                     try {
                                         const created = new Date(record.created_at);
                                         if (Number.isNaN(created.getTime())) return '-';
@@ -374,8 +374,8 @@ const ProfilePage: React.FC = () => {
                                     } catch {
                                         return '-';
                                     }
-                                })()} suffix=" Ø±ÙˆØ²" />
-                <StatisticCard title="Ù†Ù‚Ø´ Ø³ÛŒØ³ØªÙ…" value={renderFieldValue(profilesModule.fields.find((f: any) => f.key === 'role')!, record.role, record)} />
+                                })()} suffix=" روز" />
+                <StatisticCard title="نقش سیستم" value={renderFieldValue(profilesModule.fields.find((f: any) => f.key === 'role')!, record.role, record)} />
             </div>
 
             <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] p-6 shadow-sm border border-gray-200 dark:border-gray-800 min-h-[400px]">
@@ -383,7 +383,7 @@ const ProfilePage: React.FC = () => {
                     items={[
                         {
                             key: '1',
-                            label: <span><IdcardOutlined /> Ù…Ø´Ø®ØµØ§Øª ÙØ±Ø¯ÛŒ Ùˆ Ø³Ø§Ø²Ù…Ø§Ù†ÛŒ</span>,
+                            label: <span><IdcardOutlined /> مشخصات فردی و سازمانی</span>,
                             children: (
                                 <div className="mt-6">
                                     <Descriptions 
@@ -391,7 +391,7 @@ const ProfilePage: React.FC = () => {
                                         column={1} 
                                         className="custom-descriptions"
                                     >
-                                        {/* Ø­Ù„Ù‚Ù‡ Ø±ÙˆÛŒ ØªÙ…Ø§Ù… ÙÛŒÙ„Ø¯Ù‡Ø§ Ø¨Ø±Ø§ÛŒ Ø³Ø§Ø®Øª Ø³Ø·Ø±Ù‡Ø§ */}
+                                        {/* حلقه روی تمام فیلدها برای ساخت سطرها */}
                                         {detailFields.map((field: any) => (
                                             <Descriptions.Item key={field.key} label={field.labels?.fa || field.key}>
                                                 {renderFieldValue(field, record[field.key], record)}
@@ -403,8 +403,8 @@ const ProfilePage: React.FC = () => {
                         },
                         {
                             key: '2',
-                            label: <span><SafetyCertificateOutlined /> Ø§Ù…Ù†ÛŒØª</span>,
-                            children: <div className="py-10 text-center text-gray-400">Ø§Ø·Ù„Ø§Ø¹Ø§Øª Ø§Ù…Ù†ÛŒØªÛŒ</div>
+                            label: <span><SafetyCertificateOutlined /> امنیت</span>,
+                            children: <div className="py-10 text-center text-gray-400">اطلاعات امنیتی</div>
                         }
                     ]} 
                 />
@@ -419,7 +419,7 @@ const ProfilePage: React.FC = () => {
       `}</style>
 
             <Drawer
-                title={drawerMode === 'edit' ? 'ÙˆÛŒØ±Ø§ÛŒØ´ Ù¾Ø±ÙˆÙØ§ÛŒÙ„' : 'Ø§ÛŒØ¬Ø§Ø¯ Ú©Ø§Ø±Ø¨Ø±'}
+                title={drawerMode === 'edit' ? 'ویرایش پروفایل' : 'ایجاد کاربر'}
                 width={520}
                 onClose={() => setIsDrawerOpen(false)}
                 open={isDrawerOpen}
@@ -432,20 +432,20 @@ const ProfilePage: React.FC = () => {
                         <div className="text-center">
                             <Avatar size={80} src={avatarUrl} icon={<UserOutlined />} className="mb-2 bg-gray-100" />
                             <Upload showUploadList={false} beforeUpload={handleAvatarUpload}>
-                                <Button size="small" icon={<UploadOutlined />}>Ø¢Ù¾Ù„ÙˆØ¯ Ø¹Ú©Ø³</Button>
+                                <Button size="small" icon={<UploadOutlined />}>آپلود عکس</Button>
                             </Upload>
                         </div>
                     </div>
 
-                    <Form.Item label="Ù†Ø§Ù… Ùˆ Ù†Ø§Ù… Ø®Ø§Ù†ÙˆØ§Ø¯Ú¯ÛŒ" name="full_name" rules={[{ required: true }]}><Input /></Form.Item>
-                    <Form.Item label="Ø§ÛŒÙ…ÛŒÙ„" name="email" rules={[{ required: true, type: 'email' }]}><Input /></Form.Item>
-                    <Form.Item label="Ø´Ù…Ø§Ø±Ù‡ Ù…ÙˆØ¨Ø§ÛŒÙ„" name="mobile" rules={[{ required: true }]}><Input /></Form.Item>
-                    <Form.Item label="Ø¬Ø§ÛŒÚ¯Ø§Ù‡ Ø³Ø§Ø²Ù…Ø§Ù†ÛŒ" name="role_id" rules={[{ required: true }]}>
-                        <Select placeholder="Ø§Ù†ØªØ®Ø§Ø¨ Ú©Ù†ÛŒØ¯" options={roles.map(r => ({ label: r.title, value: r.id }))} />
+                    <Form.Item label="نام و نام خانوادگی" name="full_name" rules={[{ required: true }]}><Input /></Form.Item>
+                    <Form.Item label="ایمیل" name="email" rules={[{ required: true, type: 'email' }]}><Input /></Form.Item>
+                    <Form.Item label="شماره موبایل" name="mobile" rules={[{ required: true }]}><Input /></Form.Item>
+                    <Form.Item label="جایگاه سازمانی" name="role_id" rules={[{ required: true }]}>
+                        <Select placeholder="انتخاب کنید" options={roles.map(r => ({ label: r.title, value: r.id }))} />
                     </Form.Item>
-                    <Form.Item label="Ù†Ù‚Ø´ (Ù…ØªÙ†ÛŒ)" name="role" rules={[{ required: true }]}>
+                    <Form.Item label="نقش (متنی)" name="role" rules={[{ required: true }]}>
                         <Select
-                            placeholder="Ø§Ù†ØªØ®Ø§Ø¨ Ù†Ù‚Ø´"
+                            placeholder="انتخاب نقش"
                             options={[
                                 { label: 'super_admin', value: 'super_admin' },
                                 { label: 'admin', value: 'admin' },
@@ -455,8 +455,8 @@ const ProfilePage: React.FC = () => {
                         />
                     </Form.Item>
                     {drawerMode === 'create' && (
-                        <Form.Item label="Ø±Ù…Ø² Ø¹Ø¨ÙˆØ±" name="password" rules={[{ required: true, min: 6 }]}>
-                            <Input.Password placeholder="Ø­Ø¯Ø§Ù‚Ù„ Û¶ Ú©Ø§Ø±Ø§Ú©ØªØ±" />
+                        <Form.Item label="رمز عبور" name="password" rules={[{ required: true, min: 6 }]}>
+                            <Input.Password placeholder="حداقل ۶ کاراکتر" />
                         </Form.Item>
                     )}
                     {drawerMode === 'create' && (
@@ -480,20 +480,20 @@ const ProfilePage: React.FC = () => {
                         </Form.Item>
                     )}
                     {drawerMode === 'edit' && (
-                        <Form.Item label="Ø±Ù…Ø² Ø¹Ø¨ÙˆØ± Ø¬Ø¯ÛŒØ¯" name="password">
-                            <Input.Password placeholder="Ø¯Ø± ØµÙˆØ±Øª Ù†ÛŒØ§Ø² ØªØºÛŒÛŒØ± Ø¯Ù‡ÛŒØ¯" />
+                        <Form.Item label="رمز عبور جدید" name="password">
+                            <Input.Password placeholder="در صورت نیاز تغییر دهید" />
                         </Form.Item>
                     )}
                     {drawerMode === 'edit' && (
-                        <Form.Item label="ÙˆØ¶Ø¹ÛŒØª" name="is_active" valuePropName="checked">
-                            <Switch checkedChildren="ÙØ¹Ø§Ù„" unCheckedChildren="ØºÛŒØ±ÙØ¹Ø§Ù„" />
+                        <Form.Item label="وضعیت" name="is_active" valuePropName="checked">
+                            <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
                         </Form.Item>
                     )}
 
                     <div className="absolute bottom-0 left-0 right-0 p-4 bg-white dark:bg-[#1a1a1a] border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2">
-                        <Button onClick={() => setIsDrawerOpen(false)}>Ø§Ù†ØµØ±Ø§Ù</Button>
+                        <Button onClick={() => setIsDrawerOpen(false)}>انصراف</Button>
                         <Button type="primary" htmlType="submit" loading={submitting} className="bg-leather-600 border-none">
-                            {drawerMode === 'edit' ? 'Ø°Ø®ÛŒØ±Ù‡ ØªØºÛŒÛŒØ±Ø§Øª' : 'Ø«Ø¨Øª Ú©Ø§Ø±Ø¨Ø±'}
+                            {drawerMode === 'edit' ? 'ذخیره تغییرات' : 'ثبت کاربر'}
                         </Button>
                     </div>
                 </Form>

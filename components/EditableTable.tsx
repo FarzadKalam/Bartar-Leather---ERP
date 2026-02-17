@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Space, message, Empty, Typography, Spin, Select } from 'antd';
-import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined, CopyOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
 import { calculateRow } from '../utils/calculations';
@@ -564,6 +564,22 @@ const EditableTable: React.FC<EditableTableProps> = ({
     if (isProductStockMovements && tempData[index]?._readonly) return;
     const newData = [...tempData];
     newData.splice(index, 1);
+    setTempData(newData);
+    if (mode === 'local' && onChange) onChange(newData);
+  };
+
+  const copyRow = (index: number) => {
+    if (isReadOnly) return;
+    const sourceRow = tempData[index];
+    if (!sourceRow) return;
+    if (isProductStockMovements && sourceRow?._readonly) return;
+
+    const copiedRow = {
+      ...sourceRow,
+      key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    };
+    const newData = [...tempData];
+    newData.splice(index + 1, 0, copiedRow);
     setTempData(newData);
     if (mode === 'local' && onChange) onChange(newData);
   };
@@ -1159,6 +1175,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
       render: (text: any, record: any, index: number) => {
         const rowKey = getRowKey(record);
 
+        const readonlyWhen = col.readonlyWhen as { field?: string; equals?: unknown } | undefined;
+        const readonlyByCondition =
+          !!readonlyWhen?.field &&
+          Object.prototype.hasOwnProperty.call(record || {}, readonlyWhen.field) &&
+          (record as any)[readonlyWhen.field] === readonlyWhen.equals;
+
         const fieldConfig: ModuleField = {
           key: col.key,
           type: col.type,
@@ -1174,6 +1196,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             || (isProductStockMovements && col.key === 'to_shelf_id' && String((record as any)?.voucher_type || '') === 'outgoing')
             || ((record as any)?._lockedFields || []).includes(col.key)
             || (isProductionOrder && isBomItemBlock && (record as any)?.selected_product_id && !editableAfterSelection.has(col.key))
+            || readonlyByCondition
             || (isInvoiceItems && col.key === 'source_shelf_id' && !record?.product_id),
         };
 
@@ -1244,19 +1267,29 @@ const EditableTable: React.FC<EditableTableProps> = ({
       },
     })) || []),
     ...(isEditing
-      ? [
+        ? [
           {
             title: '',
             key: 'actions',
-            width: 50,
+            width: block?.allowRowCopy ? 84 : 50,
             render: (_: any, row: any, i: number) => (
-              <Button
-                danger
-                type="text"
-                icon={<DeleteOutlined />}
-                onClick={() => removeRow(i)}
-                disabled={isProductStockMovements && row?._readonly}
-              />
+              <Space size={0}>
+                {block?.allowRowCopy ? (
+                  <Button
+                    type="text"
+                    icon={<CopyOutlined />}
+                    onClick={() => copyRow(i)}
+                    disabled={isProductStockMovements && row?._readonly}
+                  />
+                ) : null}
+                <Button
+                  danger
+                  type="text"
+                  icon={<DeleteOutlined />}
+                  onClick={() => removeRow(i)}
+                  disabled={isProductStockMovements && row?._readonly}
+                />
+              </Space>
             ),
           },
         ]

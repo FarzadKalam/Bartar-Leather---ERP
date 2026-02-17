@@ -1,4 +1,4 @@
-export const PRODUCTION_MESSAGES = {
+﻿export const PRODUCTION_MESSAGES = {
   startTitle: 'شروع تولید',
   startNotice: (qty: number | string) =>
     `با شروع تولید از مقدار مواد اولیه ای که وارد کرده اید ${qty} از موجودی محصولات در قفسه ها کسر خواهد شد.\nموجودی مواد اولیه تا تکمیل تولید، کجا ذخیره شود؟`,
@@ -14,3 +14,4 @@ export const PRODUCTION_MESSAGES = {
   requireOutputShelf: 'لطفا قفسه مقصد را انتخاب کنید.',
   requireInventoryShelf: 'لطفا در تب "موجودی"، قفسه نگهداری محصول را انتخاب کنید.'
 };
+

@@ -8,6 +8,20 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          '/api/melipayamak-rest': {
+            target: 'https://rest.payamak-panel.com',
+            changeOrigin: true,
+            secure: true,
+            rewrite: (path) => path.replace(/^\/api\/melipayamak-rest/, ''),
+          },
+          '/api/melipayamak-soap': {
+            target: 'https://api.payamak-panel.com',
+            changeOrigin: true,
+            secure: true,
+            rewrite: (path) => path.replace(/^\/api\/melipayamak-soap/, ''),
+          },
+        },
       },
       plugins: [react()],
       define: {

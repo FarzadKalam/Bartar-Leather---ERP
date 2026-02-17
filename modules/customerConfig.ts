@@ -32,7 +32,8 @@ export const customerModule: ModuleDefinition = {
         { label: 'وب‌سایت', value: 'website' },
         { label: 'اینستاگرام', value: 'instagram' },
         { label: 'بازاریابی تلفنی', value: 'marketing' },
-        { label: 'معرفی دوستان', value: 'referral' }
+        { label: 'معرفی مشتریان', value: 'referral' },
+        { label: 'اسکن بارکد', value: 'scan'}
       ]
     },
 
@@ -49,7 +50,7 @@ export const customerModule: ModuleDefinition = {
     { key: 'first_purchase_date', labels: { fa: 'تاریخ اولین خرید', en: 'First Purchase' }, type: FieldType.DATE, blockId: 'financial_stats', readonly: true },
     { key: 'last_purchase_date', labels: { fa: 'تاریخ آخرین خرید', en: 'Last Purchase' }, type: FieldType.DATE, blockId: 'financial_stats', readonly: true },
     { key: 'purchase_count', labels: { fa: 'تعداد دفعات خرید', en: 'Count' }, type: FieldType.NUMBER, blockId: 'financial_stats', readonly: true },
-    { key: 'total_spend', labels: { fa: 'جمع کل خرید (ریال)', en: 'Total Spend' }, type: FieldType.PRICE, blockId: 'financial_stats', readonly: true },
+    { key: 'total_spend', labels: { fa: 'جمع کل خرید (تومان)', en: 'Total Spend' }, type: FieldType.PRICE, blockId: 'financial_stats', readonly: true },
   ],
   blocks: [
     {

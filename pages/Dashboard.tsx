@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
+import { DASHBOARD_PERMISSION_KEY } from '../utils/permissions';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
@@ -52,6 +53,7 @@ const Dashboard: React.FC = () => {
     totalProductsCount: 0,
     totalProductionOrders: 0,
   });
+  const [widgetPermissions, setWidgetPermissions] = useState<Record<string, boolean>>({});
 
   // Get today's Persian date
   const getTodayPersianDate = () => {
@@ -91,6 +93,50 @@ const Dashboard: React.FC = () => {
       return dateObj.convert(persian, persian_fa).format(format);
     } catch {
       return '-';
+    }
+  };
+
+  const canShowWidget = (key: string) => {
+    if (widgetPermissions.__all === false) return false;
+    return widgetPermissions[key] !== false;
+  };
+
+  const fetchDashboardWidgetPermissions = async () => {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const user = authData?.user;
+      if (!user) {
+        setWidgetPermissions({});
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role_id')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (!profile?.role_id) {
+        setWidgetPermissions({});
+        return;
+      }
+
+      const { data: role } = await supabase
+        .from('org_roles')
+        .select('permissions')
+        .eq('id', profile.role_id)
+        .maybeSingle();
+
+      const dashboardPerms = role?.permissions?.[DASHBOARD_PERMISSION_KEY] || {};
+      const canViewDashboard = dashboardPerms.view !== false;
+      if (!canViewDashboard) {
+        setWidgetPermissions({ __all: false });
+        return;
+      }
+
+      setWidgetPermissions(dashboardPerms.fields || {});
+    } catch {
+      setWidgetPermissions({});
     }
   };
 
@@ -232,6 +278,10 @@ const Dashboard: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchDashboardWidgetPermissions();
+  }, []);
 
   useEffect(() => {
     fetchDashboardData();
@@ -425,6 +475,7 @@ const Dashboard: React.FC = () => {
       </div>
 
       {/* Quick Add Section */}
+      {canShowWidget('quick_add') && (
       <div className="mb-6">
         <Card 
           className="shadow-sm hover:shadow-md transition-shadow cursor-pointer"
@@ -497,9 +548,12 @@ const Dashboard: React.FC = () => {
           </Row>
         </Card>
       </div>
+      )}
 
       {/* KPI Cards */}
+      {(canShowWidget('kpi_total_sales') || canShowWidget('kpi_in_production') || canShowWidget('kpi_total_products') || canShowWidget('kpi_monthly_growth')) && (
       <Row gutter={[16, 16]} className="mb-6">
+        {canShowWidget('kpi_total_sales') && (
         <Col xs={24} sm={12} lg={6}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow cursor-pointer"
@@ -528,6 +582,8 @@ const Dashboard: React.FC = () => {
             </div>
           </Card>
         </Col>
+        )}
+        {canShowWidget('kpi_in_production') && (
         <Col xs={24} sm={12} lg={6}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow cursor-pointer"
@@ -555,6 +611,8 @@ const Dashboard: React.FC = () => {
             </div>
           </Card>
         </Col>
+        )}
+        {canShowWidget('kpi_total_products') && (
         <Col xs={24} sm={12} lg={6}>
           <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer">
             <div className="flex items-center justify-between">
@@ -575,6 +633,8 @@ const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
+        )}
+        {canShowWidget('kpi_monthly_growth') && (
         <Col xs={24} sm={12} lg={6}>
           <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer">
             <div className="flex items-center justify-between">
@@ -597,11 +657,15 @@ const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
+        )}
       </Row>
+      )}
 
       {/* Charts Row */}
+      {(canShowWidget('chart_production_status') || canShowWidget('chart_monthly_sales')) && (
       <Row gutter={[16, 16]} className="mb-6">
         {/* Production Orders by Status - Pie Chart */}
+        {canShowWidget('chart_production_status') && (
         <Col xs={24} lg={12}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow h-full"
@@ -646,8 +710,10 @@ const Dashboard: React.FC = () => {
             )}
           </Card>
         </Col>
+        )}
 
         {/* Monthly Sales Chart */}
+        {canShowWidget('chart_monthly_sales') && (
         <Col xs={24} lg={12}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow h-full"
@@ -690,11 +756,15 @@ const Dashboard: React.FC = () => {
             )}
           </Card>
         </Col>
+        )}
       </Row>
+      )}
 
       {/* Tables Row */}
+      {(canShowWidget('table_latest_invoices') || canShowWidget('table_latest_production_orders')) && (
       <Row gutter={[16, 16]} className="mb-6">
         {/* Latest Invoices */}
+        {canShowWidget('table_latest_invoices') && (
         <Col xs={24} lg={12}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow"
@@ -730,8 +800,10 @@ const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
+        )}
 
         {/* Latest Production Orders */}
+        {canShowWidget('table_latest_production_orders') && (
         <Col xs={24} lg={12}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow"
@@ -767,11 +839,15 @@ const Dashboard: React.FC = () => {
             />
           </Card>
         </Col>
+        )}
       </Row>
+      )}
 
       {/* Bottom Row */}
+      {(canShowWidget('timeline_recent_activity') || canShowWidget('top_selling_products')) && (
       <Row gutter={[16, 16]}>
         {/* Recent Activity Timeline */}
+        {canShowWidget('timeline_recent_activity') && (
         <Col xs={24} lg={12}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow"
@@ -804,8 +880,10 @@ const Dashboard: React.FC = () => {
             )}
           </Card>
         </Col>
+        )}
 
         {/* Top Selling Products */}
+        {canShowWidget('top_selling_products') && (
         <Col xs={24} lg={12}>
           <Card
             className="shadow-sm hover:shadow-md transition-shadow"
@@ -853,7 +931,9 @@ const Dashboard: React.FC = () => {
             )}
           </Card>
         </Col>
+        )}
       </Row>
+      )}
     </div>
   );
 };

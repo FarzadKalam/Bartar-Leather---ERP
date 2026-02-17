@@ -8,6 +8,7 @@ import { RelationQuickCreateInline } from '../SmartFieldRenderer';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
 import { convertArea } from '../../utils/unitConversions';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
+import { insertChangelog } from '../editableTable/changelogHelpers';
 
 interface ShelfStockMovementsPanelProps {
   block: any;
@@ -537,6 +538,37 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
     };
   };
 
+  const buildLogRow = (
+    normalized: {
+      productId: string;
+      transferType: string;
+      voucherType: string;
+      qtyMain: number;
+      qtySub: number;
+      fromShelfId: string | null;
+      toShelfId: string | null;
+    },
+    creatorId: string | null
+  ) => {
+    const meta = productMetaMap[normalized.productId];
+    return {
+      product_id: normalized.productId,
+      voucher_type: normalized.voucherType,
+      source: normalized.transferType,
+      main_unit: meta?.mainUnit || null,
+      main_quantity: normalized.qtyMain,
+      sub_unit: meta?.subUnit || null,
+      sub_quantity: normalized.qtySub,
+      from_shelf_id: normalized.fromShelfId,
+      to_shelf_id: normalized.toShelfId,
+      invoice_id: null,
+      purchase_invoice_id: null,
+      production_order_id: null,
+      created_by_name: creatorId,
+      created_at: new Date().toISOString(),
+    };
+  };
+
   const handleSubmit = async () => {
     setQuickCreateLoading(true);
     try {
@@ -583,6 +615,15 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
         const { error: insertError } = await supabase.from('stock_transfers').insert(payload);
         if (insertError) throw insertError;
       }
+
+      await insertChangelog(
+        supabase as any,
+        'shelves',
+        recordId,
+        block,
+        editingRow ? [editingRow] : [],
+        [buildLogRow(normalized, currentUserId)]
+      );
 
       const affectedProducts = new Set<string>([normalized.productId]);
       if (editingRow?.product_id) affectedProducts.add(String(editingRow.product_id));
@@ -635,6 +676,14 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
             .delete()
             .eq('id', row.id);
           if (deleteError) throw deleteError;
+          await insertChangelog(
+            supabase as any,
+            'shelves',
+            recordId,
+            block,
+            [row],
+            []
+          );
 
           if (row?.product_id) {
             await syncMultipleProductsStock(supabase as any, [String(row.product_id)]);

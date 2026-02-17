@@ -1,15 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined } from '@ant-design/icons';
+import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import PersianDatePicker from './PersianDatePicker';
+import TaskHandoverModal, { type StageHandoverConfirm, type StageHandoverGroup } from './production/TaskHandoverModal';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
+import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -17,6 +19,7 @@ interface ProductionStagesFieldProps {
   readOnly?: boolean;
   compact?: boolean;
   lazyLoad?: boolean;
+  onlyLineId?: string | null;
   onQuantityChange?: (qty: number) => void;
   orderStatus?: string | null;
   draftStages?: any[];
@@ -24,7 +27,32 @@ interface ProductionStagesFieldProps {
   showWageSummary?: boolean;
 }
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onQuantityChange, orderStatus, draftStages = [], onDraftStagesChange, showWageSummary = false }) => {
+type StageHandoverSide = 'giver' | 'receiver';
+
+type StageAssignee = {
+  id: string | null;
+  type: 'user' | 'role' | null;
+  label: string;
+};
+
+type StageHandoverContext = {
+  taskId: string;
+  orderId: string;
+  lineId: string | null;
+  sourceTaskId: string | null;
+  sourceStageName: string;
+  sourceShelfId: string | null;
+  targetShelfId: string | null;
+  giver: StageAssignee;
+  receiver: StageAssignee;
+  groups: StageHandoverGroup[];
+  giverConfirmation: StageHandoverConfirm;
+  receiverConfirmation: StageHandoverConfirm;
+  previousTotalsByProduct: Record<string, number>;
+  previousWasteByProduct: Record<string, number>;
+};
+
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, showWageSummary = false }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -34,7 +62,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [activeLineId, setActiveLineId] = useState<string | null>(null);
   const [lineForm] = Form.useForm();
   const [taskForm] = Form.useForm();
-  const [draftLocal, setDraftLocal] = useState<any[]>(Array.isArray(draftStages) ? draftStages : []);
+  const [draftLocal, setDraftLocal] = useState<any[]>(() => (Array.isArray(draftStages) ? draftStages : []));
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [draftForm] = Form.useForm();
   const [, setDraftToCreate] = useState<any | null>(null);
@@ -42,6 +70,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [isReadyToLoad, setIsReadyToLoad] = useState(!lazyLoad);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isBom = moduleId === 'production_boms';
+  const [currentUser, setCurrentUser] = useState<{ id: string | null; roleId: string | null; fullName: string }>({ id: null, roleId: null, fullName: 'کاربر' });
+  const [handoverTask, setHandoverTask] = useState<any | null>(null);
+  const [handoverContext, setHandoverContext] = useState<StageHandoverContext | null>(null);
+  const [handoverGroups, setHandoverGroups] = useState<StageHandoverGroup[]>([]);
+  const [handoverLoading, setHandoverLoading] = useState(false);
+  const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
 
   const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
 
@@ -49,9 +83,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     onQuantityChangeRef.current = onQuantityChange;
   }, [onQuantityChange]);
 
+  const normalizedDraftStages = useMemo(
+    () => (Array.isArray(draftStages) ? draftStages : []),
+    [draftStages]
+  );
+
   useEffect(() => {
-    setDraftLocal(Array.isArray(draftStages) ? draftStages : []);
-  }, [draftStages]);
+    setDraftLocal((prev) => (prev === normalizedDraftStages ? prev : normalizedDraftStages));
+  }, [normalizedDraftStages]);
 
   useEffect(() => {
     if (!lazyLoad) {
@@ -79,6 +118,40 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     return () => observer.disconnect();
   }, [lazyLoad, isReadyToLoad]);
 
+  const toNumber = useCallback((value: any) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, []);
+
+  const parseRecurrenceInfo = useCallback((value: any) => {
+    if (!value) return {};
+    if (typeof value === 'object') return value;
+    if (typeof value !== 'string') return {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const getHandoverFromTask = useCallback((task: any) => {
+    const recurrence = parseRecurrenceInfo(task?.recurrence_info);
+    const handover = recurrence?.production_handover;
+    if (!handover || typeof handover !== 'object') return null;
+    return handover as any;
+  }, [parseRecurrenceInfo]);
+
+  const assigneeLabelFromIds = useCallback((assigneeId: string | null | undefined, assigneeType: string | null | undefined) => {
+    if (!assigneeId) return 'تعیین نشده';
+    if (assigneeType === 'role') {
+      const role = assignees.roles.find((item: any) => String(item?.id) === String(assigneeId));
+      return role?.title || 'تعیین نشده';
+    }
+    const user = assignees.users.find((item: any) => String(item?.id) === String(assigneeId));
+    return user?.full_name || 'تعیین نشده';
+  }, [assignees.roles, assignees.users]);
+
   const fetchAssignees = async () => {
     try {
       const { data: users } = await supabase.from('profiles').select('id, full_name');
@@ -88,6 +161,44 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       console.error('Error fetching assignees', e);
     }
   };
+
+  const fetchCurrentUser = useCallback(async () => {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || null;
+      if (!userId) return;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name, role_id')
+        .eq('id', userId)
+        .maybeSingle();
+      setCurrentUser({ id: userId, roleId: profile?.role_id ? String(profile.role_id) : null, fullName: profile?.full_name || 'کاربر' });
+    } catch (err) {
+      console.warn('Could not fetch current user for handover', err);
+    }
+  }, []);
+
+  const fetchProductionShelves = useCallback(async () => {
+    try {
+      const { data: shelves } = await supabase
+        .from('shelves')
+        .select('id, shelf_number, name, warehouses(name)')
+        .limit(500);
+      const filtered = (shelves || []).filter((row: any) => {
+        const warehouseName = String(row?.warehouses?.name || '');
+        return warehouseName.includes('تولید') || /production/i.test(warehouseName);
+      });
+      const source = filtered.length ? filtered : (shelves || []);
+      const options = source.map((row: any) => ({
+        value: String(row.id),
+        label: `${row?.shelf_number || row?.name || row?.id}${row?.warehouses?.name ? ` - ${row.warehouses.name}` : ''}`,
+      }));
+      setProductionShelfOptions(options);
+    } catch (err) {
+      console.warn('Could not fetch production shelves', err);
+      setProductionShelfOptions([]);
+    }
+  }, []);
 
   const fetchLines = async () => {
     if (!recordId || isBom) return;
@@ -105,7 +216,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   };
 
   const fetchTasks = async () => {
-    if (!recordId || isBom) return;
+    if (!recordId || isBom) return [] as any[];
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -119,9 +230,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         .order('sort_order', { ascending: true });
 
       if (error) throw error;
-      setTasks(data || []);
+      const next = data || [];
+      setTasks(next);
+      return next;
     } catch (error: any) {
       console.error('Error fetching tasks:', error);
+      return [] as any[];
     } finally {
       setLoading(false);
     }
@@ -131,8 +245,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     if (!isReadyToLoad) return;
     fetchLines();
     fetchTasks();
-    if (isTaskModalOpen) fetchAssignees();
-  }, [recordId, isTaskModalOpen, isBom, isReadyToLoad]);
+    fetchAssignees();
+    fetchCurrentUser();
+    fetchProductionShelves();
+  }, [recordId, isBom, isReadyToLoad, fetchCurrentUser, fetchProductionShelves]);
 
   const syncOrderQuantity = useCallback(async (nextLines: any[]) => {
     if (!recordId || isBom) return;
@@ -163,6 +279,625 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
     return map;
   }, [lines, tasks]);
+
+  const getLineTaskChain = useCallback((lineId: string | null | undefined, sourceTasks?: any[]) => {
+    if (!lineId) return [] as any[];
+    const scoped = (sourceTasks || tasks)
+      .filter((item: any) => String(item?.production_line_id || '') === String(lineId))
+      .slice()
+      .sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0));
+    return scoped;
+  }, [tasks]);
+
+  const toGroupTotals = useCallback((groups: StageHandoverGroup[]) => {
+    const totals: Record<string, number> = {};
+    groups.forEach((group) => {
+      const anyGroup = group as any;
+      const pickedPiece = (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).find(
+        (piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id
+      );
+      const productId =
+        anyGroup?.selectedProductId
+        || anyGroup?.selected_product_id
+        || pickedPiece?.selectedProductId
+        || pickedPiece?.selected_product_id
+        || pickedPiece?.product_id
+        || null;
+      const normalizedProductId = productId ? String(productId) : '';
+      if (!normalizedProductId) return;
+      const qty = (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).reduce(
+        (sum: number, piece: any) => sum + toNumber(piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0),
+        0
+      );
+      totals[normalizedProductId] = (totals[normalizedProductId] || 0) + qty;
+    });
+    return totals;
+  }, [toNumber]);
+
+  const buildGroupsFromOrder = useCallback((order: any): StageHandoverGroup[] => {
+    const rows = Array.isArray(order?.grid_materials) ? order.grid_materials : [];
+    const orderQty = Math.max(1, toNumber(order?.quantity));
+    return rows.map((row: any, rowIndex: number) => {
+      const header = row?.header || {};
+      const rowPieces = Array.isArray(row?.pieces) && row.pieces.length > 0 ? row.pieces : [row];
+      const selectedPiece = rowPieces.find((piece: any) => (
+        piece?.selected_product_id || piece?.product_id || piece?.selected_product_name || piece?.product_name
+      )) || null;
+      const selectedProductId =
+        header?.selected_product_id
+        || row?.selected_product_id
+        || row?.product_id
+        || selectedPiece?.selected_product_id
+        || selectedPiece?.product_id
+        || null;
+      const selectedProductName =
+        header?.selected_product_name
+        || row?.selected_product_name
+        || row?.product_name
+        || selectedPiece?.selected_product_name
+        || selectedPiece?.product_name
+        || '-';
+      const selectedProductCode =
+        header?.selected_product_code
+        || row?.selected_product_code
+        || row?.product_code
+        || selectedPiece?.selected_product_code
+        || selectedPiece?.product_code
+        || '';
+      const categoryLabel = header?.category_label || header?.category || 'مواد اولیه';
+      const pieces = rowPieces.map((piece: any, pieceIndex: number) => {
+        const hasDelivered = Object.prototype.hasOwnProperty.call(piece || {}, 'delivered_qty');
+        const deliveredQty = hasDelivered ? toNumber(piece?.delivered_qty) : null;
+        const finalUsage = toNumber(piece?.final_usage);
+        const totalUsage = toNumber(piece?.total_usage);
+        const fallback = totalUsage > 0 ? totalUsage : (finalUsage > 0 ? finalUsage * orderQty : 0);
+        const sourceQty = deliveredQty === null ? fallback : deliveredQty;
+        return {
+          key: `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`,
+          name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
+          length: toNumber(piece?.length),
+          width: toNumber(piece?.width),
+          quantity: toNumber(piece?.quantity),
+          totalQuantity: toNumber(piece?.quantity) * orderQty,
+          mainUnit: String(piece?.main_unit || row?.main_unit || ''),
+          subUnit: String(piece?.sub_unit || ''),
+          subUsage: toNumber(piece?.qty_sub),
+          sourceQty,
+          handoverQty: sourceQty,
+        };
+      });
+      const totalSourceQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.sourceQty), 0);
+      const totalHandoverQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.handoverQty), 0);
+      return {
+        key: `${String(row?.key || 'group')}_${rowIndex}`,
+        rowIndex,
+        categoryLabel: String(categoryLabel || 'مواد اولیه'),
+        selectedProductId: selectedProductId ? String(selectedProductId) : null,
+        selectedProductName: String(selectedProductName || '-'),
+        selectedProductCode: String(selectedProductCode || ''),
+        sourceShelfId: null,
+        targetShelfId: null,
+        pieces,
+        totalSourceQty,
+        totalHandoverQty,
+      } as StageHandoverGroup;
+    });
+  }, [toNumber]);
+
+  const buildGroupsFromPreviousStage = useCallback((groups: any[]) => {
+    const sourceGroups = Array.isArray(groups) ? groups : [];
+    return sourceGroups.map((group: any, groupIndex: number) => {
+      const piecesRaw = Array.isArray(group?.pieces) ? group.pieces : [];
+      const selectedPiece = piecesRaw.find((piece: any) => (
+        piece?.selectedProductId || piece?.selected_product_id || piece?.product_id || piece?.selectedProductName || piece?.selected_product_name
+      )) || null;
+      const pieces = piecesRaw.map((piece: any, pieceIndex: number) => {
+        const sourceQty = toNumber(piece?.handoverQty ?? piece?.sourceQty ?? piece?.totalUsage ?? 0);
+        return {
+          key: String(piece?.key || `${groupIndex}_${pieceIndex}`),
+          name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
+          length: toNumber(piece?.length),
+          width: toNumber(piece?.width),
+          quantity: toNumber(piece?.quantity),
+          totalQuantity: toNumber(piece?.totalQuantity),
+          mainUnit: String(piece?.mainUnit || piece?.main_unit || ''),
+          subUnit: String(piece?.subUnit || piece?.sub_unit || ''),
+          subUsage: toNumber(piece?.subUsage ?? piece?.sub_usage ?? 0),
+          sourceQty,
+          handoverQty: sourceQty,
+        };
+      });
+      const totalSourceQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.sourceQty), 0);
+      const totalHandoverQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.handoverQty), 0);
+      return {
+        key: String(group?.key || `group_${groupIndex}`),
+        rowIndex: Number(group?.rowIndex ?? groupIndex),
+        categoryLabel: String(group?.categoryLabel || group?.category_label || 'مواد اولیه'),
+        selectedProductId: (group?.selectedProductId || group?.selected_product_id || selectedPiece?.selectedProductId || selectedPiece?.selected_product_id || selectedPiece?.product_id)
+          ? String(group?.selectedProductId || group?.selected_product_id || selectedPiece?.selectedProductId || selectedPiece?.selected_product_id || selectedPiece?.product_id)
+          : null,
+        selectedProductName: String(group?.selectedProductName || group?.selected_product_name || selectedPiece?.selectedProductName || selectedPiece?.selected_product_name || selectedPiece?.product_name || '-'),
+        selectedProductCode: String(group?.selectedProductCode || group?.selected_product_code || selectedPiece?.selectedProductCode || selectedPiece?.selected_product_code || selectedPiece?.product_code || ''),
+        sourceShelfId: (group?.sourceShelfId || group?.source_shelf_id)
+          ? String(group?.sourceShelfId || group?.source_shelf_id)
+          : null,
+        targetShelfId: (group?.targetShelfId || group?.target_shelf_id)
+          ? String(group?.targetShelfId || group?.target_shelf_id)
+          : null,
+        pieces,
+        totalSourceQty,
+        totalHandoverQty,
+      } as StageHandoverGroup;
+    });
+  }, [toNumber]);
+
+  const mergeSavedGroups = useCallback((baseGroups: StageHandoverGroup[], savedGroups: any[]) => {
+    const savedMap = new Map<string, any>((Array.isArray(savedGroups) ? savedGroups : []).map((group: any) => [String(group?.key || ''), group]));
+    return baseGroups.map((group) => {
+      const savedGroup = savedMap.get(String(group.key));
+      if (!savedGroup) return group;
+      const savedPieces = new Map<string, any>((Array.isArray(savedGroup?.pieces) ? savedGroup.pieces : []).map((piece: any) => [String(piece?.key || ''), piece]));
+      const pieces = group.pieces.map((piece) => {
+        const savedPiece = savedPieces.get(String(piece.key));
+        if (!savedPiece) return piece;
+        return {
+          ...piece,
+          handoverQty: Math.max(0, toNumber(savedPiece?.handoverQty)),
+        };
+      });
+      return {
+        ...group,
+        targetShelfId: savedGroup?.targetShelfId ? String(savedGroup.targetShelfId) : group.targetShelfId,
+        pieces,
+        totalSourceQty: pieces.reduce((sum, row) => sum + toNumber(row.sourceQty), 0),
+        totalHandoverQty: pieces.reduce((sum, row) => sum + toNumber(row.handoverQty), 0),
+      };
+    });
+  }, [toNumber]);
+
+  const openTaskHandoverModal = useCallback(async (task: any, providedTasks?: any[]) => {
+    if (!task?.id || !recordId || isBom) return;
+    try {
+      setHandoverLoading(true);
+      if (!productionShelfOptions.length) await fetchProductionShelves();
+      if (!assignees.users.length && !assignees.roles.length) await fetchAssignees();
+
+      const [{ data: latestTask }, { data: order }] = await Promise.all([
+        supabase.from('tasks').select('*').eq('id', task.id).maybeSingle(),
+        supabase
+          .from('production_orders')
+          .select('id, quantity, assignee_id, assignee_type, grid_materials, production_shelf_id')
+          .eq('id', recordId)
+          .maybeSingle(),
+      ]);
+      const currentTask = latestTask || task;
+      const lineId = currentTask?.production_line_id ? String(currentTask.production_line_id) : null;
+      const lineTasks = getLineTaskChain(lineId, providedTasks);
+      const currentTaskIndex = lineTasks.findIndex((item: any) => String(item?.id) === String(currentTask.id));
+      const previousTask = currentTaskIndex > 0 ? lineTasks[currentTaskIndex - 1] : null;
+
+      const previousHandover = previousTask ? getHandoverFromTask(previousTask) : null;
+      const currentHandover = getHandoverFromTask(currentTask);
+
+      const sourceStageName = previousTask?.name || 'شروع تولید';
+      const sourceShelfId = previousTask?.production_shelf_id
+        ? String(previousTask.production_shelf_id)
+        : (previousHandover?.targetShelfId || order?.production_shelf_id || null);
+      const targetShelfId = currentTask?.production_shelf_id
+        ? String(currentTask.production_shelf_id)
+        : (currentHandover?.targetShelfId || sourceShelfId || order?.production_shelf_id || null);
+
+      const baseGroups = previousTask
+        ? buildGroupsFromPreviousStage(previousHandover?.groups || [])
+        : buildGroupsFromOrder(order || {});
+      const mergedGroups = mergeSavedGroups(baseGroups, currentHandover?.groups || []).map((group) => ({
+        ...group,
+        sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
+        targetShelfId: targetShelfId ? String(targetShelfId) : null,
+      }));
+
+      const giverSourceId = previousTask?.assignee_id || order?.assignee_id || null;
+      const giverSourceType = previousTask?.assignee_type || order?.assignee_type || null;
+      const giver: StageAssignee = {
+        id: giverSourceId ? String(giverSourceId) : null,
+        type: giverSourceType === 'role' ? 'role' : (giverSourceType === 'user' ? 'user' : null),
+        label: assigneeLabelFromIds(giverSourceId, giverSourceType),
+      };
+      const receiver: StageAssignee = {
+        id: currentTask?.assignee_id ? String(currentTask.assignee_id) : null,
+        type: currentTask?.assignee_type === 'role' ? 'role' : (currentTask?.assignee_type === 'user' ? 'user' : null),
+        label: assigneeLabelFromIds(currentTask?.assignee_id, currentTask?.assignee_type),
+      };
+
+      const previousTotalsByProduct = toGroupTotals((Array.isArray(currentHandover?.groups) ? currentHandover.groups : []) as any);
+      const previousWasteByProduct = currentHandover?.wasteByProduct && typeof currentHandover.wasteByProduct === 'object'
+        ? currentHandover.wasteByProduct
+        : {};
+
+      setHandoverTask(currentTask);
+      setHandoverGroups(mergedGroups);
+      setHandoverContext({
+        taskId: String(currentTask.id),
+        orderId: String(recordId),
+        lineId,
+        sourceTaskId: previousTask?.id ? String(previousTask.id) : null,
+        sourceStageName,
+        sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
+        targetShelfId: targetShelfId ? String(targetShelfId) : null,
+        giver,
+        receiver,
+        groups: mergedGroups,
+        giverConfirmation: currentHandover?.giverConfirmation?.confirmed
+          ? currentHandover.giverConfirmation
+          : { confirmed: false },
+        receiverConfirmation: currentHandover?.receiverConfirmation?.confirmed
+          ? currentHandover.receiverConfirmation
+          : { confirmed: false },
+        previousTotalsByProduct,
+        previousWasteByProduct,
+      });
+    } catch (error: any) {
+      message.error(error?.message || 'خطا در بارگذاری فرم تحویل');
+    } finally {
+      setHandoverLoading(false);
+    }
+  }, [
+    recordId,
+    isBom,
+    productionShelfOptions.length,
+    fetchProductionShelves,
+    assignees.roles.length,
+    assignees.users.length,
+    getLineTaskChain,
+    getHandoverFromTask,
+    buildGroupsFromPreviousStage,
+    buildGroupsFromOrder,
+    mergeSavedGroups,
+    assigneeLabelFromIds,
+    toGroupTotals,
+  ]);
+
+  const updateHandoverPieceQty = useCallback((groupIndex: number, pieceIndex: number, value: number | null) => {
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const pieces = [...group.pieces];
+      const piece = pieces[pieceIndex];
+      if (!piece) return prev;
+      pieces[pieceIndex] = { ...piece, handoverQty: Math.max(0, toNumber(value)) };
+      next[groupIndex] = {
+        ...group,
+        pieces,
+        totalSourceQty: pieces.reduce((sum, row) => sum + toNumber(row.sourceQty), 0),
+        totalHandoverQty: pieces.reduce((sum, row) => sum + toNumber(row.handoverQty), 0),
+      };
+      return next;
+    });
+  }, [toNumber]);
+
+  const setHandoverTargetShelf = useCallback((shelfId: string | null) => {
+    setHandoverContext((prev) => (prev ? { ...prev, targetShelfId: shelfId } : prev));
+    setHandoverGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        targetShelfId: shelfId,
+      }))
+    );
+  }, []);
+
+  const handleHandoverShelfScan = useCallback((shelfId: string) => {
+    const allowed = productionShelfOptions.some((option) => String(option.value) === String(shelfId));
+    if (!allowed) {
+      message.error('قفسه اسکن‌شده در لیست قفسه‌های تولید نیست.');
+      return;
+    }
+    setHandoverTargetShelf(shelfId);
+  }, [productionShelfOptions, setHandoverTargetShelf]);
+
+  const saveHandover = useCallback(async (confirmSide?: StageHandoverSide) => {
+    if (!handoverContext || !handoverTask) return false;
+    if (!handoverContext.targetShelfId) {
+      message.error('قفسه این مرحله انتخاب نشده است.');
+      return false;
+    }
+    if (!handoverContext.sourceShelfId) {
+      message.error('قفسه مرحله قبلی/منبع مشخص نشده است.');
+      return false;
+    }
+
+    setHandoverLoading(true);
+    try {
+      const { data: freshTask, error: taskError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('id', handoverContext.taskId)
+        .maybeSingle();
+      if (taskError) throw taskError;
+
+      const recurrence = parseRecurrenceInfo(freshTask?.recurrence_info);
+      const existing = recurrence?.production_handover && typeof recurrence.production_handover === 'object'
+        ? recurrence.production_handover
+        : {};
+
+      const previousGroups = Array.isArray(existing?.groups) ? existing.groups : [];
+      const previousWasteByProduct = existing?.wasteByProduct && typeof existing.wasteByProduct === 'object'
+        ? existing.wasteByProduct
+        : {};
+      const hasImmutableConfirmation = Boolean(
+        existing?.giverConfirmation?.confirmed || existing?.receiverConfirmation?.confirmed
+      );
+      const effectiveGroups = (hasImmutableConfirmation ? previousGroups : handoverGroups) as any[];
+      const effectiveTargetShelfId = hasImmutableConfirmation
+        ? (existing?.targetShelfId ? String(existing.targetShelfId) : handoverContext.targetShelfId)
+        : handoverContext.targetShelfId;
+      const previousTotalsByProduct = (
+        handoverContext?.previousTotalsByProduct
+        && typeof handoverContext.previousTotalsByProduct === 'object'
+      )
+        ? handoverContext.previousTotalsByProduct
+        : toGroupTotals(previousGroups as any);
+      const nextTotalsByProduct = toGroupTotals(effectiveGroups as any);
+
+      const nextWasteByProduct: Record<string, number> = {};
+      effectiveGroups.forEach((group: any) => {
+        const productId = (
+          group.selectedProductId
+          || (group as any)?.selected_product_id
+          || (Array.isArray((group as any)?.pieces)
+            ? ((group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.selectedProductId
+              || (group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.selected_product_id
+              || (group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.product_id)
+            : null)
+        );
+        const normalizedProductId = productId ? String(productId) : '';
+        if (!normalizedProductId) return;
+        const sourceQty = (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
+          (sum: number, piece: any) => sum + toNumber(piece?.sourceQty),
+          0
+        );
+        const handoverQty = (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
+          (sum: number, piece: any) => sum + toNumber(piece?.handoverQty),
+          0
+        );
+        const waste = Math.max(0, sourceQty - handoverQty);
+        if (waste > 0) nextWasteByProduct[normalizedProductId] = (nextWasteByProduct[normalizedProductId] || 0) + waste;
+      });
+
+      const shortageTotal = Object.values(nextWasteByProduct).reduce((sum, value) => sum + toNumber(value), 0);
+      let registerWaste = false;
+      if (shortageTotal > 0) {
+        registerWaste = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+            title: 'ثبت ضایعات',
+            content: 'مقدار تحویل شده از مقداری که تحویل گرفته بودید کمتر است، بعنوان ضایعات ثبت شود؟',
+            okText: 'بله',
+            cancelText: 'خیر',
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+      }
+
+      const finalWasteByProduct = registerWaste ? nextWasteByProduct : {};
+      const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
+      const transferLogs: any[] = [];
+      const userId = currentUser.id;
+
+      const productIds = new Set<string>([
+        ...Object.keys(previousTotalsByProduct),
+        ...Object.keys(nextTotalsByProduct),
+      ]);
+      productIds.forEach((productId) => {
+        const prevQty = toNumber(previousTotalsByProduct[productId]);
+        const nextQty = toNumber(nextTotalsByProduct[productId]);
+        const delta = nextQty - prevQty;
+        if (!delta) return;
+        const sourceShelfId = String(handoverContext.sourceShelfId);
+        const targetShelfId = String(effectiveTargetShelfId);
+        if (!sourceShelfId || !targetShelfId || sourceShelfId === targetShelfId) return;
+        if (delta > 0) {
+          deltas.push({ productId, shelfId: sourceShelfId, delta: -delta });
+          deltas.push({ productId, shelfId: targetShelfId, delta });
+          transferLogs.push({
+            transfer_type: 'production_stage',
+            product_id: productId,
+            required_qty: delta,
+            delivered_qty: delta,
+            production_order_id: handoverContext.orderId,
+            from_shelf_id: sourceShelfId,
+            to_shelf_id: targetShelfId,
+            sender_id: userId,
+            receiver_id: userId,
+          });
+        } else {
+          const rollbackQty = Math.abs(delta);
+          deltas.push({ productId, shelfId: sourceShelfId, delta: rollbackQty });
+          deltas.push({ productId, shelfId: targetShelfId, delta: -rollbackQty });
+          transferLogs.push({
+            transfer_type: 'production_stage',
+            product_id: productId,
+            required_qty: rollbackQty,
+            delivered_qty: rollbackQty,
+            production_order_id: handoverContext.orderId,
+            from_shelf_id: targetShelfId,
+            to_shelf_id: sourceShelfId,
+            sender_id: userId,
+            receiver_id: userId,
+          });
+        }
+      });
+
+      const wasteProductIds = new Set<string>([
+        ...Object.keys(previousWasteByProduct),
+        ...Object.keys(finalWasteByProduct),
+      ]);
+      wasteProductIds.forEach((productId) => {
+        const prevWaste = toNumber(previousWasteByProduct[productId]);
+        const nextWaste = toNumber(finalWasteByProduct[productId]);
+        const wasteDelta = nextWaste - prevWaste;
+        if (!wasteDelta || !handoverContext.sourceShelfId) return;
+        if (wasteDelta > 0) {
+          deltas.push({ productId, shelfId: String(handoverContext.sourceShelfId), delta: -wasteDelta });
+          transferLogs.push({
+            transfer_type: 'waste',
+            product_id: productId,
+            required_qty: wasteDelta,
+            delivered_qty: wasteDelta,
+            production_order_id: handoverContext.orderId,
+            from_shelf_id: String(handoverContext.sourceShelfId),
+            to_shelf_id: null,
+            sender_id: userId,
+            receiver_id: userId,
+          });
+        } else {
+          deltas.push({ productId, shelfId: String(handoverContext.sourceShelfId), delta: Math.abs(wasteDelta) });
+        }
+      });
+
+      if (deltas.length > 0) {
+        await applyInventoryDeltas(supabase as any, deltas);
+        await syncMultipleProductsStock(
+          supabase as any,
+          Array.from(new Set(deltas.map((item) => item.productId).filter(Boolean)))
+        );
+      }
+
+      if (transferLogs.length > 0) {
+        const { error: transferError } = await supabase.from('stock_transfers').insert(transferLogs);
+        if (transferError) throw transferError;
+      }
+
+      const nowIso = new Date().toISOString();
+      const nextGiverConfirmation: StageHandoverConfirm = existing?.giverConfirmation?.confirmed
+        ? existing.giverConfirmation
+        : { confirmed: false };
+      const nextReceiverConfirmation: StageHandoverConfirm = existing?.receiverConfirmation?.confirmed
+        ? existing.receiverConfirmation
+        : { confirmed: false };
+      if (confirmSide === 'giver') {
+        nextGiverConfirmation.confirmed = true;
+        nextGiverConfirmation.userId = currentUser.id;
+        nextGiverConfirmation.userName = currentUser.fullName;
+        nextGiverConfirmation.at = nowIso;
+      }
+      if (confirmSide === 'receiver') {
+        nextReceiverConfirmation.confirmed = true;
+        nextReceiverConfirmation.userId = currentUser.id;
+        nextReceiverConfirmation.userName = currentUser.fullName;
+        nextReceiverConfirmation.at = nowIso;
+      }
+
+      const nextHandover = {
+        sourceTaskId: handoverContext.sourceTaskId,
+        sourceStageName: handoverContext.sourceStageName,
+        sourceShelfId: handoverContext.sourceShelfId,
+        targetShelfId: effectiveTargetShelfId,
+        giver: handoverContext.giver,
+        receiver: handoverContext.receiver,
+        groups: effectiveGroups,
+        wasteByProduct: finalWasteByProduct,
+        giverConfirmation: nextGiverConfirmation,
+        receiverConfirmation: nextReceiverConfirmation,
+        updatedAt: nowIso,
+      };
+
+      const nextRecurrence = {
+        ...recurrence,
+        production_handover: nextHandover,
+      };
+
+      const updatePayload: any = {
+        recurrence_info: nextRecurrence,
+        production_shelf_id: effectiveTargetShelfId,
+      };
+      const { error: updateError } = await supabase
+        .from('tasks')
+        .update(updatePayload)
+        .eq('id', handoverContext.taskId);
+      if (updateError) throw updateError;
+
+      const updatedTask = {
+        ...freshTask,
+        ...updatePayload,
+        recurrence_info: nextRecurrence,
+      };
+      setTasks((prev) => prev.map((item: any) => (
+        String(item?.id) === String(handoverContext.taskId)
+          ? {
+              ...item,
+              recurrence_info: nextRecurrence,
+              production_shelf_id: effectiveTargetShelfId,
+            }
+          : item
+      )));
+      setHandoverTask(updatedTask);
+      setHandoverContext((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          targetShelfId: effectiveTargetShelfId,
+          groups: effectiveGroups as any,
+          previousTotalsByProduct: nextTotalsByProduct,
+          previousWasteByProduct: finalWasteByProduct,
+          giverConfirmation: nextGiverConfirmation,
+          receiverConfirmation: nextReceiverConfirmation,
+        };
+      });
+      message.success(confirmSide ? 'تایید ثبت شد' : 'فرم تحویل ذخیره شد');
+      return true;
+    } catch (error: any) {
+      message.error(error?.message || 'خطا در ثبت فرم تحویل');
+      return false;
+    } finally {
+      setHandoverLoading(false);
+    }
+  }, [
+    currentUser.fullName,
+    currentUser.id,
+    handoverContext,
+    handoverGroups,
+    handoverTask,
+    mergeSavedGroups,
+    parseRecurrenceInfo,
+    toGroupTotals,
+    toNumber,
+  ]);
+
+  const maybeOpenHandoverByStatus = useCallback(async (taskId: string, newStatus: string, providedTasks?: any[]) => {
+    if (!taskId || !recordId || isBom) return;
+    const normalized = String(newStatus || '').toLowerCase();
+    if (normalized !== 'in_progress' && normalized !== 'done' && normalized !== 'completed') return;
+    const allTasks = (providedTasks && providedTasks.length > 0) ? providedTasks : tasks;
+    const currentTask = allTasks.find((item: any) => String(item?.id) === String(taskId));
+    if (!currentTask || !currentTask?.production_line_id) return;
+    const chain = getLineTaskChain(String(currentTask.production_line_id), allTasks);
+    const currentIndex = chain.findIndex((item: any) => String(item?.id) === String(taskId));
+    const isFirstStage = currentIndex === 0;
+    if (normalized === 'in_progress' && !isFirstStage) return;
+
+    const handover = getHandoverFromTask(currentTask);
+    const isComplete = handover?.giverConfirmation?.confirmed && handover?.receiverConfirmation?.confirmed;
+    if (isComplete) return;
+
+    await openTaskHandoverModal(currentTask, allTasks);
+  }, [recordId, isBom, tasks, getLineTaskChain, getHandoverFromTask, openTaskHandoverModal]);
+
+  const closeHandoverModal = useCallback(() => {
+    setHandoverTask(null);
+    setHandoverContext(null);
+    setHandoverGroups([]);
+  }, []);
+
+  const handleConfirmGiver = useCallback(async () => {
+    const ok = await saveHandover('giver');
+    if (!ok) return;
+  }, [saveHandover]);
+
+  const handleConfirmReceiver = useCallback(async () => {
+    const ok = await saveHandover('receiver');
+    if (!ok) return;
+  }, [saveHandover]);
 
   const handleAddLine = async (values: any) => {
     if (!recordId) return;
@@ -212,6 +947,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       name: draftStage?.name || '',
       sort_order: draftStage?.sort_order || ((tasks.length + 1) * 10),
       wage: draftStage?.wage || 0,
+      production_shelf_id: null,
     };
     taskForm.setFieldsValue(initial);
     setIsTaskModalOpen(true);
@@ -239,12 +975,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const payload: any = {
         name: values.name,
         status: 'todo',
+        produced_qty: 0,
         related_production_order: recordId,
         related_to_module: 'production_orders',
         production_line_id: activeLineId,
         assignee_id: assigneeType === 'user' ? assigneeId : null,
         assignee_role_id: assigneeType === 'role' ? assigneeId : null,
         assignee_type: assigneeType,
+        production_shelf_id: values.production_shelf_id || null,
         due_date: values.due_date || null,
         wage: values.wage || null,
         sort_order: values.sort_order || ((tasks.length + 1) * 10),
@@ -259,7 +997,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       taskForm.resetFields();
       setActiveLineId(null);
       setDraftToCreate(null);
-      fetchTasks();
+      await fetchTasks();
     } catch (error: any) {
       message.error(`خطا: ${error.message}`);
     }
@@ -269,10 +1007,29 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     try {
       const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId);
       if (error) throw error;
-      message.success('وضعیت بروز شد');
-      fetchTasks();
+      message.success('وضعیت بروزرسانی شد');
+      const nextTasks = await fetchTasks();
+      await maybeOpenHandoverByStatus(taskId, newStatus, nextTasks);
     } catch (err: any) {
       message.error('خطا');
+    }
+  };
+
+  const handleProducedQtyChange = async (taskId: string, value: number | null) => {
+    try {
+      const nextProducedQty = Math.max(0, toNumber(value));
+      const { error } = await supabase
+        .from('tasks')
+        .update({ produced_qty: nextProducedQty })
+        .eq('id', taskId);
+      if (error) throw error;
+      setTasks((prev) => prev.map((item: any) => (
+        String(item?.id) === String(taskId)
+          ? { ...item, produced_qty: nextProducedQty }
+          : item
+      )));
+    } catch (err: any) {
+      message.error(err?.message || 'خطا در ثبت مقدار تولید شده');
     }
   };
 
@@ -302,6 +1059,23 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     }
     return 'تعیین نشده';
   };
+
+  const isTaskAssignedToCurrentUser = useCallback((task: any) => {
+    if (!task || !currentUser.id) return false;
+    const assigneeType = String(task?.assignee_type || '');
+    const assigneeUserId = task?.assignee_id ? String(task.assignee_id) : null;
+    const assigneeRoleId = task?.assignee_role_id ? String(task.assignee_role_id) : (assigneeType === 'role' && assigneeUserId ? assigneeUserId : null);
+    if ((assigneeType === 'role' || task?.assignee_role_id) && currentUser.roleId) {
+      return Boolean(assigneeRoleId && String(assigneeRoleId) === String(currentUser.roleId));
+    }
+    return Boolean(assigneeUserId && String(assigneeUserId) === String(currentUser.id));
+  }, [currentUser.id, currentUser.roleId]);
+
+  const getShelfLabel = useCallback((shelfId: string | null | undefined) => {
+    if (!shelfId) return 'تعیین نشده';
+    const option = productionShelfOptions.find((item) => String(item.value) === String(shelfId));
+    return option?.label || String(shelfId);
+  }, [productionShelfOptions]);
 
   const renderDate = (dateVal: any) => {
     if (!dateVal) return null;
@@ -345,6 +1119,19 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             ]}
           />
         </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-gray-500">مقدار تولید شده:</span>
+          <InputNumber
+            size="small"
+            min={0}
+            className="w-36 persian-number"
+            value={toNumber(task?.produced_qty)}
+            disabled={String(task?.status || '').toLowerCase() === 'todo' || String(task?.status || '').toLowerCase() === 'pending'}
+            onChange={(val) => {
+              void handleProducedQtyChange(String(task.id), val);
+            }}
+          />
+        </div>
 
         <div className="bg-gray-50 p-2 rounded-lg border border-gray-100 space-y-2 text-xs text-gray-600">
           <div className="flex items-center gap-2">
@@ -355,6 +1142,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             {task.assignee_type === 'role' ? <TeamOutlined className="text-amber-700" /> : <UserOutlined className="text-amber-700" />}
             <span>مسئول: {getAssigneeLabel(task)}</span>
           </div>
+          {task.production_shelf_id && (
+            <div className="flex items-center gap-2">
+              <span className="text-amber-700">قفسه:</span>
+              <span>{getShelfLabel(task.production_shelf_id)}</span>
+            </div>
+          )}
           {task.wage !== undefined && task.wage !== null && (
             <div className="flex items-center gap-2">
               <span className="text-amber-700">💰</span>
@@ -370,7 +1163,15 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         </div>
       </div>
 
-      <div className="flex justify-end pt-2 border-t border-gray-100">
+      <div className="flex justify-between pt-2 border-t border-gray-100">
+        <Button
+          size="small"
+          type="link"
+          className="text-xs text-leather-700 hover:text-leather-600 px-0"
+          onClick={() => openTaskHandoverModal(task)}
+        >
+          فرم تحویل کالا
+        </Button>
         <Link to={`/tasks/${task.id}`} target="_blank">
           <Button size="small" type="link" icon={<ArrowRightOutlined />} className="text-xs text-amber-700 hover:text-amber-600">
             جزئیات کامل
@@ -387,6 +1188,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     const qty = parseFloat(line.quantity) || 0;
     return sum + (lineWage * qty);
   }, 0);
+  const visibleLines = useMemo(() => {
+    if (!onlyLineId) return lines;
+    return lines.filter((line: any) => String(line?.id || '') === String(onlyLineId));
+  }, [lines, onlyLineId]);
 
   const saveDraftStages = async (nextStages: any[]) => {
     setDraftLocal(nextStages);
@@ -418,8 +1223,17 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   };
 
   const handleRemoveDraftStage = async (id: any) => {
-    const next = draftLocal.filter((s: any) => s.id !== id);
-    await saveDraftStages(next);
+    Modal.confirm({
+      title: 'حذف مرحله پیش‌نویس',
+      content: 'آیا از حذف این مرحله پیش‌نویس مطمئن هستید؟',
+      okText: 'حذف',
+      okType: 'danger',
+      cancelText: 'انصراف',
+      onOk: async () => {
+        const next = draftLocal.filter((s: any) => s.id !== id);
+        await saveDraftStages(next);
+      },
+    });
   };
 
   useEffect(() => {
@@ -495,6 +1309,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const payload = sourceTasks.map((task: any) => ({
           name: task.name || task.title,
           status: 'todo',
+          produced_qty: toNumber(task?.produced_qty),
           related_production_order: recordId,
           related_to_module: 'production_orders',
           production_line_id: newLine.id,
@@ -594,7 +1409,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         </div>
       )}
 
-      {!isBom && lines.map((line) => {
+      {!isBom && visibleLines.map((line) => {
         const lineTasks = tasksByLine.get(String(line.id)) || [];
         const canEditQuantity = !readOnly && (!orderStatus || orderStatus === 'pending');
         const showInlineQty = !compact || canEditQuantity;
@@ -646,9 +1461,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 </Tooltip>
               )}
 
-              <div className={`flex-1 flex bg-gray-100 rounded-lg overflow-hidden border border-gray-200 ${compact ? 'h-5' : 'h-9'}`}>
+              <div className={`relative flex-1 flex bg-gray-100 rounded-lg overflow-visible border border-gray-200 ${compact ? 'h-5' : 'h-9'}`}>
                 {lineSegments.map((segment: any, index: number) => (
                   segment.type === 'task' ? (
+                    (() => {
+                      const isAssignedToCurrent = isTaskAssignedToCurrentUser(segment);
+                      const isHighlightedTask = isAssignedToCurrent;
+                      const segmentColor = getStatusColor(segment.status);
+                      return (
                     <Popover
                       key={segment.id}
                       content={renderPopupContent(segment)}
@@ -657,8 +1477,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                       title={null}
                     >
                       <div
-                        className={`relative flex items-center justify-center cursor-pointer transition-all hover:brightness-110 group ${index !== 0 ? 'border-r border-white/30' : ''}`}
-                        style={{ flex: 1, backgroundColor: getStatusColor(segment.status) }}
+                        className={`relative flex items-center justify-center cursor-pointer transition-all hover:brightness-110 group ${index !== 0 ? 'border-r border-white/30' : ''} ${index === 0 ? 'rounded-r-lg' : ''} ${index === lineSegments.length - 1 ? 'rounded-l-lg' : ''} ${isHighlightedTask ? 'z-10' : ''}`}
+                        style={{
+                          flex: 1,
+                          backgroundColor: segmentColor,
+                          boxShadow: isHighlightedTask
+                            ? `0 0 8px ${segmentColor}66, 0 0 16px ${segmentColor}4D, 0 0 24px ${segmentColor}33`
+                            : undefined,
+                        }}
                       >
                         <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
                           <span className={`text-white font-medium truncate w-full text-center drop-shadow-md ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
@@ -672,6 +1498,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                         </div>
                       </div>
                     </Popover>
+                      );
+                    })()
                   ) : (
                     <Popover
                       key={`draft-${segment.id}-${index}`}
@@ -680,7 +1508,17 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                           <div className="font-bold text-gray-700">{segment.label}</div>
                           <div>ترتیب: {toPersianNumber(segment.sort_order || '-')}</div>
                           {!readOnly && (
-                            <Button size="small" type="primary" onClick={() => openTaskModal(line.id, segment)}>ایجاد وظیفه</Button>
+                            <div className="flex items-center gap-2">
+                              <Button size="small" type="primary" onClick={() => openTaskModal(line.id, segment)}>ایجاد وظیفه</Button>
+                              <Button
+                                size="small"
+                                danger
+                                icon={<DeleteOutlined />}
+                                onClick={() => handleRemoveDraftStage(segment.id)}
+                              >
+                                حذف
+                              </Button>
+                            </div>
                           )}
                         </div>
                       }
@@ -689,7 +1527,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                       title={null}
                     >
                       <div
-                        className={`relative flex items-center justify-center cursor-pointer transition-all group ${index !== 0 ? 'border-r border-white/30' : ''}`}
+                        className={`relative flex items-center justify-center cursor-pointer transition-all group ${index !== 0 ? 'border-r border-white/30' : ''} ${index === 0 ? 'rounded-r-lg' : ''} ${index === lineSegments.length - 1 ? 'rounded-l-lg' : ''}`}
                         style={{ flex: 1, border: '1px dashed #d1d5db', backgroundColor: 'transparent' }}
                       >
                         <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
@@ -717,7 +1555,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         );
       })}
 
-      {!isBom && lines.length === 0 && (
+      {!isBom && visibleLines.length === 0 && (
         <div className="w-full flex items-center justify-center text-gray-400 text-xs bg-gray-50 h-10 rounded">
           بدون خط تولید
         </div>
@@ -827,6 +1665,19 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             </div>
 
             <div className="col-span-12">
+              <Form.Item name="production_shelf_id" label="قفسه مرحله">
+                <Select
+                  placeholder="انتخاب قفسه از انبار تولید"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  options={productionShelfOptions}
+                  getPopupContainer={() => document.body}
+                />
+              </Form.Item>
+            </div>
+
+            <div className="col-span-12">
               <Form.Item name="due_date" label="موعد انجام">
                 <PersianDatePicker
                   type="DATETIME"
@@ -880,6 +1731,28 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           </div>
         </Form>
       </Modal>
+
+      <TaskHandoverModal
+        open={!!handoverTask && !!handoverContext}
+        loading={handoverLoading}
+        locked={!!(handoverContext?.giverConfirmation?.confirmed || handoverContext?.receiverConfirmation?.confirmed)}
+        taskName={String(handoverTask?.name || handoverTask?.title || 'مرحله')}
+        sourceStageName={String(handoverContext?.sourceStageName || 'شروع تولید')}
+        giverName={String(handoverContext?.giver?.label || 'تعیین نشده')}
+        receiverName={String(handoverContext?.receiver?.label || 'تعیین نشده')}
+        groups={handoverGroups}
+        shelfOptions={productionShelfOptions}
+        targetShelfId={handoverContext?.targetShelfId || null}
+        giverConfirmation={handoverContext?.giverConfirmation || { confirmed: false }}
+        receiverConfirmation={handoverContext?.receiverConfirmation || { confirmed: false }}
+        onCancel={closeHandoverModal}
+        onSave={() => { void saveHandover(); }}
+        onQtyChange={updateHandoverPieceQty}
+        onTargetShelfChange={setHandoverTargetShelf}
+        onTargetShelfScan={handleHandoverShelfScan}
+        onConfirmGiver={() => { void handleConfirmGiver(); }}
+        onConfirmReceiver={() => { void handleConfirmReceiver(); }}
+      />
     </div>
   );
 };

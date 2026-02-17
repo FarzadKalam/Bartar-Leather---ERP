@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+﻿import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Spin, App, Avatar, Checkbox, Modal, Select } from 'antd';
 import { EditOutlined, CheckOutlined, CloseOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
@@ -33,6 +33,7 @@ import {
   syncProductStock,
 } from '../utils/productionWorkflow';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
+import { canAccessAssignedRecord } from '../utils/permissions';
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -453,13 +454,10 @@ const ModuleShow: React.FC = () => {
 
         const tags = tagsData?.map((item: any) => item.tags).filter(Boolean) || [];
         
-        const hasAccess = !record?.assignee_id
-          || !currentUserId
-          || (record?.created_by && record.created_by === currentUserId)
-          || (record?.assignee_type === 'user' && record.assignee_id === currentUserId)
-          || (record?.assignee_type === 'role' && record.assignee_id === currentUserRoleId);
+        const hasModuleViewAccess = modulePermissions.view !== false;
+        const assignedAccess = canAccessAssignedRecord(record, currentUserId, currentUserRoleId);
 
-        if (!hasAccess && currentUserId) {
+        if (!hasModuleViewAccess && !assignedAccess) {
           setAccessDenied(true);
           setData(null);
           return;
@@ -474,7 +472,7 @@ const ModuleShow: React.FC = () => {
     } finally {
         setLoading(false);
     }
-  }, [id, moduleConfig, moduleId, msg, currentUserId, currentUserRoleId]);
+  }, [id, moduleConfig, moduleId, msg, currentUserId, currentUserRoleId, modulePermissions.view]);
 
   useEffect(() => {
     fetchBaseInfo();
@@ -823,7 +821,6 @@ const ModuleShow: React.FC = () => {
     [fieldPermissions]
   );
 
-  const canViewModule = modulePermissions.view !== false;
   const canEditModule = modulePermissions.edit !== false;
   const canDeleteModule = modulePermissions.delete !== false;
 
@@ -2023,13 +2020,6 @@ const ModuleShow: React.FC = () => {
     );
   }
   if (!moduleConfig || !data) return loading ? <div className="flex h-screen items-center justify-center"><Spin size="large" /></div> : null;
-  if (!canViewModule) {
-    return (
-      <div className="flex h-screen items-center justify-center text-gray-400">
-        دسترسی مشاهده برای این ماژول ندارید.
-      </div>
-    );
-  }
 
   const renderSmartField = (field: any, isHeader = false) => {
     if (!canViewField(field.key)) return null;
@@ -2138,22 +2128,29 @@ const ModuleShow: React.FC = () => {
     );
   };
 
-  const fieldGroups = moduleConfig.blocks?.filter(b => b.type === BlockType.FIELD_GROUP && checkVisibility(b));
+  const canUseAction = (actionId: string) => canViewField(`__action_${actionId}`);
+
+  const fieldGroups = moduleConfig.blocks?.filter(
+    (b) => b.type === BlockType.FIELD_GROUP && checkVisibility(b) && canViewField(String(b.id))
+  );
   const headerActions = (moduleConfig.actionButtons || [])
     .filter((b: any) => b.placement === 'header')
+    .filter((b: any) => canUseAction(b.id))
     .map((b: any) => ({
       id: b.id,
       label: b.label,
       variant: b.variant,
       onClick: () => handleHeaderAction(b.id)
     }));
-  if (moduleId === 'products') {
+  if (moduleId === 'products' && canUseAction('auto_name')) {
     headerActions.push({
       id: 'auto_name',
       label: 'نامگذاری خودکار',
       variant: 'primary',
       onClick: () => handleHeaderAction('auto_name')
     });
+  }
+  if (moduleId === 'products' && canUseAction('quick_stock_movement')) {
     headerActions.push({
       id: 'quick_stock_movement',
       label: 'افزودن حواله',
@@ -2161,7 +2158,7 @@ const ModuleShow: React.FC = () => {
       onClick: () => handleHeaderAction('quick_stock_movement')
     });
   }
-  if (moduleId === 'shelves') {
+  if (moduleId === 'shelves' && canUseAction('quick_stock_movement')) {
     headerActions.push({
       id: 'quick_stock_movement',
       label: 'افزودن حواله',
@@ -2171,25 +2168,31 @@ const ModuleShow: React.FC = () => {
   }
   if (moduleId === 'production_orders') {
     if (data?.status === 'in_progress') {
-      headerActions.push({
-        id: 'stop_production',
-        label: 'توقف تولید',
-        variant: 'default',
-        onClick: () => handleProductionStatusChange('pending')
-      });
-      headerActions.push({
-        id: 'complete_production',
-        label: 'تکمیل تولید',
-        variant: 'primary',
-        onClick: () => handleProductionStatusChange('completed')
-      });
+      if (canUseAction('stop_production')) {
+        headerActions.push({
+          id: 'stop_production',
+          label: 'توقف تولید',
+          variant: 'default',
+          onClick: () => handleProductionStatusChange('pending')
+        });
+      }
+      if (canUseAction('complete_production')) {
+        headerActions.push({
+          id: 'complete_production',
+          label: 'تکمیل تولید',
+          variant: 'primary',
+          onClick: () => handleProductionStatusChange('completed')
+        });
+      }
     } else if (data?.status === 'pending') {
-      headerActions.push({
-        id: 'start_production',
-        label: 'شروع تولید',
-        variant: 'primary',
-        onClick: () => handleProductionStatusChange('in_progress')
-      });
+      if (canUseAction('start_production')) {
+        headerActions.push({
+          id: 'start_production',
+          label: 'شروع تولید',
+          variant: 'primary',
+          onClick: () => handleProductionStatusChange('in_progress')
+        });
+      }
     }
   }
 

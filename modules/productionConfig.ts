@@ -1,4 +1,4 @@
-import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, FieldNature } from '../types';
+﻿import { ModuleDefinition, ModuleNature, ViewMode, FieldType, FieldLocation, BlockType, FieldNature } from '../types';
 
 const GRID_MATERIALS_BLOCK = {
   id: 'grid_materials',
@@ -132,3 +132,4 @@ export const productionOrderModule: ModuleDefinition = {
   relatedTabs: [],
   table: 'production_orders'
 };
+

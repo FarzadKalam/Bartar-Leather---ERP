@@ -15,6 +15,9 @@ import BulkActionsBar from "../components/moduleList/BulkActionsBar";
 import ViewWrapper from "../components/moduleList/ViewWrapper";
 import GridView from "../components/moduleList/GridView";
 import RenderCardItem from "../components/moduleList/RenderCardItem";
+import { canAccessAssignedRecord, WORKFLOWS_PERMISSION_KEY } from "../utils/permissions";
+import BulkProductsCreateModal from "../components/products/BulkProductsCreateModal";
+import WorkflowsManager from "../components/workflows/WorkflowsManager";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -97,6 +100,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRoleId, setCurrentUserRoleId] = useState<string | null>(null);
+  const [isBulkProductsModalOpen, setIsBulkProductsModalOpen] = useState(false);
+  const [isWorkflowsModalOpen, setIsWorkflowsModalOpen] = useState(false);
+  const [canOpenWorkflows, setCanOpenWorkflows] = useState(true);
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: resolvedModuleId,
@@ -146,6 +152,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     setEditRecordId(null);
     setIsBulkEditOpen(false);
     setIsBulkEditMode(false);
+    setIsBulkProductsModalOpen(false);
+    setIsWorkflowsModalOpen(false);
+    setCanOpenWorkflows(true);
   }, [resolvedModuleId, moduleConfig?.defaultViewMode]);
 
   const fetchPermissions = useCallback(async () => {
@@ -170,14 +179,19 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
         .single();
 
       const modulePerms = role?.permissions?.[resolvedModuleId] || {};
+      const workflowPerms = role?.permissions?.[WORKFLOWS_PERMISSION_KEY] || {};
       setModulePermissions({
         view: modulePerms.view,
         edit: modulePerms.edit,
         delete: modulePerms.delete
       });
       setFieldPermissions(modulePerms.fields || {});
+      setCanOpenWorkflows(
+        workflowPerms.view !== false && (workflowPerms?.fields?.module_list_button !== false)
+      );
     } catch (err) {
       console.warn('Could not fetch permissions:', err);
+      setCanOpenWorkflows(true);
     }
   }, [resolvedModuleId]);
 
@@ -229,16 +243,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 
   // ✅ Merge tags into allData
   const accessibleData = useMemo(() => {
-    if (!currentUserId) return allData;
-    return allData.filter((record: any) => {
-      if (!record) return false;
-      if (!record.assignee_id) return true;
-      if (record.created_by && record.created_by === currentUserId) return true;
-      if (record.assignee_type === 'user' && record.assignee_id === currentUserId) return true;
-      if (record.assignee_type === 'role' && record.assignee_id === currentUserRoleId) return true;
-      return false;
-    });
-  }, [allData, currentUserId, currentUserRoleId]);
+    if (canViewModule) return allData;
+    return allData.filter((record: any) => canAccessAssignedRecord(record, currentUserId, currentUserRoleId));
+  }, [allData, canViewModule, currentUserId, currentUserRoleId]);
 
   const enrichedData = useMemo(() => {
     if (!tagsField) return accessibleData;
@@ -572,7 +579,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   };
 
   if (!resolvedModuleId || !moduleConfig) return null;
-  if (!canViewModule) {
+  if (!canViewModule && !loading && accessibleData.length === 0) {
     return (
       <div className="p-6">
         <Empty description="دسترسی مشاهده برای این ماژول ندارید" />
@@ -597,15 +604,34 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
             />
             </div>
 
-            {selectedRowKeys.length === 0 && canEditModule && (
-            <Button
-                type="primary"
-                icon={<PlusOutlined />}
-              onClick={() => navigate(`/${resolvedModuleId}/create`)}
-                className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/30 shrink-0"
-            >
-                افزودن
-            </Button>
+            {selectedRowKeys.length === 0 && (
+              <div className="flex items-center gap-2 shrink-0">
+                {canOpenWorkflows && (
+                  <Button
+                    onClick={() => setIsWorkflowsModalOpen(true)}
+                    className="rounded-xl"
+                  >
+                    گردش کارها
+                  </Button>
+                )}
+                {canEditModule && resolvedModuleId === 'products' && (
+                  <Button
+                    icon={<PlusOutlined />}
+                    onClick={() => setIsBulkProductsModalOpen(true)}
+                    className="rounded-xl"
+                  >
+                    افزودن گروهی
+                  </Button>
+                )}
+                {canEditModule && (
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={() => navigate(`/${resolvedModuleId}/create`)}
+                    className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/30 shrink-0"
+                  >افزودن تکی</Button>
+                )}
+              </div>
             )}
         </div>
 
@@ -645,9 +671,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
          <div className="flex-1 overflow-hidden relative rounded-[2rem]">
            {showContentSkeleton ? (
               <ModuleListContentSkeleton viewMode={viewMode} />
-           ) : allData.length === 0 ? (
+           ) : accessibleData.length === 0 ? (
              <div className="flex h-full items-center justify-center bg-white dark:bg-[#1a1a1a] rounded-[2rem] border border-dashed border-gray-300">
-               <Empty description="هیچ داده‌ای یافت نشد" />
+                <Empty description="هیچ داده‌ای یافت نشد" />
              </div>
            ) : (
              <>
@@ -689,6 +715,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                               canViewField={canViewField}
                               allUsers={allUsers}
                               allRoles={allRoles}
+                              relationOptions={relationOptions}
                             />
                             
                   {/* Load More Button */}
@@ -738,6 +765,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                               canViewField={canViewField}
                               allUsers={allUsers}
                               allRoles={allRoles}
+                              relationOptions={relationOptions}
                             />
                           ))}
                         </div>
@@ -752,7 +780,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                             });
                           }}
                         >
-                          افزودن در {col.label}
+                          افزودن به {col.label}
                         </Button>
                       </div>
                     );
@@ -775,12 +803,30 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                  tableQueryResult.refetch();
                }}
                onSave={isBulkEditMode ? handleBulkSave : undefined}
-               title={isBulkEditMode ? `ویرایش گروهی ${selectedRowKeys.length} مورد` : `ویرایش مورد انتخابی`}
+                title={isBulkEditMode ? `ویرایش گروهی ${selectedRowKeys.length} مورد` : `ویرایش مورد انتخابی`}
                isBulkEdit={isBulkEditMode}
            />
        )}
+      {resolvedModuleId === 'products' && (
+        <BulkProductsCreateModal
+          open={isBulkProductsModalOpen}
+          onClose={() => setIsBulkProductsModalOpen(false)}
+          onCreated={() => {
+            setIsBulkProductsModalOpen(false);
+            tableQueryResult.refetch();
+          }}
+        />
+      )}
+      <WorkflowsManager
+        inline={false}
+        open={isWorkflowsModalOpen}
+        onClose={() => setIsWorkflowsModalOpen(false)}
+        defaultModuleId={resolvedModuleId}
+        context="module_list"
+      />
     </div>
   );
 };
 
 export default ModuleListRefine;
+

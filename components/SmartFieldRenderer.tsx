@@ -387,7 +387,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       const status = (allValues as any)?.status;
       const isOrder = moduleId === 'production_orders';
       const isBom = moduleId === 'production_boms';
-      const canEditStages = isOrder && (!status || status === 'pending');
+      const canEditStages = isOrder && String(status || '').toLowerCase() !== 'completed';
       return (
         <ProductionStagesField
           recordId={recordId}

@@ -16,6 +16,7 @@ interface GridViewProps {
   setSelectedRowKeys: (keys: React.Key[]) => void;
   navigate: (path: string) => void;
   canViewField?: (fieldKey: string) => boolean;
+  relationOptions?: Record<string, any[]>;
 }
 
 const GridView: React.FC<GridViewProps> = ({
@@ -32,6 +33,7 @@ const GridView: React.FC<GridViewProps> = ({
   setSelectedRowKeys,
   navigate,
   canViewField,
+  relationOptions,
 }) => {
   if (!data?.length) {
     return <Empty description="داده‌ای یافت نشد" className="py-10" />;
@@ -55,6 +57,7 @@ const GridView: React.FC<GridViewProps> = ({
           setSelectedRowKeys={setSelectedRowKeys}
           navigate={navigate}
           canViewField={canViewField}
+          relationOptions={relationOptions}
         />
       ))}
     </div>

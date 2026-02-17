@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { Button, InputNumber, Modal, Select, Table } from 'antd';
 import { RightOutlined, SaveOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
@@ -290,3 +290,4 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
 };
 
 export default StartProductionModal;
+

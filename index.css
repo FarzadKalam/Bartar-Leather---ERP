@@ -675,12 +675,18 @@
    ========================================= */
 
 @media (max-width: 1024px) {
-  .ant-layout-sider {
+  .ant-layout-sider:not(.app-main-sider) {
     position: fixed !important;
     left: 0 !important;
     top: 0 !important;
     z-index: 999;
     height: 100vh !important;
+  }
+
+  .app-main-sider.ant-layout-sider {
+    left: auto !important;
+    right: 0 !important;
+    z-index: 1100 !important;
   }
 }
 
@@ -790,8 +796,12 @@
 
 @media (max-width: 480px) {
   /* موبایل بسیار کوچک */
-  .ant-layout-sider {
+  .ant-layout-sider:not(.app-main-sider) {
     display: none !important;
+  }
+
+  .app-main-sider.ant-layout-sider:not(.mobile-collapsed) {
+    display: block !important;
   }
   
   main > div {

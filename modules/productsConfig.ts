@@ -119,7 +119,16 @@ const fieldsArray: any[] = [
   { key: 'leather_finish_1', labels: { fa: 'صفحه چرم', en: 'Finish 1' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 4, dynamicOptionsCategory: 'leather_finish', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   { key: 'leather_effect', labels: { fa: 'افکت چرم', en: 'leather_effect' }, type: FieldType.MULTI_SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 5, dynamicOptionsCategory: 'leather_effect', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   { key: 'leather_sort', labels: { fa: 'سورت چرم', en: 'Sort' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 6, dynamicOptionsCategory: 'leather_sort', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
-  { key: 'leather_unit', labels: { fa: 'واحد چرم', en: 'leather_unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpecs', order:7, dynamicOptionCategory: 'leather_unit', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
+  {
+    key: 'leather_unit',
+    labels: { fa: 'واحد چرم', en: 'leather_unit' },
+    type: FieldType.SELECT,
+    location: FieldLocation.BLOCK,
+    blockId: 'leatherSpec',
+    order: 7,
+    options: HARD_CODED_UNIT_OPTIONS,
+    logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } },
+  },
   // فیلدهای اختصاصی آستر
   { key: 'lining_material', labels: { fa: 'جنس آستر', en: 'Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 1, dynamicOptionsCategory: 'lining_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
   { key: 'lining_color', labels: { fa: 'رنگ آستر', en: 'Color' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 2, dynamicOptionsCategory: 'general_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },

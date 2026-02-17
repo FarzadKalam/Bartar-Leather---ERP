@@ -111,6 +111,8 @@ const TablesSection: React.FC<TablesSectionProps> = ({
         ?.filter((b: any) => b.type === 'table' || b.type === 'grid_table')
         .filter((b: any) => !(module.id === 'products' && b.id === 'product_stock_movements'))
         .filter((b: any) => !(module.id === 'shelves' && b.id === 'shelf_stock_movements'))
+        .filter((b: any) => !(module.id === 'tasks' && b.id === 'task_shelf_stock_movements'))
+        .filter((b: any) => (canViewField ? canViewField(String(b.id)) !== false : true))
         .filter((b: any) => (b.visibleIf ? checkVisibility(b.visibleIf) : true))
           .map((block: any) => (
         <div key={block.id}>
@@ -124,7 +126,10 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               relationOptions={relationOptions}
               dynamicOptions={dynamicOptions}
               canEditModule={canEditModule && !(productionLocked && String(block.id).startsWith('items_'))}
-              canViewField={canViewField}
+              canViewField={(fieldKey) =>
+                (canViewField ? canViewField(`${block.id}.${fieldKey}`) !== false : true) &&
+                (canViewField ? canViewField(fieldKey) !== false : true)
+              }
               orderQuantity={module.id === 'production_orders' ? (data?.quantity || 0) : 0}
               showDeliveredQtyColumn={module.id === 'production_orders' && ['in_progress', 'completed'].includes(String(data?.status || ''))}
               forceProductionOrderMode={module.id === 'products'}
@@ -140,7 +145,10 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               relationOptions={relationOptions}
               dynamicOptions={dynamicOptions}
               canEditModule={canEditModule && !(productionLocked && String(block.id).startsWith('items_'))}
-              canViewField={canViewField}
+              canViewField={(fieldKey) =>
+                (canViewField ? canViewField(`${block.id}.${fieldKey}`) !== false : true) &&
+                (canViewField ? canViewField(fieldKey) !== false : true)
+              }
             />
           )}
         </div>

@@ -8,6 +8,7 @@ import { RelationQuickCreateInline } from '../SmartFieldRenderer';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
 import { convertArea } from '../../utils/unitConversions';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
+import { insertChangelog } from '../editableTable/changelogHelpers';
 
 interface ProductStockMovementsPanelProps {
   block: any;
@@ -371,6 +372,32 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     };
   };
 
+  const buildLogRow = (
+    normalized: {
+      transferType: string;
+      voucherType: string;
+      qtyMain: number;
+      qtySub: number;
+      fromShelfId: string | null;
+      toShelfId: string | null;
+    },
+    creatorId: string | null
+  ) => ({
+    voucher_type: normalized.voucherType,
+    source: normalized.transferType,
+    main_unit: productUnits.mainUnit,
+    main_quantity: normalized.qtyMain,
+    sub_unit: productUnits.subUnit,
+    sub_quantity: normalized.qtySub,
+    from_shelf_id: normalized.fromShelfId,
+    to_shelf_id: normalized.toShelfId,
+    invoice_id: null,
+    purchase_invoice_id: null,
+    production_order_id: null,
+    created_by_name: creatorId,
+    created_at: new Date().toISOString(),
+  });
+
   const handleSubmit = async () => {
     setQuickCreateLoading(true);
     try {
@@ -415,6 +442,15 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         if (insertError) throw insertError;
       }
 
+      await insertChangelog(
+        supabase as any,
+        'products',
+        recordId,
+        block,
+        editingRow ? [editingRow] : [],
+        [buildLogRow(normalized, currentUserId)]
+      );
+
       await syncMultipleProductsStock(supabase as any, [recordId]);
       await loadRows();
       setQuickCreateOpen(false);
@@ -458,6 +494,14 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
           }
           const { error: deleteError } = await supabase.from('stock_transfers').delete().eq('id', row.id);
           if (deleteError) throw deleteError;
+          await insertChangelog(
+            supabase as any,
+            'products',
+            recordId,
+            block,
+            [row],
+            []
+          );
           await syncMultipleProductsStock(supabase as any, [recordId]);
           await loadRows();
           msg.success('حواله حذف شد');

@@ -4,6 +4,8 @@ import { AppstoreOutlined } from "@ant-design/icons";
 import { FieldType } from "../../types";
 import { formatPersianPrice, toPersianNumber, safeJalaliFormat, parseDateValue } from "../../utils/persianNumberFormatter";
 import { getRecordTitle } from "../../utils/recordTitle";
+import ProductionStagesField from "../ProductionStagesField";
+import { MODULES } from "../../moduleRegistry";
 
 export interface RenderCardItemProps {
   item: any;
@@ -20,6 +22,7 @@ export interface RenderCardItemProps {
   navigate: (path: string) => void;
   minimal?: boolean;
   canViewField?: (fieldKey: string) => boolean;
+  relationOptions?: Record<string, any[]>;
 }
 
 const RenderCardItem: React.FC<RenderCardItemProps> = ({
@@ -37,11 +40,18 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
   navigate,
   minimal = false,
   canViewField,
+  relationOptions = {},
 }) => {
   const isSelected = selectedRowKeys.includes(item.id);
   const imageUrl = imageField ? item[imageField] : null;
   const title = getRecordTitle(item, moduleConfig, { fallback: "-" });
   const isTasks = moduleId === 'tasks';
+  const isProductionTask = (
+    isTasks
+    && String(item?.related_to_module || '') === 'production_orders'
+    && item?.related_production_order
+    && item?.production_line_id
+  );
 
   const statusFieldConfig = moduleConfig?.fields.find(
     (f: any) => f.type === FieldType.STATUS || f.key === statusField,
@@ -59,6 +69,33 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
   const assigneeAllowed = canViewField ? canViewField('assignee_id') !== false : true;
   const dueAllowed = canViewField ? canViewField('due_date') !== false : true;
   const categoryAllowed = canViewField ? canViewField(categoryFieldConfig?.key || 'related_to_module') !== false : true;
+  const relatedRelationFields = isTasks
+    ? (moduleConfig?.fields || []).filter(
+        (f: any) => f?.type === FieldType.RELATION && String(f?.key || '').startsWith('related_')
+      )
+    : [];
+  const selectedRelationField = isTasks
+    ? (
+        relatedRelationFields.find((f: any) => f?.relationConfig?.targetModule === item?.related_to_module && item?.[f.key])
+        || relatedRelationFields.find((f: any) => item?.[f.key])
+      )
+    : null;
+  const relatedRecordId = selectedRelationField ? item?.[selectedRelationField.key] : null;
+  const relatedModuleId = isTasks
+    ? (item?.related_to_module || selectedRelationField?.relationConfig?.targetModule || null)
+    : null;
+  const relatedFieldAllowed = selectedRelationField
+    ? (canViewField ? canViewField(selectedRelationField.key) !== false : true)
+    : false;
+  const relatedOptions = selectedRelationField ? relationOptions?.[selectedRelationField.key] || [] : [];
+  const relatedOptionLabel = relatedRecordId
+    ? relatedOptions.find((opt: any) => opt?.value === relatedRecordId)?.label
+    : null;
+  const relatedRecordLabel = relatedOptionLabel || (relatedRecordId ? String(relatedRecordId) : null);
+  const relatedModuleTitle = relatedModuleId
+    ? (MODULES as Record<string, any>)?.[String(relatedModuleId)]?.titles?.fa || String(relatedModuleId)
+    : null;
+  const showRelatedRecord = isTasks && relatedRecordId && relatedModuleId && relatedFieldAllowed;
 
   const renderAssignee = () => {
     if (!assigneeId) {
@@ -263,6 +300,22 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
               </>
             )}
           </div>
+          {showRelatedRecord && (
+            <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-300 truncate">
+              <span className="font-semibold">رکورد مرتبط:</span>{' '}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/${relatedModuleId}/${relatedRecordId}`);
+                }}
+                className="text-leather-600 hover:underline truncate max-w-full"
+                title={`${relatedModuleTitle || ''} - ${relatedRecordLabel || ''}`}
+              >
+                {relatedRecordLabel}
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -280,6 +333,38 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
               {renderDueDate()}
             </div>
           )}
+        </div>
+      )}
+      {minimal && showRelatedRecord && (
+        <div className="mt-1 text-[10px] text-gray-500 dark:text-gray-300 truncate">
+          <span className="font-semibold">رکورد مرتبط:</span>{' '}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/${relatedModuleId}/${relatedRecordId}`);
+            }}
+            className="text-leather-600 hover:underline truncate max-w-full"
+            title={`${relatedModuleTitle || ''} - ${relatedRecordLabel || ''}`}
+          >
+            {relatedRecordLabel}
+          </button>
+        </div>
+      )}
+
+      {isProductionTask && (
+        <div
+          className={`${minimal ? 'mt-2' : 'mt-3'} rounded-lg border border-[#d6c2ab] bg-[#faf5ef] p-2`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ProductionStagesField
+            recordId={String(item.related_production_order)}
+            moduleId="production_orders"
+            readOnly
+            compact
+            lazyLoad
+            onlyLineId={String(item.production_line_id)}
+          />
         </div>
       )}
     </div>

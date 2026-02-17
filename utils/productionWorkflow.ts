@@ -1,4 +1,4 @@
-import { supabase } from '../supabaseClient';
+﻿import { supabase } from '../supabaseClient';
 
 export type ProductionMove = {
   product_id: string;
@@ -143,3 +143,4 @@ export const syncProductStock = async (productId: string) => {
     .eq('id', productId);
   if (updateError) throw updateError;
 };
+
