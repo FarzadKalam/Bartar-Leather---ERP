@@ -484,11 +484,11 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
             <InputNumber 
                 {...commonProps}
-                className="w-full" 
+                className="w-full persian-number" 
                 controls={false}
                 stringMode
                 inputMode="decimal"
-                formatter={(val, info) => formatNumericForInput(info?.input ?? val, fieldType === FieldType.PRICE)}
+                formatter={(val, info) => formatNumericForInput(info?.input ?? val, true)}
                 parser={(val) => normalizeNumericString(val)}
             />
         );
@@ -575,7 +575,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     options={filteredOptions}
                     optionFilterProp="label"
                     getPopupContainer={() => document.body}
-                    dropdownStyle={{ zIndex: 4000 }}
+                    popupMatchSelectWidth={false}
+                    dropdownStyle={{ zIndex: 4000, minWidth: 320 }}
                     filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                     dropdownRender={(menu) => (
                         <>
@@ -881,12 +882,12 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       case FieldType.STOCK:
         return (
           <InputNumber
-            className="w-full"
+            className="w-full persian-number"
             controls={false}
             disabled={isDisabled}
             stringMode
             inputMode="decimal"
-            formatter={(val, info) => formatNumericForInput(info?.input ?? val, field.type === FieldType.PRICE)}
+            formatter={(val, info) => formatNumericForInput(info?.input ?? val, true)}
             parser={(val) => normalizeNumericString(val)}
           />
         );

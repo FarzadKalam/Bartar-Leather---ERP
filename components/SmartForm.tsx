@@ -316,6 +316,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
         addPart(getFieldValueLabel('related_bom', values?.related_bom));
       }
     }
+    addPart(getFieldValueLabel('brand_name', values?.brand_name));
 
     return parts.join(' ');
   };
@@ -416,7 +417,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
     const stock = parseFloat(currentValues?.stock) || 0;
     if (!mainUnit || !subUnit) return;
     const subStock = convertArea(stock, mainUnit, subUnit);
-    if (Number.isFinite(subStock)) {
+    const currentSubStock = parseFloat(currentValues?.sub_stock);
+    if (
+      Number.isFinite(subStock) &&
+      (!Number.isFinite(currentSubStock) || Math.abs((currentSubStock as number) - subStock) > 0.0005)
+    ) {
       form.setFieldValue('sub_stock', subStock);
       setFormData((prev: any) => ({ ...prev, sub_stock: subStock }));
     }
@@ -441,6 +446,17 @@ const SmartForm: React.FC<SmartFormProps> = ({
     try {
       if (module.id === 'production_orders' && !recordId) {
         values = { ...formData, ...values };
+      }
+      if (module.id === 'products') {
+        const mainUnit = values?.main_unit ?? formData?.main_unit;
+        const subUnit = values?.sub_unit ?? formData?.sub_unit;
+        const stock = parseFloat(values?.stock ?? formData?.stock ?? 0) || 0;
+        if (mainUnit && subUnit) {
+          const computedSubStock = convertArea(stock, mainUnit, subUnit);
+          if (Number.isFinite(computedSubStock)) {
+            values.sub_stock = computedSubStock;
+          }
+        }
       }
       const assigneeCombo = values?.assignee_combo ?? formData?.assignee_combo;
       if (assigneeCombo) {
@@ -825,6 +841,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     compact={true}
                     orderStatus={module.id === 'production_orders' ? (currentValues as any)?.status : null}
                     draftStages={(currentValues as any)?.production_stages_draft || []}
+                    onDraftStagesChange={(stages) => {
+                      const next = { ...form.getFieldsValue(), production_stages_draft: stages };
+                      form.setFieldValue('production_stages_draft', stages);
+                      setFormData(next);
+                    }}
                     showWageSummary={module.id === 'production_orders'}
                   />
                 </div>
@@ -835,6 +856,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 if (block.visibleIf && !checkVisibility(block.visibleIf, currentValues)) return null;
                 if (canViewField(String(block.id)) === false) return null;
                 if (module.id === 'products' && block.id === 'product_stock_movements') return null;
+                if (module.id === 'products' && block.id === 'product_inventory' && !!recordId) return null;
                 if (module.id === 'shelves' && block.id === 'shelf_stock_movements') return null;
                 if (module.id === 'tasks' && block.id === 'task_shelf_stock_movements') return null;
 

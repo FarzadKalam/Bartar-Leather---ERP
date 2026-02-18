@@ -267,6 +267,7 @@ ADD COLUMN IF NOT EXISTS production_completed_at timestamptz;
 
 -- اضافه کردن فیلد تصویر به محصولات و مشتریان
 ALTER TABLE public.products ADD COLUMN image_url text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS brand_name text;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS notes text;
 ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS lead_source text;
 ALTER TABLE public.customers ADD COLUMN image_url text;

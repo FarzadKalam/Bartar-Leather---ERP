@@ -1,4 +1,5 @@
 ﻿import { supabase } from '../supabaseClient';
+import { convertArea, type UnitValue } from './unitConversions';
 
 export type ProductionMove = {
   product_id: string;
@@ -137,9 +138,17 @@ export const syncProductStock = async (productId: string) => {
     .eq('product_id', productId);
   if (error) throw error;
   const totalStock = (data || []).reduce((sum: number, row: any) => sum + (parseFloat(row.stock) || 0), 0);
+  const { data: productRow } = await supabase
+    .from('products')
+    .select('main_unit, sub_unit')
+    .eq('id', productId)
+    .maybeSingle();
+  const mainUnit = productRow?.main_unit as UnitValue | undefined;
+  const subUnit = productRow?.sub_unit as UnitValue | undefined;
+  const subStock = mainUnit && subUnit ? convertArea(totalStock, mainUnit, subUnit) : 0;
   const { error: updateError } = await supabase
     .from('products')
-    .update({ stock: totalStock })
+    .update({ stock: totalStock, sub_stock: subStock })
     .eq('id', productId);
   if (updateError) throw updateError;
 };

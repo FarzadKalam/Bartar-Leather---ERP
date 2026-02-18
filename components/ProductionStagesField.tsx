@@ -5,13 +5,14 @@ import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import PersianDatePicker from './PersianDatePicker';
-import TaskHandoverModal, { type StageHandoverConfirm, type StageHandoverGroup } from './production/TaskHandoverModal';
+import TaskHandoverModal, { type StageHandoverConfirm, type StageHandoverGroup, type StageHandoverDeliveryRow } from './production/TaskHandoverModal';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
+import { MODULES } from '../moduleRegistry';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -76,6 +77,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [handoverGroups, setHandoverGroups] = useState<StageHandoverGroup[]>([]);
   const [handoverLoading, setHandoverLoading] = useState(false);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
+  const [openTaskPopoverId, setOpenTaskPopoverId] = useState<string | null>(null);
 
   const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
 
@@ -122,6 +124,73 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     const parsed = parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
   }, []);
+
+  const categoryLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const productionModule = MODULES['production_orders'] as any;
+    const gridBlock = (productionModule?.blocks || []).find((block: any) => block?.id === 'grid_materials');
+    const categories = gridBlock?.gridConfig?.categories || [];
+    categories.forEach((category: any) => {
+      const key = String(category?.value || '').trim();
+      if (!key) return;
+      map.set(key, String(category?.label || key));
+    });
+    return map;
+  }, []);
+
+  const resolveCategoryLabel = useCallback((rawCategory: any) => {
+    const raw = String(rawCategory || '').trim();
+    if (!raw) return 'مواد اولیه';
+    return categoryLabelMap.get(raw) || raw;
+  }, [categoryLabelMap]);
+
+  const buildHandoverRowKey = useCallback(
+    () => `handover_row_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    []
+  );
+
+  const normalizeHandoverDeliveryRow = useCallback((group: StageHandoverGroup, rawRow?: any): StageHandoverDeliveryRow => {
+    const firstPiece = Array.isArray(group?.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
+    return {
+      key: String(rawRow?.key || buildHandoverRowKey()),
+      pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
+      name: String(rawRow?.name ?? firstPiece?.name ?? ''),
+      length: Math.max(0, toNumber(rawRow?.length ?? firstPiece?.length ?? 0)),
+      width: Math.max(0, toNumber(rawRow?.width ?? firstPiece?.width ?? 0)),
+      quantity: Math.max(0, toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1)),
+      mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
+      subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
+      deliveredQty: Math.max(0, toNumber(rawRow?.deliveredQty ?? rawRow?.handoverQty ?? 0)),
+    };
+  }, [buildHandoverRowKey, toNumber]);
+
+  const sumDeliveredRows = useCallback((rows: StageHandoverDeliveryRow[]) => {
+    return rows.reduce((sum, row) => sum + Math.max(0, toNumber(row?.deliveredQty)), 0);
+  }, [toNumber]);
+
+  const recalcHandoverGroup = useCallback((group: StageHandoverGroup): StageHandoverGroup => {
+    const pieces = Array.isArray(group?.pieces) ? group.pieces : [];
+    const orderPieces = Array.isArray(group?.orderPieces) ? group.orderPieces : [];
+    const deliveryRows = Array.isArray(group?.deliveryRows)
+      ? group.deliveryRows.map((row) => normalizeHandoverDeliveryRow(group, row))
+      : [];
+    const totalSourceQty = pieces.reduce((sum, row) => sum + Math.max(0, toNumber(row?.sourceQty)), 0);
+    const totalOrderQty = orderPieces.reduce((sum, row) => sum + Math.max(0, toNumber(row?.sourceQty)), 0);
+    const fallbackTotal = pieces.reduce(
+      (sum, row) => sum + Math.max(0, toNumber((row as any)?.handoverQty ?? row?.sourceQty)),
+      0
+    );
+    const totalHandoverQty = deliveryRows.length > 0 ? sumDeliveredRows(deliveryRows) : fallbackTotal;
+    return {
+      ...group,
+      pieces,
+      orderPieces,
+      deliveryRows,
+      totalSourceQty,
+      totalOrderQty,
+      totalHandoverQty,
+    };
+  }, [normalizeHandoverDeliveryRow, sumDeliveredRows, toNumber]);
 
   const parseRecurrenceInfo = useCallback((value: any) => {
     if (!value) return {};
@@ -305,13 +374,41 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         || null;
       const normalizedProductId = productId ? String(productId) : '';
       if (!normalizedProductId) return;
-      const qty = (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).reduce(
-        (sum: number, piece: any) => sum + toNumber(piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0),
-        0
-      );
+      const deliveryRows = Array.isArray(anyGroup?.deliveryRows) ? anyGroup.deliveryRows : [];
+      const qty = deliveryRows.length > 0
+        ? deliveryRows.reduce((sum: number, row: any) => sum + toNumber(row?.deliveredQty ?? row?.handoverQty ?? 0), 0)
+        : (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).reduce(
+            (sum: number, piece: any) => sum + toNumber(piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0),
+            0
+          );
       totals[normalizedProductId] = (totals[normalizedProductId] || 0) + qty;
     });
     return totals;
+  }, [toNumber]);
+
+  const buildPiecesFromOrderRow = useCallback((row: any, rowIndex: number, orderQty: number, useDeliveredQty: boolean) => {
+    const rowPieces = Array.isArray(row?.pieces) && row.pieces.length > 0 ? row.pieces : [row];
+    return rowPieces.map((piece: any, pieceIndex: number) => {
+      const hasDelivered = Object.prototype.hasOwnProperty.call(piece || {}, 'delivered_qty');
+      const deliveredQty = hasDelivered ? toNumber(piece?.delivered_qty) : null;
+      const finalUsage = toNumber(piece?.final_usage);
+      const totalUsage = toNumber(piece?.total_usage);
+      const fallback = totalUsage > 0 ? totalUsage : (finalUsage > 0 ? finalUsage * orderQty : 0);
+      const sourceQty = useDeliveredQty && deliveredQty !== null ? deliveredQty : fallback;
+      return {
+        key: `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`,
+        name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
+        length: toNumber(piece?.length),
+        width: toNumber(piece?.width),
+        quantity: toNumber(piece?.quantity),
+        totalQuantity: toNumber(piece?.quantity) * orderQty,
+        mainUnit: String(piece?.main_unit || row?.main_unit || ''),
+        subUnit: String(piece?.sub_unit || ''),
+        subUsage: toNumber(piece?.qty_sub),
+        sourceQty,
+        handoverQty: sourceQty,
+      } as any;
+    });
   }, [toNumber]);
 
   const buildGroupsFromOrder = useCallback((order: any): StageHandoverGroup[] => {
@@ -344,31 +441,24 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         || selectedPiece?.selected_product_code
         || selectedPiece?.product_code
         || '';
-      const categoryLabel = header?.category_label || header?.category || 'مواد اولیه';
-      const pieces = rowPieces.map((piece: any, pieceIndex: number) => {
-        const hasDelivered = Object.prototype.hasOwnProperty.call(piece || {}, 'delivered_qty');
-        const deliveredQty = hasDelivered ? toNumber(piece?.delivered_qty) : null;
-        const finalUsage = toNumber(piece?.final_usage);
-        const totalUsage = toNumber(piece?.total_usage);
-        const fallback = totalUsage > 0 ? totalUsage : (finalUsage > 0 ? finalUsage * orderQty : 0);
-        const sourceQty = deliveredQty === null ? fallback : deliveredQty;
-        return {
-          key: `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`,
-          name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
-          length: toNumber(piece?.length),
-          width: toNumber(piece?.width),
-          quantity: toNumber(piece?.quantity),
-          totalQuantity: toNumber(piece?.quantity) * orderQty,
-          mainUnit: String(piece?.main_unit || row?.main_unit || ''),
-          subUnit: String(piece?.sub_unit || ''),
-          subUsage: toNumber(piece?.qty_sub),
-          sourceQty,
-          handoverQty: sourceQty,
-        };
-      });
-      const totalSourceQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.sourceQty), 0);
-      const totalHandoverQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.handoverQty), 0);
-      return {
+      const categoryLabel = resolveCategoryLabel(header?.category_label || header?.category);
+      const pieces = buildPiecesFromOrderRow(row, rowIndex, orderQty, true);
+      const orderPieces = buildPiecesFromOrderRow(row, rowIndex, orderQty, false);
+      const deliveryRows = pieces.map((piece: any) => normalizeHandoverDeliveryRow(
+        { pieces } as StageHandoverGroup,
+        {
+          pieceKey: piece.key,
+          name: piece.name,
+          length: piece.length,
+          width: piece.width,
+          quantity: piece.quantity,
+          mainUnit: piece.mainUnit,
+          subUnit: piece.subUnit,
+          deliveredQty: piece.sourceQty,
+        }
+      ));
+
+      return recalcHandoverGroup({
         key: `${String(row?.key || 'group')}_${rowIndex}`,
         rowIndex,
         categoryLabel: String(categoryLabel || 'مواد اولیه'),
@@ -378,11 +468,16 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         sourceShelfId: null,
         targetShelfId: null,
         pieces,
-        totalSourceQty,
-        totalHandoverQty,
-      } as StageHandoverGroup;
+        orderPieces,
+        deliveryRows,
+        totalSourceQty: 0,
+        totalOrderQty: 0,
+        totalHandoverQty: 0,
+        collapsed: rowIndex !== 0,
+        isConfirmed: false,
+      } as StageHandoverGroup);
     });
-  }, [toNumber]);
+  }, [buildPiecesFromOrderRow, normalizeHandoverDeliveryRow, recalcHandoverGroup, resolveCategoryLabel, toNumber]);
 
   const buildGroupsFromPreviousStage = useCallback((groups: any[]) => {
     const sourceGroups = Array.isArray(groups) ? groups : [];
@@ -407,12 +502,26 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           handoverQty: sourceQty,
         };
       });
-      const totalSourceQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.sourceQty), 0);
-      const totalHandoverQty = pieces.reduce((sum: number, piece: any) => sum + toNumber(piece.handoverQty), 0);
-      return {
+      const savedDeliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+      const deliveryRows = savedDeliveryRows.length > 0
+        ? savedDeliveryRows.map((row: any) => normalizeHandoverDeliveryRow({ pieces } as StageHandoverGroup, row))
+        : pieces.map((piece: any) => normalizeHandoverDeliveryRow(
+            { pieces } as StageHandoverGroup,
+            {
+              pieceKey: piece.key,
+              name: piece.name,
+              length: piece.length,
+              width: piece.width,
+              quantity: piece.quantity,
+              mainUnit: piece.mainUnit,
+              subUnit: piece.subUnit,
+              deliveredQty: toNumber(piece?.handoverQty ?? piece?.sourceQty),
+            }
+          ));
+      return recalcHandoverGroup({
         key: String(group?.key || `group_${groupIndex}`),
         rowIndex: Number(group?.rowIndex ?? groupIndex),
-        categoryLabel: String(group?.categoryLabel || group?.category_label || 'مواد اولیه'),
+        categoryLabel: resolveCategoryLabel(group?.categoryLabel || group?.category_label),
         selectedProductId: (group?.selectedProductId || group?.selected_product_id || selectedPiece?.selectedProductId || selectedPiece?.selected_product_id || selectedPiece?.product_id)
           ? String(group?.selectedProductId || group?.selected_product_id || selectedPiece?.selectedProductId || selectedPiece?.selected_product_id || selectedPiece?.product_id)
           : null,
@@ -425,17 +534,22 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           ? String(group?.targetShelfId || group?.target_shelf_id)
           : null,
         pieces,
-        totalSourceQty,
-        totalHandoverQty,
-      } as StageHandoverGroup;
+        orderPieces: Array.isArray(group?.orderPieces) ? group.orderPieces : [],
+        deliveryRows,
+        totalSourceQty: 0,
+        totalOrderQty: 0,
+        totalHandoverQty: 0,
+        collapsed: typeof group?.collapsed === 'boolean' ? group.collapsed : groupIndex !== 0,
+        isConfirmed: group?.isConfirmed === true,
+      } as StageHandoverGroup);
     });
-  }, [toNumber]);
+  }, [normalizeHandoverDeliveryRow, recalcHandoverGroup, resolveCategoryLabel, toNumber]);
 
   const mergeSavedGroups = useCallback((baseGroups: StageHandoverGroup[], savedGroups: any[]) => {
     const savedMap = new Map<string, any>((Array.isArray(savedGroups) ? savedGroups : []).map((group: any) => [String(group?.key || ''), group]));
     return baseGroups.map((group) => {
       const savedGroup = savedMap.get(String(group.key));
-      if (!savedGroup) return group;
+      if (!savedGroup) return recalcHandoverGroup(group);
       const savedPieces = new Map<string, any>((Array.isArray(savedGroup?.pieces) ? savedGroup.pieces : []).map((piece: any) => [String(piece?.key || ''), piece]));
       const pieces = group.pieces.map((piece) => {
         const savedPiece = savedPieces.get(String(piece.key));
@@ -445,19 +559,42 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           handoverQty: Math.max(0, toNumber(savedPiece?.handoverQty)),
         };
       });
-      return {
+
+      let deliveryRows = Array.isArray(savedGroup?.deliveryRows)
+        ? savedGroup.deliveryRows.map((row: any) => normalizeHandoverDeliveryRow(group, row))
+        : [];
+      if (!deliveryRows.length) {
+        deliveryRows = pieces.map((piece) => {
+          const savedPiece = savedPieces.get(String(piece.key));
+          return normalizeHandoverDeliveryRow(group, {
+            pieceKey: piece.key,
+            name: piece.name,
+            length: piece.length,
+            width: piece.width,
+            quantity: piece.quantity,
+            mainUnit: piece.mainUnit,
+            subUnit: piece.subUnit,
+            deliveredQty: toNumber(savedPiece?.handoverQty ?? piece?.sourceQty),
+          });
+        });
+      }
+
+      return recalcHandoverGroup({
         ...group,
+        categoryLabel: resolveCategoryLabel(savedGroup?.categoryLabel || group.categoryLabel),
         targetShelfId: savedGroup?.targetShelfId ? String(savedGroup.targetShelfId) : group.targetShelfId,
         pieces,
-        totalSourceQty: pieces.reduce((sum, row) => sum + toNumber(row.sourceQty), 0),
-        totalHandoverQty: pieces.reduce((sum, row) => sum + toNumber(row.handoverQty), 0),
-      };
+        deliveryRows,
+        collapsed: typeof savedGroup?.collapsed === 'boolean' ? savedGroup.collapsed : group.collapsed,
+        isConfirmed: savedGroup?.isConfirmed === true,
+      });
     });
-  }, [toNumber]);
+  }, [normalizeHandoverDeliveryRow, recalcHandoverGroup, resolveCategoryLabel, toNumber]);
 
   const openTaskHandoverModal = useCallback(async (task: any, providedTasks?: any[]) => {
     if (!task?.id || !recordId || isBom) return;
     try {
+      setOpenTaskPopoverId(null);
       setHandoverLoading(true);
       if (!productionShelfOptions.length) await fetchProductionShelves();
       if (!assignees.users.length && !assignees.roles.length) await fetchAssignees();
@@ -487,14 +624,42 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ? String(currentTask.production_shelf_id)
         : (currentHandover?.targetShelfId || sourceShelfId || order?.production_shelf_id || null);
 
+      const orderGroups = buildGroupsFromOrder(order || {});
+      const orderByKey = new Map<string, StageHandoverGroup>(
+        orderGroups.map((group) => [String(group.key), group])
+      );
+      const orderByProductCategory = new Map<string, StageHandoverGroup>();
+      orderGroups.forEach((group) => {
+        const key = `${String(group.selectedProductId || '')}|${String(group.categoryLabel || '')}`;
+        if (key !== '|') orderByProductCategory.set(key, group);
+      });
+
       const baseGroups = previousTask
         ? buildGroupsFromPreviousStage(previousHandover?.groups || [])
-        : buildGroupsFromOrder(order || {});
-      const mergedGroups = mergeSavedGroups(baseGroups, currentHandover?.groups || []).map((group) => ({
-        ...group,
-        sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
-        targetShelfId: targetShelfId ? String(targetShelfId) : null,
-      }));
+        : orderGroups;
+
+      const withOrderGroups = baseGroups.map((group, index) => {
+        const byKey = orderByKey.get(String(group.key));
+        const byProductCategory = orderByProductCategory.get(
+          `${String(group.selectedProductId || '')}|${String(group.categoryLabel || '')}`
+        );
+        const byIndex = orderGroups[index];
+        const matched = byKey || byProductCategory || byIndex;
+        const orderPieces = matched?.orderPieces || matched?.pieces || group.orderPieces || [];
+        return recalcHandoverGroup({
+          ...group,
+          categoryLabel: resolveCategoryLabel(group.categoryLabel),
+          orderPieces,
+        });
+      });
+
+      const mergedGroups = mergeSavedGroups(withOrderGroups, currentHandover?.groups || []).map((group) =>
+        recalcHandoverGroup({
+          ...group,
+          sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
+          targetShelfId: targetShelfId ? String(targetShelfId) : null,
+        })
+      );
 
       const giverSourceId = previousTask?.assignee_id || order?.assignee_id || null;
       const giverSourceType = previousTask?.assignee_type || order?.assignee_type || null;
@@ -553,28 +718,138 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     buildGroupsFromPreviousStage,
     buildGroupsFromOrder,
     mergeSavedGroups,
+    recalcHandoverGroup,
+    resolveCategoryLabel,
     assigneeLabelFromIds,
     toGroupTotals,
   ]);
 
-  const updateHandoverPieceQty = useCallback((groupIndex: number, pieceIndex: number, value: number | null) => {
+  const setHandoverGroupCollapsed = useCallback((groupIndex: number, collapsed: boolean) => {
     setHandoverGroups((prev) => {
       const next = [...prev];
       const group = next[groupIndex];
       if (!group) return prev;
-      const pieces = [...group.pieces];
-      const piece = pieces[pieceIndex];
-      if (!piece) return prev;
-      pieces[pieceIndex] = { ...piece, handoverQty: Math.max(0, toNumber(value)) };
-      next[groupIndex] = {
-        ...group,
-        pieces,
-        totalSourceQty: pieces.reduce((sum, row) => sum + toNumber(row.sourceQty), 0),
-        totalHandoverQty: pieces.reduce((sum, row) => sum + toNumber(row.handoverQty), 0),
-      };
+      next[groupIndex] = { ...group, collapsed };
       return next;
     });
-  }, [toNumber]);
+  }, []);
+
+  const addHandoverDeliveryRow = useCallback((groupIndex: number) => {
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const deliveryRows = Array.isArray(group.deliveryRows) ? [...group.deliveryRows] : [];
+      deliveryRows.push(normalizeHandoverDeliveryRow(group));
+      next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
+      return next;
+    });
+  }, [normalizeHandoverDeliveryRow, recalcHandoverGroup]);
+
+  const deleteHandoverDeliveryRows = useCallback((groupIndex: number, rowKeys: string[]) => {
+    if (!rowKeys.length) return;
+    const keySet = new Set(rowKeys.map((key) => String(key)));
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const deliveryRows = (group.deliveryRows || []).filter((row) => !keySet.has(String(row.key)));
+      next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
+      return next;
+    });
+  }, [recalcHandoverGroup]);
+
+  const transferHandoverDeliveryRows = useCallback((
+    sourceGroupIndex: number,
+    rowKeys: string[],
+    targetGroupIndex: number,
+    mode: 'copy' | 'move'
+  ) => {
+    if (!rowKeys.length) return;
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const sourceGroup = next[sourceGroupIndex];
+      const targetGroup = next[targetGroupIndex];
+      if (!sourceGroup || !targetGroup) return prev;
+      if (mode === 'move' && sourceGroupIndex === targetGroupIndex) return prev;
+
+      const keySet = new Set(rowKeys.map((key) => String(key)));
+      const sourceRows = Array.isArray(sourceGroup.deliveryRows) ? sourceGroup.deliveryRows : [];
+      const selectedRows = sourceRows.filter((row) => keySet.has(String(row.key)));
+      if (!selectedRows.length) return prev;
+
+      const copiedRows = selectedRows.map((row) =>
+        normalizeHandoverDeliveryRow(targetGroup, {
+          ...row,
+          key: buildHandoverRowKey(),
+          pieceKey: undefined,
+        })
+      );
+
+      const nextTargetRows = [...(targetGroup.deliveryRows || []), ...copiedRows];
+      next[targetGroupIndex] = recalcHandoverGroup({
+        ...targetGroup,
+        deliveryRows: nextTargetRows,
+        isConfirmed: false,
+      });
+
+      if (mode === 'move') {
+        const nextSourceRows = sourceRows.filter((row) => !keySet.has(String(row.key)));
+        next[sourceGroupIndex] = recalcHandoverGroup({
+          ...sourceGroup,
+          deliveryRows: nextSourceRows,
+          isConfirmed: false,
+        });
+      }
+
+      return next;
+    });
+  }, [buildHandoverRowKey, normalizeHandoverDeliveryRow, recalcHandoverGroup]);
+
+  const updateHandoverDeliveryRowField = useCallback((
+    groupIndex: number,
+    rowKey: string,
+    field: keyof Omit<StageHandoverDeliveryRow, 'key'>,
+    value: any
+  ) => {
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const deliveryRows = [...(group.deliveryRows || [])];
+      const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
+      if (rowIndex < 0) return prev;
+      const currentRow = deliveryRows[rowIndex];
+      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'quantity', 'deliveredQty'];
+      const nextValue = numericFields.includes(field)
+        ? Math.max(0, toNumber(value))
+        : (value == null ? '' : String(value));
+      deliveryRows[rowIndex] = { ...currentRow, [field]: nextValue };
+      next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
+      return next;
+    });
+  }, [recalcHandoverGroup, toNumber]);
+
+  const confirmHandoverGroup = useCallback((groupIndex: number) => {
+    const group = handoverGroups[groupIndex];
+    if (!group) return;
+    if (!handoverContext?.targetShelfId) {
+      message.error('قفسه مرحله انتخاب نشده است.');
+      return;
+    }
+    if (!group.totalHandoverQty || group.totalHandoverQty <= 0) {
+      message.error('برای این محصول، مقدار تحویل شده معتبر نیست.');
+      return;
+    }
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const current = next[groupIndex];
+      if (!current) return prev;
+      next[groupIndex] = { ...current, isConfirmed: true, collapsed: true };
+      return next;
+    });
+    message.success('این محصول ثبت شد.');
+  }, [handoverContext?.targetShelfId, handoverGroups]);
 
   const setHandoverTargetShelf = useCallback((shelfId: string | null) => {
     setHandoverContext((prev) => (prev ? { ...prev, targetShelfId: shelfId } : prev));
@@ -582,6 +857,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       prev.map((group) => ({
         ...group,
         targetShelfId: shelfId,
+        isConfirmed: false,
       }))
     );
   }, []);
@@ -656,10 +932,13 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           (sum: number, piece: any) => sum + toNumber(piece?.sourceQty),
           0
         );
-        const handoverQty = (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
-          (sum: number, piece: any) => sum + toNumber(piece?.handoverQty),
-          0
-        );
+        const deliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+        const handoverQty = deliveryRows.length > 0
+          ? deliveryRows.reduce((sum: number, row: any) => sum + toNumber(row?.deliveredQty ?? row?.handoverQty), 0)
+          : (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
+              (sum: number, piece: any) => sum + toNumber(piece?.handoverQty),
+              0
+            );
         const waste = Math.max(0, sourceQty - handoverQty);
         if (waste > 0) nextWasteByProduct[normalizedProductId] = (nextWasteByProduct[normalizedProductId] || 0) + waste;
       });
@@ -1168,7 +1447,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           size="small"
           type="link"
           className="text-xs text-leather-700 hover:text-leather-600 px-0"
-          onClick={() => openTaskHandoverModal(task)}
+          onClick={() => {
+            setOpenTaskPopoverId(null);
+            void openTaskHandoverModal(task);
+          }}
         >
           فرم تحویل کالا
         </Button>
@@ -1347,10 +1629,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   return (
     <div ref={containerRef} className="w-full flex flex-col gap-4 select-none" dir="rtl">
-      {loading && tasks.length === 0 && (
-        <div className="flex justify-center p-2"><Spin size="small" /></div>
-      )}
-
       {isBom && (
         <div className="space-y-2">
           <div className="text-xs text-gray-500">مراحل پیش‌نویس (BOM)</div>
@@ -1473,6 +1751,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                       key={segment.id}
                       content={renderPopupContent(segment)}
                       trigger={compact ? 'hover' : 'click'}
+                      open={compact ? undefined : openTaskPopoverId === String(segment.id)}
+                      onOpenChange={(open) => {
+                        if (compact) return;
+                        setOpenTaskPopoverId(open ? String(segment.id) : null);
+                      }}
                       overlayStyle={{ zIndex: 10000 }}
                       title={null}
                     >
@@ -1557,7 +1840,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
       {!isBom && visibleLines.length === 0 && (
         <div className="w-full flex items-center justify-center text-gray-400 text-xs bg-gray-50 h-10 rounded">
-          بدون خط تولید
+          {loading ? <Spin size="small" /> : 'بدون خط تولید'}
         </div>
       )}
 
@@ -1747,7 +2030,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         receiverConfirmation={handoverContext?.receiverConfirmation || { confirmed: false }}
         onCancel={closeHandoverModal}
         onSave={() => { void saveHandover(); }}
-        onQtyChange={updateHandoverPieceQty}
+        onToggleGroup={setHandoverGroupCollapsed}
+        onConfirmGroup={confirmHandoverGroup}
+        onDeliveryRowAdd={addHandoverDeliveryRow}
+        onDeliveryRowsDelete={deleteHandoverDeliveryRows}
+        onDeliveryRowsTransfer={transferHandoverDeliveryRows}
+        onDeliveryRowFieldChange={updateHandoverDeliveryRowField}
         onTargetShelfChange={setHandoverTargetShelf}
         onTargetShelfScan={handleHandoverShelfScan}
         onConfirmGiver={() => { void handleConfirmGiver(); }}

@@ -18,10 +18,11 @@ import HeroSection from '../components/moduleShow/HeroSection';
 import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
 import TablesSection from '../components/moduleShow/TablesSection';
 import PrintSection from '../components/moduleShow/PrintSection';
-import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece } from '../components/production/StartProductionModal';
+import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece, type StartMaterialDeliveryRow } from '../components/production/StartProductionModal';
 import { printStyles } from '../utils/printTemplates';
 import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
+import { convertArea } from '../utils/unitConversions';
 import QrScanPopover from '../components/QrScanPopover';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import { getRecordTitle } from '../utils/recordTitle';
@@ -97,6 +98,14 @@ const ModuleShow: React.FC = () => {
     return readOrderQuantity(data, override);
   }, [data, readOrderQuantity]);
 
+  const resolveProductionQuantity = useCallback(async (record?: any) => {
+    const qtyFromRecord = readOrderQuantity(record ?? data);
+    if (qtyFromRecord > 0) return qtyFromRecord;
+    const qtyFromLines = await fetchProductionQuantity();
+    if (typeof qtyFromLines === 'number' && qtyFromLines > 0) return qtyFromLines;
+    return 0;
+  }, [data, fetchProductionQuantity, readOrderQuantity]);
+
   const filteredOutputProductOptions = useMemo(() => {
     if (!outputProductType) return outputProductOptions;
     return outputProductOptions.filter((item) => String(item?.product_type || '') === outputProductType);
@@ -139,6 +148,38 @@ const ModuleShow: React.FC = () => {
   const toNumber = (value: any) => {
     const parsed = parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const sumDeliveredRows = (rows: StartMaterialDeliveryRow[]) => {
+    return rows.reduce((sum: number, row: StartMaterialDeliveryRow) => sum + toNumber(row.deliveredQty), 0);
+  };
+
+  const buildDeliveryRowKey = () => `delivery_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+  const normalizeDeliveryRow = (group: StartMaterialGroup, rawRow?: any): StartMaterialDeliveryRow => {
+    const firstPiece = Array.isArray(group.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
+    return {
+      key: String(rawRow?.key || buildDeliveryRowKey()),
+      pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
+      name: String(rawRow?.name ?? firstPiece?.name ?? ''),
+      length: toNumber(rawRow?.length ?? firstPiece?.length ?? 0),
+      width: toNumber(rawRow?.width ?? firstPiece?.width ?? 0),
+      quantity: toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1),
+      mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
+      subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
+      deliveredQty: Math.max(0, toNumber(rawRow?.deliveredQty)),
+    };
+  };
+
+  const recalcStartGroup = (group: StartMaterialGroup): StartMaterialGroup => {
+    const pieces = Array.isArray(group.pieces) ? group.pieces : [];
+    const deliveryRows = Array.isArray(group.deliveryRows) ? group.deliveryRows : [];
+    return {
+      ...group,
+      totalPerItemUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0),
+      totalUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0),
+      totalDeliveredQty: sumDeliveredRows(deliveryRows),
+    };
   };
 
   const getRowSelectedProduct = useCallback((row: any) => {
@@ -208,13 +249,11 @@ const ModuleShow: React.FC = () => {
               subUsage,
               perItemUsage,
               totalUsage,
-              deliveredQty: totalUsage,
             } as StartMaterialPiece;
           });
 
         const totalPerItemUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0);
         const totalUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0);
-        const totalDeliveredQty = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.deliveredQty, 0);
         const { selectedProductId, selectedProductName, selectedProductCode } = getRowSelectedProduct(row);
         const sourceShelfId =
           row?.selected_shelf_id ||
@@ -232,9 +271,10 @@ const ModuleShow: React.FC = () => {
           sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
           productionShelfId: order?.production_shelf_id || null,
           pieces,
+          deliveryRows: [],
           totalPerItemUsage,
           totalUsage,
-          totalDeliveredQty,
+          totalDeliveredQty: 0,
           collapsed: rowIndex !== 0,
           isConfirmed: false,
         } as StartMaterialGroup;
@@ -270,20 +310,98 @@ const ModuleShow: React.FC = () => {
     return !!category || !!selectedProductId || hasPieceData;
   }, [getRowSelectedProduct]);
 
-  const updateStartMaterialDelivered = useCallback((groupIndex: number, pieceIndex: number, value: number | null) => {
+  const addStartDeliveryRow = useCallback((groupIndex: number) => {
     setStartMaterials((prev) => {
       const next = [...prev];
       const group = next[groupIndex];
       if (!group) return prev;
-      const pieces = [...group.pieces];
-      const piece = pieces[pieceIndex];
-      if (!piece) return prev;
-      const deliveredQty = Math.max(0, toNumber(value));
-      pieces[pieceIndex] = { ...piece, deliveredQty };
-      const totalPerItemUsage = pieces.reduce((sum, row) => sum + row.perItemUsage, 0);
-      const totalUsage = pieces.reduce((sum, row) => sum + row.totalUsage, 0);
-      const totalDeliveredQty = pieces.reduce((sum, row) => sum + row.deliveredQty, 0);
-      next[groupIndex] = { ...group, pieces, totalPerItemUsage, totalUsage, totalDeliveredQty, isConfirmed: false };
+      const deliveryRows = Array.isArray(group.deliveryRows) ? [...group.deliveryRows] : [];
+      deliveryRows.push(normalizeDeliveryRow(group));
+      next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
+      return next;
+    });
+  }, []);
+
+  const deleteStartDeliveryRows = useCallback((groupIndex: number, rowKeys: string[]) => {
+    if (!rowKeys.length) return;
+    const keySet = new Set(rowKeys.map((key) => String(key)));
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const deliveryRows = (group.deliveryRows || []).filter((row) => !keySet.has(String(row.key)));
+      next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
+      return next;
+    });
+  }, []);
+
+  const transferStartDeliveryRows = useCallback((
+    sourceGroupIndex: number,
+    rowKeys: string[],
+    targetGroupIndex: number,
+    mode: 'copy' | 'move'
+  ) => {
+    if (!rowKeys.length) return;
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const sourceGroup = next[sourceGroupIndex];
+      const targetGroup = next[targetGroupIndex];
+      if (!sourceGroup || !targetGroup) return prev;
+      if (mode === 'move' && sourceGroupIndex === targetGroupIndex) return prev;
+
+      const keySet = new Set(rowKeys.map((key) => String(key)));
+      const sourceRows = Array.isArray(sourceGroup.deliveryRows) ? sourceGroup.deliveryRows : [];
+      const selectedRows = sourceRows.filter((row) => keySet.has(String(row.key)));
+      if (!selectedRows.length) return prev;
+
+      const copiedRows = selectedRows.map((row) =>
+        normalizeDeliveryRow(targetGroup, {
+          ...row,
+          key: buildDeliveryRowKey(),
+          pieceKey: undefined,
+        })
+      );
+
+      const nextTargetRows = [...(targetGroup.deliveryRows || []), ...copiedRows];
+      next[targetGroupIndex] = recalcStartGroup({
+        ...targetGroup,
+        deliveryRows: nextTargetRows,
+        isConfirmed: false,
+      });
+
+      if (mode === 'move') {
+        const nextSourceRows = sourceRows.filter((row) => !keySet.has(String(row.key)));
+        next[sourceGroupIndex] = recalcStartGroup({
+          ...sourceGroup,
+          deliveryRows: nextSourceRows,
+          isConfirmed: false,
+        });
+      }
+
+      return next;
+    });
+  }, []);
+
+  const updateStartDeliveryRowField = useCallback((
+    groupIndex: number,
+    rowKey: string,
+    field: keyof Omit<StartMaterialDeliveryRow, 'key'>,
+    value: any
+  ) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const deliveryRows = [...(group.deliveryRows || [])];
+      const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
+      if (rowIndex < 0) return prev;
+      const currentRow = deliveryRows[rowIndex];
+      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['length', 'width', 'quantity', 'deliveredQty'];
+      const nextValue = numericFields.includes(field)
+        ? Math.max(0, toNumber(value))
+        : (value == null ? '' : String(value));
+      deliveryRows[rowIndex] = { ...currentRow, [field]: nextValue };
+      next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
     });
   }, []);
@@ -390,6 +508,85 @@ const ModuleShow: React.FC = () => {
     return moves;
   }, []);
 
+  const buildFinalStageConsumptionMoves = useCallback(async () => {
+    if (!id) return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }>;
+    try {
+      const { data: taskRows, error } = await supabase
+        .from('tasks')
+        .select('id, sort_order, production_line_id, production_shelf_id, recurrence_info')
+        .eq('related_production_order', id);
+      if (error) throw error;
+
+      const tasks = Array.isArray(taskRows) ? taskRows : [];
+      if (!tasks.length) return [];
+
+      const byLine = new Map<string, any[]>();
+      tasks.forEach((task: any) => {
+        const lineKey = String(task?.production_line_id || 'default');
+        if (!byLine.has(lineKey)) byLine.set(lineKey, []);
+        byLine.get(lineKey)!.push(task);
+      });
+
+      const finalMoves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }> = [];
+      byLine.forEach((lineTasks) => {
+        const ordered = [...lineTasks].sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0));
+        const lastTask = ordered[ordered.length - 1];
+        if (!lastTask) return;
+
+        let recurrenceInfo: any = lastTask?.recurrence_info;
+        if (typeof recurrenceInfo === 'string') {
+          try {
+            recurrenceInfo = JSON.parse(recurrenceInfo);
+          } catch {
+            recurrenceInfo = null;
+          }
+        }
+
+        const handover = recurrenceInfo?.production_handover;
+        const groups = Array.isArray(handover?.groups) ? handover.groups : [];
+        const targetShelfId = String(
+          handover?.targetShelfId
+          || handover?.target_shelf_id
+          || lastTask?.production_shelf_id
+          || data?.production_shelf_id
+          || ''
+        );
+        if (!targetShelfId || !groups.length) return;
+
+        groups.forEach((group: any) => {
+          const pieces = Array.isArray(group?.pieces) ? group.pieces : [];
+          const selectedPiece = pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id) || null;
+          const productId = String(
+            group?.selectedProductId
+            || group?.selected_product_id
+            || selectedPiece?.selectedProductId
+            || selectedPiece?.selected_product_id
+            || selectedPiece?.product_id
+            || ''
+          );
+          if (!productId) return;
+          const qty = pieces.reduce((sum: number, piece: any) => {
+            const raw = piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0;
+            const value = parseFloat(raw);
+            return sum + (Number.isFinite(value) ? value : 0);
+          }, 0);
+          if (!qty || qty <= 0) return;
+          finalMoves.push({
+            product_id: productId,
+            from_shelf_id: targetShelfId,
+            to_shelf_id: targetShelfId,
+            quantity: qty,
+          });
+        });
+      });
+
+      return finalMoves;
+    } catch (err) {
+      console.warn('Could not build final stage consumption moves', err);
+      return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }>;
+    }
+  }, [data?.production_shelf_id, id]);
+
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRoleId, setCurrentUserRoleId] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -465,7 +662,19 @@ const ModuleShow: React.FC = () => {
 
         setAccessDenied(false);
         setCurrentTags(tags);
-        setData(record);
+        let nextRecord: any = record;
+        if (moduleId === 'products') {
+          const mainUnit = nextRecord?.main_unit;
+          const subUnit = nextRecord?.sub_unit;
+          const stockValue = parseFloat(nextRecord?.stock) || 0;
+          if (mainUnit && subUnit) {
+            const computedSubStock = convertArea(stockValue, mainUnit, subUnit);
+            if (Number.isFinite(computedSubStock)) {
+              nextRecord = { ...nextRecord, sub_stock: computedSubStock };
+            }
+          }
+        }
+        setData(nextRecord);
     } catch (err: any) {
         console.error(err);
         msg.error('خطا در دریافت اطلاعات: ' + err.message);
@@ -637,14 +846,10 @@ const ModuleShow: React.FC = () => {
         if (!shouldContinue) return;
       }
 
-      const qtyFromCurrentRecord = readOrderQuantity({
+      const resolvedQty = await resolveProductionQuantity({
         ...(modalRecord || {}),
         quantity: data?.quantity ?? modalRecord?.quantity,
       });
-      const qtyFromLines = await fetchProductionQuantity();
-      const resolvedQty = qtyFromCurrentRecord > 0
-        ? qtyFromCurrentRecord
-        : ((typeof qtyFromLines === 'number' && qtyFromLines > 0) ? qtyFromLines : 0);
       setProductionQuantityPreview(resolvedQty > 0 ? resolvedQty : null);
       const baseGroups = buildStartMaterialsDraft(modalRecord, resolvedQty);
       const selectedProductIds: string[] = Array.from(
@@ -680,19 +885,13 @@ const ModuleShow: React.FC = () => {
           selectedProductCode: selectedMeta?.system_code || group.selectedProductCode,
         };
         if (!savedGroup) return baseWithMeta;
-        const savedPieces = Array.isArray(savedGroup?.pieces) ? savedGroup.pieces : [];
-        const pieceMap = new Map<string, any>(savedPieces.map((piece: any) => [String(piece?.key || ''), piece]));
-        const pieces = baseWithMeta.pieces.map((piece) => {
-          const savedPiece = pieceMap.get(piece.key);
-          if (!savedPiece) return piece;
-          return {
-            ...piece,
-            deliveredQty: Math.max(0, toNumber(savedPiece.deliveredQty)),
-          };
-        });
-        const totalPerItemUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0);
-        const totalUsage = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0);
-        const totalDeliveredQty = pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.deliveredQty, 0);
+        const savedDeliveryRows = Array.isArray(savedGroup?.deliveryRows) ? savedGroup.deliveryRows : [];
+        const deliveryRows: StartMaterialDeliveryRow[] = savedDeliveryRows.map((row: any) =>
+          normalizeDeliveryRow(baseWithMeta, row)
+        );
+        const totalPerItemUsage = baseWithMeta.pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0);
+        const totalUsage = baseWithMeta.pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0);
+        const totalDeliveredQty = sumDeliveredRows(deliveryRows);
         const savedName = typeof savedGroup?.selectedProductName === 'string' && savedGroup.selectedProductName.trim() && savedGroup.selectedProductName !== '-'
           ? savedGroup.selectedProductName
           : null;
@@ -701,7 +900,7 @@ const ModuleShow: React.FC = () => {
           : null;
         return {
           ...baseWithMeta,
-          pieces,
+          deliveryRows,
           totalPerItemUsage,
           totalUsage,
           totalDeliveredQty,
@@ -722,6 +921,8 @@ const ModuleShow: React.FC = () => {
     if (type === 'complete') {
       await loadOutputShelves();
       await loadOutputProducts();
+      const resolvedQty = await resolveProductionQuantity();
+      setProductionQuantityPreview(resolvedQty > 0 ? resolvedQty : null);
       setOutputMode('existing');
       setOutputProductId(null);
       setOutputProductType(null);
@@ -1476,6 +1677,7 @@ const ModuleShow: React.FC = () => {
         addPart(getFieldValueLabel('related_bom', record?.related_bom));
       }
     }
+    addPart(getFieldValueLabel('brand_name', record?.brand_name));
 
     return parts.join(' ');
   };
@@ -1648,9 +1850,13 @@ const ModuleShow: React.FC = () => {
         const group = deliveredByGroupKey.get(rowKey);
         if (!group) return row;
         const rowPieces = Array.isArray(row?.pieces) ? row.pieces : [];
-        const deliveredByPieceKey = new Map<string, number>(
-          group.pieces.map((piece: StartMaterialPiece) => [piece.key, toNumber(piece.deliveredQty)])
-        );
+        const deliveredByPieceKey = new Map<string, number>();
+        (group.deliveryRows || []).forEach((deliveryRow: StartMaterialDeliveryRow) => {
+          const pieceKey = String(deliveryRow?.pieceKey || '');
+          if (!pieceKey) return;
+          const current = deliveredByPieceKey.get(pieceKey) || 0;
+          deliveredByPieceKey.set(pieceKey, current + toNumber(deliveryRow?.deliveredQty));
+        });
         const nextPieces = rowPieces.map((piece: any, pieceIndex: number) => {
           const normalizedPieceKey = `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`;
           const deliveredQty = deliveredByPieceKey.get(normalizedPieceKey);
@@ -1664,6 +1870,8 @@ const ModuleShow: React.FC = () => {
           ...row,
           selected_shelf_id: group.sourceShelfId || row?.selected_shelf_id || null,
           production_shelf_id: group.productionShelfId || row?.production_shelf_id || null,
+          delivered_total_qty: group.totalDeliveredQty,
+          delivery_rows: group.deliveryRows || [],
           pieces: nextPieces,
         };
       });
@@ -1726,8 +1934,15 @@ const ModuleShow: React.FC = () => {
       const currentGridMaterials = Array.isArray(data?.grid_materials) ? data.grid_materials : [];
       const clearedGridMaterials = currentGridMaterials.map((row: any) => {
         const pieces = Array.isArray(row?.pieces) ? row.pieces : [];
+        const nextRow = { ...row };
+        if (Object.prototype.hasOwnProperty.call(nextRow, 'delivered_total_qty')) {
+          delete (nextRow as any).delivered_total_qty;
+        }
+        if (Object.prototype.hasOwnProperty.call(nextRow, 'delivery_rows')) {
+          delete (nextRow as any).delivery_rows;
+        }
         return {
-          ...row,
+          ...nextRow,
           pieces: pieces.map((piece: any) => {
             const nextPiece = { ...piece };
             if (Object.prototype.hasOwnProperty.call(nextPiece, 'delivered_qty')) {
@@ -1787,22 +2002,23 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireOutputShelf);
         return;
       }
-      const latestQty = getOrderQuantity(productionQuantityPreview ?? (await fetchProductionQuantity()));
-      const normalizedQty = Number.isFinite(latestQty) ? latestQty : 0;
+      const normalizedQty = await resolveProductionQuantity();
       if (!normalizedQty || normalizedQty <= 0) {
         msg.error(PRODUCTION_MESSAGES.requireQuantity);
         return;
       }
       const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
       const productionShelfId = data?.production_shelf_id;
-      if (!moves.length && !productionShelfId) {
+      const finalStageMoves = await buildFinalStageConsumptionMoves();
+      const fallbackMoves = moves.length
+        ? moves
+        : (productionShelfId ? buildConsumptionMoves(data, normalizedQty, String(productionShelfId)) : []);
+      const consumptionMoves = finalStageMoves.length ? finalStageMoves : fallbackMoves;
+      if (!consumptionMoves.length) {
         msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
         return;
       }
       setStatusLoading(true);
-      const consumptionMoves = moves.length
-        ? moves
-        : buildConsumptionMoves(data, normalizedQty, String(productionShelfId));
       if (consumptionMoves.length) {
         await consumeProductionMaterials(consumptionMoves, productionShelfId || undefined);
       }
@@ -1913,21 +2129,22 @@ const ModuleShow: React.FC = () => {
       }
       setOutputShelfId(outputShelf);
 
-      const latestQty = getOrderQuantity(productionQuantityPreview ?? (await fetchProductionQuantity()));
-      const normalizedQty = Number.isFinite(latestQty) ? latestQty : 0;
-      const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
-      const productionShelfId = data?.production_shelf_id;
-      if (!moves.length && !productionShelfId) {
-        msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
-        return;
-      }
+      const normalizedQty = await resolveProductionQuantity();
       if (!normalizedQty || normalizedQty <= 0) {
         msg.error(PRODUCTION_MESSAGES.requireQuantity);
         return;
       }
-      const consumptionMoves = moves.length
+      const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
+      const productionShelfId = data?.production_shelf_id;
+      const finalStageMoves = await buildFinalStageConsumptionMoves();
+      const fallbackMoves = moves.length
         ? moves
-        : buildConsumptionMoves(data, normalizedQty, String(productionShelfId));
+        : (productionShelfId ? buildConsumptionMoves(data, normalizedQty, String(productionShelfId)) : []);
+      const consumptionMoves = finalStageMoves.length ? finalStageMoves : fallbackMoves;
+      if (!consumptionMoves.length) {
+        msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
+        return;
+      }
       if (consumptionMoves.length) {
         await consumeProductionMaterials(consumptionMoves, productionShelfId || undefined);
       }
@@ -2209,6 +2426,9 @@ const ModuleShow: React.FC = () => {
       }
   }
   const resolvedRecordTitle = getRecordTitle(data, moduleConfig, { fallback: '' });
+  const handleHeaderRefresh = async () => {
+    await fetchRecord();
+  };
 
   return (
     <div className="p-4 pt-1 md:p-6 md:pt-1 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16 scrollbar-wide">
@@ -2230,6 +2450,8 @@ const ModuleShow: React.FC = () => {
         onHome={() => navigate('/')}
         onModule={() => navigate(`/${moduleId}`)}
         onPrint={() => printManager.setIsPrintModalOpen(true)}
+        onRefresh={handleHeaderRefresh}
+        refreshLoading={loading}
         onEdit={() => setIsEditDrawerOpen(true)}
         onDelete={handleDelete}
         canEdit={canEditModule}
@@ -2330,12 +2552,16 @@ const ModuleShow: React.FC = () => {
             open={productionModal === 'start'}
             loading={statusLoading}
             materials={startMaterials}
+            orderName={String(data?.name || '')}
             sourceShelfOptionsByProduct={sourceShelfOptionsByProduct}
             productionShelfOptions={productionShelfOptions}
             onCancel={() => setProductionModal(null)}
             onStart={handleConfirmStartProduction}
             onToggleGroup={setStartMaterialCollapsed}
-            onDeliveredChange={updateStartMaterialDelivered}
+            onDeliveryRowAdd={addStartDeliveryRow}
+            onDeliveryRowsDelete={deleteStartDeliveryRows}
+            onDeliveryRowsTransfer={transferStartDeliveryRows}
+            onDeliveryRowFieldChange={updateStartDeliveryRowField}
             onSourceShelfChange={setStartMaterialSourceShelf}
             onSourceShelfScan={handleSourceShelfScan}
             onProductionShelfChange={setStartMaterialProductionShelf}
@@ -2534,3 +2760,5 @@ const ModuleShow: React.FC = () => {
 };
 
 export default ModuleShow;
+
+

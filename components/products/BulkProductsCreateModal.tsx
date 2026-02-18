@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App, Modal, Select, Spin } from 'antd';
 import { PaperClipOutlined } from '@ant-design/icons';
 import EditableTable from '../EditableTable';
@@ -20,7 +20,7 @@ type RelationOption = { label: string; value: string };
 type BulkRow = Record<string, unknown> & { key: string };
 
 const PRODUCTS_MODULE = MODULES.products;
-const SHARED_KEYS = new Set(['status', 'main_unit', 'sub_unit', 'buy_price', 'sell_price']);
+const SHARED_KEYS = new Set(['status', 'main_unit', 'sub_unit', 'buy_price', 'sell_price', 'brand_name']);
 const EXCLUDED_KEYS = new Set([
   'id',
   'system_code',
@@ -110,9 +110,11 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
   const [relationOptions, setRelationOptions] = useState<Record<string, RelationOption[]>>({});
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, DynamicOption[]>>({});
   const [productCategoryOptions, setProductCategoryOptions] = useState<DynamicOption[]>([]);
+  const initializedRef = useRef(false);
 
   const productTypeField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'product_type'), []);
   const rawCategoryField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'category'), []);
+  const brandField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'brand_name'), []);
   const nameField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'name'), []);
   const manualCodeField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'manual_code'), []);
   const imageField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'image_url'), []);
@@ -186,7 +188,12 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
   }, [msg, rowFields, sharedFields]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      initializedRef.current = false;
+      return;
+    }
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     const defaultType = String(productTypeField?.defaultValue || productTypeField?.options?.[0]?.value || 'raw');
     const defaultRaw = String(rawCategoryField?.options?.[0]?.value || '');
     const sharedDefaults: Record<string, unknown> = {};
@@ -199,8 +206,12 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
     setProductCategory('');
     setSharedValues(sharedDefaults);
     setRows([createEmptyRow()]);
+  }, [createEmptyRow, open, productTypeField?.defaultValue, productTypeField?.options, rawCategoryField?.options, sharedFields]);
+
+  useEffect(() => {
+    if (!open) return;
     void refreshOptions();
-  }, [createEmptyRow, open, productTypeField?.defaultValue, productTypeField?.options, rawCategoryField?.options, refreshOptions, sharedFields]);
+  }, [open, refreshOptions]);
 
   const resolveLabel = useCallback((field: ModuleField, value: unknown) => {
     if (isEmpty(value)) return '';
@@ -216,8 +227,12 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
     if (productType === 'raw' && rawLabel) parts.push(rawLabel);
     if (productType !== 'raw' && prodLabel) parts.push(prodLabel);
     rowFields.forEach((f) => { const label = resolveLabel(f, row[f.key]); if (label) parts.push(label); });
+    if (brandField) {
+      const brandLabel = resolveLabel(brandField, sharedValues.brand_name);
+      if (brandLabel) parts.push(brandLabel);
+    }
     return parts.join(' ').replace(/\s+/g, ' ').trim() || `محصول جدید ${index + 1}`;
-  }, [productCategory, productCategoryOptions, productType, rawCategory, rawCategoryField?.options, resolveLabel, rowFields]);
+  }, [brandField, productCategory, productCategoryOptions, productType, rawCategory, rawCategoryField?.options, resolveLabel, rowFields, sharedValues.brand_name]);
 
   const validate = useCallback(() => {
     if (!rows.length) return 'حداقل یک ردیف لازم است.';
@@ -329,6 +344,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       cancelText="انصراف"
       confirmLoading={saving}
       width={1320}
+      zIndex={2600}
       destroyOnClose
       styles={{ body: { maxHeight: '74vh', overflowY: 'auto', paddingTop: 12 } }}
     >
@@ -336,17 +352,40 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <div className="text-xs text-gray-500 mb-1">نوع محصول</div>
-            <Select value={productType} options={typeOptions} onChange={(v) => setProductType(String(v))} className="w-full" />
+            <Select
+              value={productType}
+              options={typeOptions}
+              onChange={(v) => setProductType(String(v))}
+              className="w-full"
+              getPopupContainer={() => document.body}
+              dropdownStyle={{ zIndex: 3000 }}
+            />
           </div>
           {productType === 'raw' ? (
             <div>
               <div className="text-xs text-gray-500 mb-1">دسته‌بندی مواد اولیه</div>
-              <Select value={rawCategory || undefined} options={rawOptions} onChange={(v) => setRawCategory(String(v))} className="w-full" />
+              <Select
+                value={rawCategory || undefined}
+                options={rawOptions}
+                onChange={(v) => setRawCategory(String(v))}
+                className="w-full"
+                getPopupContainer={() => document.body}
+                dropdownStyle={{ zIndex: 3000 }}
+              />
             </div>
           ) : (
             <div>
               <div className="text-xs text-gray-500 mb-1">دسته‌بندی محصول</div>
-              <Select value={productCategory || undefined} options={productCategoryOptions} onChange={(v) => setProductCategory(String(v))} className="w-full" showSearch optionFilterProp="label" />
+              <Select
+                value={productCategory || undefined}
+                options={productCategoryOptions}
+                onChange={(v) => setProductCategory(String(v))}
+                className="w-full"
+                showSearch
+                optionFilterProp="label"
+                getPopupContainer={() => document.body}
+                dropdownStyle={{ zIndex: 3000 }}
+              />
             </div>
           )}
         </div>

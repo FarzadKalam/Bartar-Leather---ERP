@@ -29,10 +29,14 @@ const M_IN_CM = 100;
 
 const AREA_UNITS: UnitValue[] = ['فوت مربع', 'سانتیمتر مربع', 'میلیمتر مربع', 'متر مربع'];
 const LENGTH_UNITS: UnitValue[] = ['میلیمتر طول', 'سانتیمتر طول', 'متر طول'];
+const roundToThree = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 1000) / 1000;
+};
 
 export const convertArea = (value: number, from: UnitValue, to: UnitValue) => {
   if (!Number.isFinite(value)) return 0;
-  if (from === to) return value;
+  if (from === to) return roundToThree(value);
   if (['عدد', 'بسته'].includes(from) || ['عدد', 'بسته'].includes(to)) return 0;
 
   const isArea = AREA_UNITS.includes(from) && AREA_UNITS.includes(to);
@@ -96,8 +100,8 @@ export const convertArea = (value: number, from: UnitValue, to: UnitValue) => {
   };
 
   if (isLength) {
-    return fromMeter(toMeter(value, from), to);
+    return roundToThree(fromMeter(toMeter(value, from), to));
   }
 
-  return fromFt2(toFt2(value, from), to);
+  return roundToThree(fromFt2(toFt2(value, from), to));
 };

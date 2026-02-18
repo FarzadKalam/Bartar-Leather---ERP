@@ -68,6 +68,35 @@ const createEmptyRow = () => ({
   totals: {},
 });
 
+const toEnglishDigits = (value: any) =>
+  String(value ?? '')
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+
+const normalizeNumberInput = (value: any) =>
+  toEnglishDigits(value).replace(/,/g, '').replace(/\u066C/g, '').trim();
+
+const addCommas = (value: string) => value.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+const formatGroupedInput = (value: any) => {
+  const raw = normalizeNumberInput(value);
+  if (!raw) return '';
+  const sign = raw.startsWith('-') ? '-' : '';
+  const unsigned = raw.replace(/-/g, '');
+  const [intPartRaw, decimalPart] = unsigned.split('.');
+  const intPart = (intPartRaw || '0').replace(/^0+(?=\d)/, '');
+  const grouped = addCommas(intPart || '0');
+  const withDecimal = decimalPart !== undefined ? `${grouped}.${decimalPart}` : grouped;
+  return toPersianNumber(`${sign}${withDecimal}`);
+};
+
+const parseNumberInput = (value: any) => {
+  const normalized = normalizeNumberInput(value);
+  if (!normalized) return 0;
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const GridTable: React.FC<GridTableProps> = ({
   block,
   initialData,
@@ -87,6 +116,12 @@ const GridTable: React.FC<GridTableProps> = ({
 }) => {
   const isReadOnly = readOnly === true || canEditModule === false || block?.readonly === true;
   const isProductionOrder = moduleId === 'production_orders' || forceProductionOrderMode;
+  // TEMP: hide formula selector in raw-material pieces for BOM and Production Orders.
+  // Set to `false` to restore the column quickly.
+  const TEMP_HIDE_FORMULA_IN_PRODUCTION = true;
+  const shouldHideFormulaColumn =
+    TEMP_HIDE_FORMULA_IN_PRODUCTION &&
+    (moduleId === 'production_boms' || moduleId === 'production_orders');
   const [activeEditRowKey, setActiveEditRowKey] = useState<string | null>(null);
   const [data, setData] = useState<any[]>(Array.isArray(initialData) ? initialData : []);
   const [tempData, setTempData] = useState<any[]>([]);
@@ -115,6 +150,9 @@ const GridTable: React.FC<GridTableProps> = ({
   }, [productModule]);
 
   useEffect(() => {
+    if (mode === 'db' && !!activeEditRowKey) {
+      return;
+    }
     const safeData = Array.isArray(initialData) ? initialData : [];
     const normalized = safeData.map((item, idx) => ({
       key: item.key || item.id || `${createRowKey()}_${idx}`,
@@ -137,7 +175,7 @@ const GridTable: React.FC<GridTableProps> = ({
     setTransferTargetRowKey(null);
     setTransferTargetProductId(null);
     setTransferProductOptions([]);
-  }, [initialData, mode]);
+  }, [initialData, mode, activeEditRowKey]);
 
   const categories = block?.gridConfig?.categories || [];
 
@@ -210,6 +248,59 @@ const GridTable: React.FC<GridTableProps> = ({
     return candidateCandidates.some((candidate) => currentCandidates.includes(candidate));
   };
 
+  const getRowUnitsSummary = (row: any) => {
+    const pieces = Array.isArray(row?.pieces) ? row.pieces : [];
+    const mainUnits = Array.from(
+      new Set(
+        pieces
+          .map((piece: any) => String(piece?.main_unit || '').trim())
+          .filter((val: string) => !!val)
+      )
+    );
+    const subUnits = Array.from(
+      new Set(
+        pieces
+          .map((piece: any) => String(piece?.sub_unit || '').trim())
+          .filter((val: string) => !!val)
+      )
+    );
+
+    return {
+      main: mainUnits[0] || null,
+      sub: subUnits[0] || null,
+      mainLabel: mainUnits.length ? mainUnits.join('، ') : '-',
+      subLabel: subUnits.length ? subUnits.join('، ') : '-',
+    };
+  };
+
+  const askUnitMismatchResolution = async (payload: {
+    productMainUnit: string | null;
+    productSubUnit: string | null;
+    rowMainLabel: string;
+    rowSubLabel: string;
+  }) => {
+    return new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: 'اختلاف واحد محصول و سفارش تولید',
+        content: (
+          <div className="text-xs leading-6">
+            <div className="text-red-600 font-semibold mb-2">
+              واحد محصول انتخاب شده با واحدی که در ردیف قطعات ثبت شده متفاوت است.
+            </div>
+            <div>واحد اصلی محصول: <span className="font-semibold">{payload.productMainUnit || '-'}</span></div>
+            <div>واحد فرعی محصول: <span className="font-semibold">{payload.productSubUnit || '-'}</span></div>
+            <div>واحد اصلی سفارش تولید فعلی: <span className="font-semibold">{payload.rowMainLabel || '-'}</span></div>
+            <div>واحد فرعی سفارش تولید فعلی: <span className="font-semibold">{payload.rowSubLabel || '-'}</span></div>
+          </div>
+        ),
+        okText: 'نام واحد را از محصول انتخاب شده کپی کن',
+        cancelText: 'واحد ها را تغییر نده',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      });
+    });
+  };
+
   const cloneGridRowWithNewKeys = (row: any) => {
     const pieces = Array.isArray(row?.pieces)
       ? row.pieces.map((piece: any) => ({ ...piece, key: createPieceKey() }))
@@ -226,7 +317,11 @@ const GridTable: React.FC<GridTableProps> = ({
     const num = Number(value);
     if (!Number.isFinite(num)) return toPersianNumber(0);
     const rounded = Math.round(num * Math.pow(10, decimals)) / Math.pow(10, decimals);
-    return toPersianNumber(rounded);
+    const fixed = rounded.toFixed(decimals).replace(/\.?0+$/, '');
+    const [intPartRaw, decimalPart] = fixed.split('.');
+    const intPart = Number(intPartRaw || 0).toLocaleString('en-US');
+    const normalized = decimalPart ? `${intPart}.${decimalPart}` : intPart;
+    return toPersianNumber(normalized);
   };
 
   const toNumber = (value: any) => {
@@ -445,6 +540,29 @@ const GridTable: React.FC<GridTableProps> = ({
 
     try {
       const product = await fetchProductById(productId);
+      const currentUnits = getRowUnitsSummary(row);
+      const productMainUnit = product?.main_unit ? String(product.main_unit) : null;
+      const productSubUnit = product?.sub_unit ? String(product.sub_unit) : null;
+
+      const mainUnitMismatch =
+        !!productMainUnit &&
+        !!currentUnits.main &&
+        productMainUnit !== String(currentUnits.main);
+      const subUnitMismatch =
+        !!productSubUnit &&
+        !!currentUnits.sub &&
+        productSubUnit !== String(currentUnits.sub);
+
+      let shouldCopyUnits = true;
+      if (mainUnitMismatch || subUnitMismatch) {
+        shouldCopyUnits = await askUnitMismatchResolution({
+          productMainUnit,
+          productSubUnit,
+          rowMainLabel: currentUnits.mainLabel,
+          rowSubLabel: currentUnits.subLabel,
+        });
+      }
+
       row.header = {
         ...row.header,
         selected_product_id: product?.id || productId,
@@ -464,8 +582,8 @@ const GridTable: React.FC<GridTableProps> = ({
       const pieces = (row.pieces || []).map((piece: any) => ({
         ...piece,
         waste_rate: product?.waste_rate ?? piece.waste_rate,
-        main_unit: product?.main_unit ?? piece.main_unit,
-        sub_unit: product?.sub_unit ?? piece.sub_unit,
+        main_unit: shouldCopyUnits ? (product?.main_unit ?? piece.main_unit) : piece.main_unit,
+        sub_unit: shouldCopyUnits ? (product?.sub_unit ?? piece.sub_unit) : piece.sub_unit,
         unit_price: product?.buy_price ?? piece.unit_price,
       }));
       row.pieces = pieces;
@@ -857,6 +975,9 @@ const GridTable: React.FC<GridTableProps> = ({
             : true;
           const selectedPieceKeys = getSelectedPieceKeys(rowKey);
           const selectedPieceCount = selectedPieceKeys.length;
+          const rowUnits = getRowUnitsSummary(row);
+          const rowMainUnitLabel = typeof rowUnits.main === 'string' ? rowUnits.main : '';
+          const rowSubUnitLabel = typeof rowUnits.sub === 'string' ? rowUnits.sub : '';
 
           const relationProductOptions = (productOptions.length ? productOptions : (relationOptions['products'] || []))
             .map((item: any) => ({
@@ -1194,7 +1315,10 @@ const GridTable: React.FC<GridTableProps> = ({
                           <span>مشخصات از روی محصول انتخاب‌شده قفل شده‌اند. برای ویرایش، محصول را حذف کنید.</span>
                         </div>
                       )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div
+                        className="grid grid-cols-1 md:[grid-template-columns:repeat(var(--spec-count),minmax(0,1fr))] gap-3"
+                        style={{ ['--spec-count' as any]: Math.max(specFields.length, 1) }}
+                      >
                         {specFields.map((field: any) => {
                           if (canViewField && canViewField(field.key) === false) return null;
                           let options = field.options;
@@ -1203,7 +1327,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           }
                           const effectiveField = (isSpecsLocked || !rowCanEdit) ? { ...field, readonly: true } : field;
                           return (
-                            <div key={field.key} className={`space-y-1 ${isSpecsLocked ? 'opacity-75' : ''}`}>
+                            <div key={field.key} className={`space-y-1 min-w-0 ${isSpecsLocked ? 'opacity-75' : ''}`}>
                               <div className="text-[11px] text-gray-500 font-medium">{field.labels?.fa}</div>
                               <SmartFieldRenderer
                                 field={effectiveField}
@@ -1318,7 +1442,15 @@ const GridTable: React.FC<GridTableProps> = ({
                           key: 'length',
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit
-                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })} />
+                              ? (
+                                <InputNumber
+                                  className="font-medium persian-number"
+                                  value={val}
+                                  onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })}
+                                  formatter={(v) => formatGroupedInput(v)}
+                                  parser={(v) => parseNumberInput(v)}
+                                />
+                              )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
@@ -1328,7 +1460,15 @@ const GridTable: React.FC<GridTableProps> = ({
                           key: 'width',
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit
-                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })} />
+                              ? (
+                                <InputNumber
+                                  className="font-medium persian-number"
+                                  value={val}
+                                  onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })}
+                                  formatter={(v) => formatGroupedInput(v)}
+                                  parser={(v) => parseNumberInput(v)}
+                                />
+                              )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
@@ -1338,7 +1478,15 @@ const GridTable: React.FC<GridTableProps> = ({
                           key: 'quantity',
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit
-                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })} />
+                              ? (
+                                <InputNumber
+                                  className="font-medium persian-number"
+                                  value={val}
+                                  onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })}
+                                  formatter={(v) => formatGroupedInput(v)}
+                                  parser={(v) => parseNumberInput(v)}
+                                />
+                              )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
@@ -1349,7 +1497,15 @@ const GridTable: React.FC<GridTableProps> = ({
                           width: 90,
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit
-                              ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })} />
+                              ? (
+                                <InputNumber
+                                  className="font-medium persian-number"
+                                  value={val}
+                                  onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })}
+                                  formatter={(v) => formatGroupedInput(v)}
+                                  parser={(v) => parseNumberInput(v)}
+                                />
+                              )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                           ),
                         },
@@ -1407,7 +1563,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           width: 130,
                           render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
                         },
-                        {
+                        ...(!shouldHideFormulaColumn ? [{
                           title: 'فرمول',
                           dataIndex: 'formula_id',
                           key: 'formula_id',
@@ -1432,7 +1588,7 @@ const GridTable: React.FC<GridTableProps> = ({
                               </Text>
                             )
                           ),
-                        },
+                        }] : []),
                         {
                           title: 'مقدار مصرف یک تولید',
                           dataIndex: 'final_usage',
@@ -1447,7 +1603,15 @@ const GridTable: React.FC<GridTableProps> = ({
                             key: 'unit_price',
                             render: (val: any, _record: any, pieceIndex: number) => (
                               rowCanEdit
-                                ? <InputNumber className="font-medium" value={val} onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })} />
+                                ? (
+                                  <InputNumber
+                                    className="font-medium persian-number"
+                                    value={val}
+                                    onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })}
+                                    formatter={(v) => formatGroupedInput(v)}
+                                    parser={(v) => parseNumberInput(v)}
+                                  />
+                                )
                                 : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>
                             ),
                           },
@@ -1517,11 +1681,11 @@ const GridTable: React.FC<GridTableProps> = ({
 
                   <div className="bg-gray-50 dark:bg-[#101010] rounded-xl p-3 flex flex-wrap gap-4 text-xs border border-leather-500">
                     <span>جمع تعداد در یک تولید: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_quantity || 0)}</Text></span>
-                    <span>جمع واحد اصلی: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_qty_main || 0)}</Text></span>
-                    <span>جمع واحد فرعی: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_qty_sub || 0)}</Text></span>
-                    <span>جمع مصرف یک تولید: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_final_usage || 0)}</Text></span>
+                    <span>جمع واحد اصلی: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_qty_main || 0)}</Text>{rowMainUnitLabel ? <Text className="font-medium mr-1">{rowMainUnitLabel}</Text> : null}</span>
+                    <span>جمع واحد فرعی: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_qty_sub || 0)}</Text>{rowSubUnitLabel ? <Text className="font-medium mr-1">{rowSubUnitLabel}</Text> : null}</span>
+                    <span>جمع مصرف یک تولید: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_final_usage || 0)}</Text>{rowMainUnitLabel ? <Text className="font-medium mr-1">{rowMainUnitLabel}</Text> : null}</span>
                     {isProductionOrder && (
-                      <span>جمع مقدار مصرف کل: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_usage || 0)}</Text></span>
+                      <span>جمع مقدار مصرف کل: <Text className="persian-number font-medium">{formatQuantity(row.totals?.total_usage || 0)}</Text>{rowMainUnitLabel ? <Text className="font-medium mr-1">{rowMainUnitLabel}</Text> : null}</span>
                     )}
                     {isProductionOrder && (
                       <span>جمع هزینه: <Text className="persian-number font-medium">{formatPersianPrice(row.totals?.total_cost || 0, true)}</Text></span>

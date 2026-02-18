@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, Tooltip, Popover, QRCode } from 'antd';
-import { ArrowRightOutlined, PrinterOutlined, ShareAltOutlined, QrcodeOutlined, EditOutlined, DeleteOutlined, AppstoreOutlined, PlusOutlined, StarOutlined } from '@ant-design/icons';
+import { ArrowRightOutlined, PrinterOutlined, ShareAltOutlined, QrcodeOutlined, EditOutlined, DeleteOutlined, AppstoreOutlined, PlusOutlined, StarOutlined, ReloadOutlined } from '@ant-design/icons';
 
 interface HeaderActionsProps {
   moduleTitle: string;
@@ -10,8 +10,10 @@ interface HeaderActionsProps {
   onHome: () => void;
   onModule: () => void;
   onPrint: () => void;
+  onRefresh?: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  refreshLoading?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
   extraActions?: { id: string; label: string; variant?: 'primary' | 'default'; onClick: () => void; }[];
@@ -21,8 +23,10 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
   shareUrl,
   onBack,
   onPrint,
+  onRefresh,
   onEdit,
   onDelete,
+  refreshLoading = false,
   canEdit = true,
   canDelete = true,
   extraActions = [],
@@ -52,6 +56,14 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
           <Button
             icon={<PrinterOutlined />}
             onClick={onPrint}
+            size="middle"
+            className="hover:text-leather-600 hover:border-leather-600"
+          />
+        </Tooltip>
+        <Tooltip title="بروزرسانی">
+          <Button
+            icon={<ReloadOutlined spin={refreshLoading} />}
+            onClick={onRefresh}
             size="middle"
             className="hover:text-leather-600 hover:border-leather-600"
           />

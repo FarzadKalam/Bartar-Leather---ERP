@@ -262,7 +262,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
         let query = supabase
           .from('product_inventory')
-          .select('id, product_id, shelf_id, warehouse_id, stock, created_at, products(main_unit,sub_unit), shelves(system_code,shelf_number,name,warehouses(name))');
+          .select('id, product_id, shelf_id, warehouse_id, stock, created_at, products(main_unit,sub_unit), shelves(warehouse_id,system_code,shelf_number,name,warehouses(id,name))');
         if (isProductInventory) query = query.eq('product_id', recordId);
         if (isShelfInventory) query = query.eq('shelf_id', recordId);
         const { data: rows, error } = await query.order('created_at', { ascending: true });
@@ -297,6 +297,11 @@ const EditableTable: React.FC<EditableTableProps> = ({
             : 0;
           return {
             ...row,
+            warehouse_id:
+              row?.warehouse_id ??
+              row?.shelves?.warehouse_id ??
+              row?.shelves?.warehouses?.id ??
+              null,
             main_unit: mainUnit,
             sub_unit: subUnit,
             sub_stock: Number.isFinite(subStock) ? subStock : 0,
@@ -849,8 +854,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
         }
 
         if (isProductInventory) {
-          const totalStock = payload.reduce((sum: number, row: any) => sum + (parseFloat(row.stock) || 0), 0);
-          await supabase.from('products').update({ stock: totalStock }).eq('id', recordId);
+          await updateProductStock(supabase as any, recordId);
         }
 
         if (isShelfInventory) {
