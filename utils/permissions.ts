@@ -81,6 +81,7 @@ export const collectModulePermissionFields = (module: ModuleDefinition) => {
     ensureField(fieldMap, '__action_start_production', 'عملیات: شروع تولید');
     ensureField(fieldMap, '__action_stop_production', 'عملیات: توقف تولید');
     ensureField(fieldMap, '__action_complete_production', 'عملیات: تکمیل تولید');
+    ensureField(fieldMap, '__action_auto_name', 'عملیات: نامگذاری خودکار');
   }
 
   if (module.id === 'products') {

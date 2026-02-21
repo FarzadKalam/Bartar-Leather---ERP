@@ -104,7 +104,7 @@ const fieldsArray: any[] = [
   },
 
   // --- سایر فیلدها ---
-  { key: 'stock', labels: { fa: 'موجودی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5, nature: FieldNature.PREDEFINED, readonly: true, description: 'محاسبه خودکار از موجودی قفسه‌ها' },
+  { key: 'stock', labels: { fa: 'موجودی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5, nature: FieldNature.PREDEFINED, readonly: true, description: 'محاسبه خودکار از موجودی قفسه‌ها', isTableColumn: true },
   { key: 'sub_stock', labels: { fa: 'موجودی (واحد فرعی)', en: 'Sub Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5.1, nature: FieldNature.PREDEFINED, readonly: true },
   { key: 'waste_rate', labels: { fa: 'نرخ پرت', en: 'waste_rate' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7, nature: FieldNature.PREDEFINED },
   { key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 8, nature: FieldNature.PREDEFINED, isTableColumn: true },
@@ -140,7 +140,8 @@ const fieldsArray: any[] = [
   { key: 'acc_material', labels: { fa: 'جنس خرجکار', en: 'Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'kharjkarSpec', order: 1, dynamicOptionsCategory: 'acc_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'accessory' } } },
   
   // فیلدهای اختصاصی یراق
-  { key: 'fitting_type', labels: { fa: 'جنس/نوع یراق', en: 'Type' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 1, dynamicOptionsCategory: 'fitting_type', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } } },
+  { key: 'fitting_type', labels: { fa: 'نوع یراق', en: 'fitting_type' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 1, dynamicOptionsCategory: 'fitting_type', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } } },
+  { key: 'fitting_material', labels: { fa: 'جنس یراق', en: 'fitting_material'}, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 1.5, dynamicOptionsCategory: 'fitting_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting'} } },
   { key: 'fitting_colors', labels: { fa: 'رنگ یراق', en: 'general_color' }, type: FieldType.MULTI_SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 2.5, dynamicOptionsCategory: 'general_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } } },
 
   {

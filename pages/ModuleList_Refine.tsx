@@ -18,6 +18,7 @@ import RenderCardItem from "../components/moduleList/RenderCardItem";
 import { canAccessAssignedRecord, WORKFLOWS_PERMISSION_KEY } from "../utils/permissions";
 import BulkProductsCreateModal from "../components/products/BulkProductsCreateModal";
 import WorkflowsManager from "../components/workflows/WorkflowsManager";
+import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from "../utils/recordCopy";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -118,6 +119,15 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const loading = tableQueryResult.isLoading;
   const isRefreshing = tableQueryResult.isFetching && !loading;
   const allData = tableQueryResult.data?.data || [];
+  const selectedRows = useMemo(
+    () => allData.filter((row: any) => selectedRowKeys.includes(row.id)),
+    [allData, selectedRowKeys]
+  );
+  const allSelectedPendingInProductionOrders = useMemo(() => {
+    if (resolvedModuleId !== 'production_orders') return false;
+    if (!selectedRows.length) return false;
+    return selectedRows.every((row: any) => String(row?.status || '') === 'pending');
+  }, [resolvedModuleId, selectedRows]);
   const [readyModuleId, setReadyModuleId] = useState<string | null>(null);
   const showContentSkeleton = readyModuleId !== resolvedModuleId;
 
@@ -531,6 +541,78 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
       setIsBulkEditOpen(true);
   };
 
+  const handleBulkCopy = () => {
+    if (!selectedRowKeys.length || !resolvedModuleId || !moduleConfig) return;
+    modal.confirm({
+      title: `کپی ${selectedRowKeys.length} رکورد`,
+      content: 'از رکوردهای انتخاب‌شده نسخه کپی ساخته شود؟',
+      okText: 'بله، کپی کن',
+      cancelText: 'انصراف',
+      onOk: async () => {
+        const tableName = moduleConfig.table || resolvedModuleId;
+        const ids = selectedRowKeys.map((id) => String(id));
+        const hide = msg.loading('در حال کپی رکوردها...', 0);
+        try {
+          const { data: sourceRows, error: sourceError } = await supabase
+            .from(tableName)
+            .select('*')
+            .in('id', ids);
+          if (sourceError) throw sourceError;
+          const records = sourceRows || [];
+          if (!records.length) {
+            msg.warning('رکوردی برای کپی یافت نشد.');
+            return;
+          }
+          const nameField = detectCopyNameField(moduleConfig);
+          if (resolvedModuleId === 'production_orders') {
+            let copiedCount = 0;
+            for (let idx = 0; idx < records.length; idx += 1) {
+              const record = records[idx];
+              const payload = buildCopyPayload(record, { nameField, copyIndex: idx });
+              const { data: inserted, error: insertError } = await supabase
+                .from(tableName)
+                .insert(payload)
+                .select('id')
+                .single();
+              if (insertError) throw insertError;
+              if (inserted?.id) {
+                await copyProductionOrderRelations(supabase, String(record.id), String(inserted.id));
+              }
+              copiedCount += 1;
+            }
+            msg.success(`${copiedCount} رکورد کپی شد.`);
+          } else {
+            const payloads = records.map((record: any, idx: number) =>
+              buildCopyPayload(record, { nameField, copyIndex: idx })
+            );
+            const { error: insertError } = await supabase.from(tableName).insert(payloads);
+            if (insertError) throw insertError;
+            msg.success(`${payloads.length} رکورد کپی شد.`);
+          }
+          setSelectedRowKeys([]);
+          tableQueryResult.refetch();
+        } catch (err: any) {
+          msg.error(`کپی رکوردها ناموفق بود: ${err?.message || err}`);
+        } finally {
+          hide();
+        }
+      }
+    });
+  };
+
+  const handleCreateGroupOrderFromSelection = () => {
+    if (resolvedModuleId !== 'production_orders') return;
+    if (!selectedRowKeys.length) return;
+    if (!allSelectedPendingInProductionOrders) {
+      msg.error('برای ایجاد سفارش گروهی، همه سفارش‌های انتخاب شده باید در وضعیت «در انتظار» باشند.');
+      return;
+    }
+    const selectedIds = selectedRowKeys.map((item) => String(item));
+    navigate('/production_group_orders/create', {
+      state: { selectedOrderIds: selectedIds },
+    });
+  };
+
   const handleBulkSave = (values: any) => {
       const changes: any = {};
       Object.keys(values).forEach(key => {
@@ -623,6 +705,14 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                     افزودن گروهی
                   </Button>
                 )}
+                {resolvedModuleId === 'production_orders' && (
+                  <Button
+                    onClick={() => navigate('/production_group_orders')}
+                    className="rounded-xl"
+                  >
+                    سفارشات گروهی
+                  </Button>
+                )}
                 {canEditModule && (
                   <Button
                     type="primary"
@@ -653,8 +743,31 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
           selectedCount={selectedRowKeys.length}
           onClear={() => setSelectedRowKeys([])}
           onEdit={selectedRowKeys.length && canEditModule ? handleBulkEditOpen : undefined}
+          onCopy={selectedRowKeys.length && canEditModule ? handleBulkCopy : undefined}
           onDelete={selectedRowKeys.length && canDeleteModule ? handleBulkDelete : undefined}
           onExport={selectedRowKeys.length ? handleExport : undefined}
+          primaryActionLabel={
+            selectedRowKeys.length > 0 && resolvedModuleId === 'production_orders'
+              ? 'ایجاد سفارش گروهی جدید'
+              : undefined
+          }
+          onPrimaryAction={
+            selectedRowKeys.length > 0 && resolvedModuleId === 'production_orders'
+              ? handleCreateGroupOrderFromSelection
+              : undefined
+          }
+          primaryActionDisabled={
+            resolvedModuleId === 'production_orders' && selectedRowKeys.length > 0
+              ? !allSelectedPendingInProductionOrders
+              : false
+          }
+          primaryActionTooltip={
+            resolvedModuleId === 'production_orders' &&
+            selectedRowKeys.length > 0 &&
+            !allSelectedPendingInProductionOrders
+              ? 'فقط سفارش‌های تولید با وضعیت «در انتظار» قابل تبدیل به سفارش گروهی هستند.'
+              : undefined
+          }
         />
         </div>
 
@@ -829,4 +942,3 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 };
 
 export default ModuleListRefine;
-

@@ -307,7 +307,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
           : category === 'accessory'
             ? ['acc_material']
             : category === 'fitting'
-              ? ['fitting_type', 'fitting_colors', 'fitting_size']
+              ? ['fitting_type', 'fitting_material', 'fitting_colors', 'fitting_size']
               : [];
       specKeys.forEach(key => addPart(getFieldValueLabel(key, values?.[key])));
     } else {
@@ -318,6 +318,20 @@ const SmartForm: React.FC<SmartFormProps> = ({
     }
     addPart(getFieldValueLabel('brand_name', values?.brand_name));
 
+    return parts.join(' ');
+  };
+
+  const buildAutoProductionOrderName = (values: any) => {
+    const parts: string[] = [];
+    const addPart = (part?: string) => {
+      if (!part) return;
+      const trimmed = String(part).trim();
+      if (trimmed) parts.push(trimmed);
+    };
+    const bomLabelRaw = getFieldValueLabel('bom_id', values?.bom_id);
+    const bomLabelClean = String(bomLabelRaw || '').replace(/\s*\([^()]*\)\s*$/, '').trim();
+    addPart(bomLabelClean);
+    addPart(getFieldValueLabel('color', values?.color));
     return parts.join(' ');
   };
 
@@ -410,6 +424,16 @@ const SmartForm: React.FC<SmartFormProps> = ({
   }, [module.id, watchedValues, relationOptions, dynamicOptions]);
 
   useEffect(() => {
+    if (module.id !== 'production_orders') return;
+    const currentValues = watchedValues || formData;
+    if (!currentValues?.auto_name_enabled) return;
+    const nextName = buildAutoProductionOrderName(currentValues);
+    if (!nextName || nextName === currentValues?.name) return;
+    form.setFieldValue('name', nextName);
+    setFormData((prev: any) => ({ ...prev, name: nextName }));
+  }, [module.id, watchedValues, relationOptions, dynamicOptions]);
+
+  useEffect(() => {
     if (module.id !== 'products') return;
     const currentValues = watchedValues || formData;
     const mainUnit = currentValues?.main_unit;
@@ -493,6 +517,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
       if (module.id === 'products' && values.auto_name_enabled) {
         const nextName = buildAutoProductName(values);
+        if (nextName) {
+          values.name = nextName;
+        }
+      }
+      if (module.id === 'production_orders' && values.auto_name_enabled) {
+        const nextName = buildAutoProductionOrderName(values);
         if (nextName) {
           values.name = nextName;
         }
@@ -721,6 +751,35 @@ const SmartForm: React.FC<SmartFormProps> = ({
           form.setFieldValue('name', nextName);
           setFormData({ ...currentValues, name: nextName, auto_name_enabled: enableAuto });
           message.success('نام محصول بروزرسانی شد');
+        }
+      });
+      return;
+    }
+    if (actionId === 'auto_name' && module.id === 'production_orders') {
+      let enableAuto = !!form.getFieldValue('auto_name_enabled');
+      Modal.confirm({
+        title: 'نامگذاری خودکار سفارش تولید',
+        content: (
+          <div className="space-y-3">
+            <div>نام سفارش براساس شناسنامه تولید و رنگ ساخته شود؟</div>
+            <Checkbox defaultChecked={enableAuto} onChange={(e) => { enableAuto = e.target.checked; }}>
+              بروزرسانی خودکار هنگام تغییر مقادیر
+            </Checkbox>
+          </div>
+        ),
+        okText: 'اعمال',
+        cancelText: 'انصراف',
+        onOk: () => {
+          const currentValues = form.getFieldsValue();
+          const nextName = buildAutoProductionOrderName({ ...currentValues, auto_name_enabled: enableAuto });
+          if (!nextName) {
+            message.warning('اطلاعات کافی برای نامگذاری وجود ندارد');
+            return;
+          }
+          form.setFieldValue('auto_name_enabled', enableAuto);
+          form.setFieldValue('name', nextName);
+          setFormData({ ...currentValues, name: nextName, auto_name_enabled: enableAuto });
+          message.success('نام سفارش تولید بروزرسانی شد');
         }
       });
       return;

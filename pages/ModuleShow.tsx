@@ -35,6 +35,7 @@ import {
 } from '../utils/productionWorkflow';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 import { canAccessAssignedRecord } from '../utils/permissions';
+import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from '../utils/recordCopy';
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -150,8 +151,15 @@ const ModuleShow: React.FC = () => {
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
+  const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
+    const length = Math.max(0, toNumber((row as any)?.length));
+    const width = Math.max(0, toNumber((row as any)?.width));
+    const quantity = Math.max(0, toNumber((row as any)?.quantity));
+    return length * width * quantity;
+  };
+
   const sumDeliveredRows = (rows: StartMaterialDeliveryRow[]) => {
-    return rows.reduce((sum: number, row: StartMaterialDeliveryRow) => sum + toNumber(row.deliveredQty), 0);
+    return rows.reduce((sum: number, row: StartMaterialDeliveryRow) => sum + calcDeliveredQty(row), 0);
   };
 
   const buildDeliveryRowKey = () => `delivery_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -167,15 +175,23 @@ const ModuleShow: React.FC = () => {
       quantity: toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1),
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
-      deliveredQty: Math.max(0, toNumber(rawRow?.deliveredQty)),
+      deliveredQty: calcDeliveredQty({
+        length: rawRow?.length ?? firstPiece?.length ?? 0,
+        width: rawRow?.width ?? firstPiece?.width ?? 0,
+        quantity: rawRow?.quantity ?? firstPiece?.quantity ?? 1,
+      }),
     };
   };
 
   const recalcStartGroup = (group: StartMaterialGroup): StartMaterialGroup => {
     const pieces = Array.isArray(group.pieces) ? group.pieces : [];
-    const deliveryRows = Array.isArray(group.deliveryRows) ? group.deliveryRows : [];
+    const deliveryRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
+      ...row,
+      deliveredQty: calcDeliveredQty(row),
+    }));
     return {
       ...group,
+      deliveryRows,
       totalPerItemUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0),
       totalUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0),
       totalDeliveredQty: sumDeliveredRows(deliveryRows),
@@ -396,11 +412,12 @@ const ModuleShow: React.FC = () => {
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['length', 'width', 'quantity', 'deliveredQty'];
+      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['length', 'width', 'quantity'];
       const nextValue = numericFields.includes(field)
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
-      deliveryRows[rowIndex] = { ...currentRow, [field]: nextValue };
+      const updatedRow = { ...currentRow, [field]: nextValue };
+      deliveryRows[rowIndex] = { ...updatedRow, deliveredQty: calcDeliveredQty(updatedRow) };
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
     });
@@ -814,32 +831,38 @@ const ModuleShow: React.FC = () => {
       const draftStages = Array.isArray(modalRecord?.production_stages_draft)
         ? modalRecord.production_stages_draft.filter((stage: any) => String(stage?.name || stage?.title || '').trim() !== '')
         : [];
-      let hasIncompleteTasks = false;
+      let hasIncompleteDraftStages = false;
       let hasProductionLine = true;
       if (id) {
         const [{ data: tasksData, error: tasksError }, { data: linesData, error: linesError }] = await Promise.all([
           supabase
             .from('tasks')
-            .select('id, status')
+            .select('id, name, title, production_line_id')
             .eq('related_production_order', id),
           supabase
             .from('production_lines')
             .select('id')
-            .eq('production_order_id', id)
-            .limit(1),
+            .eq('production_order_id', id),
         ]);
-        if (!tasksError) {
-          const pendingTasks = (tasksData || []).filter((task: any) => {
-            const normalized = String(task?.status || '').toLowerCase();
-            return normalized !== 'done' && normalized !== 'completed';
-          });
-          hasIncompleteTasks = pendingTasks.length > 0;
-        }
         if (!linesError) {
           hasProductionLine = Array.isArray(linesData) && linesData.length > 0;
         }
+        if (!tasksError && !linesError && hasProductionLine && draftStages.length > 0) {
+          const normalizeName = (value: any) => String(value || '').trim().toLowerCase();
+          const draftStageNames = draftStages
+            .map((stage: any) => normalizeName(stage?.name || stage?.title))
+            .filter(Boolean);
+          const draftStageNameSet = new Set(draftStageNames);
+          const lineCount = Array.isArray(linesData) ? linesData.length : 0;
+          const expectedDraftTasksCount = lineCount * draftStageNames.length;
+          const createdFromDraftCount = (tasksData || []).filter((task: any) => {
+            const taskName = normalizeName(task?.name || task?.title);
+            return draftStageNameSet.has(taskName);
+          }).length;
+          hasIncompleteDraftStages = createdFromDraftCount < expectedDraftTasksCount;
+        }
       }
-      if (draftStages.length > 0 || hasIncompleteTasks || !hasProductionLine) {
+      if (hasIncompleteDraftStages || !hasProductionLine) {
         const shouldContinue = await askStartWarning(
           'برای این سفارش، خط تولید تکمیل نشده و یک یا چند وظیفه در حالت پیش نویس هستند، آیا ادامه می دهید؟'
         );
@@ -1324,6 +1347,36 @@ const ModuleShow: React.FC = () => {
     modal.confirm({ title: 'حذف رکورد', okType: 'danger', onOk: async () => { await supabase.from(moduleId).delete().eq('id', id); navigate(`/${moduleId}`); } });
   };
 
+  const handleCopyRecord = useCallback(() => {
+    if (!data || !id || !moduleConfig) return;
+    modal.confirm({
+      title: 'کپی رکورد',
+      content: 'از این رکورد یک نسخه کپی ساخته شود؟',
+      okText: 'بله، کپی کن',
+      cancelText: 'انصراف',
+      onOk: async () => {
+        try {
+          const nameField = detectCopyNameField(moduleConfig);
+          const payload = buildCopyPayload(data, { nameField });
+          const tableName = moduleConfig.table || moduleId;
+          const { data: inserted, error } = await supabase
+            .from(tableName)
+            .insert(payload)
+            .select('id')
+            .single();
+          if (error) throw error;
+          if (moduleId === 'production_orders' && inserted?.id) {
+            await copyProductionOrderRelations(supabase, String(id), String(inserted.id));
+          }
+          msg.success('کپی رکورد با موفقیت ایجاد شد.');
+          if (inserted?.id) navigate(`/${moduleId}/${inserted.id}`);
+        } catch (e: any) {
+          msg.error(`کپی رکورد ناموفق بود: ${e?.message || e}`);
+        }
+      }
+    });
+  }, [data, id, moduleConfig, modal, moduleId, msg, navigate]);
+
   const handleHeaderAction = (actionId: string) => {
     if (actionId === 'create_production_order') {
       if (!MODULES['production_orders']) {
@@ -1338,23 +1391,29 @@ const ModuleShow: React.FC = () => {
       setStockMovementQuickAddSignal((prev) => prev + 1);
       return;
     }
-    if (actionId === 'auto_name' && moduleId === 'products') {
+    if (actionId === 'auto_name' && (moduleId === 'products' || moduleId === 'production_orders')) {
       if (!canEditModule) return;
       let enableAuto = !!data?.auto_name_enabled;
       modal.confirm({
-        title: 'نامگذاری خودکار محصول',
+        title: moduleId === 'products' ? 'نامگذاری خودکار محصول' : 'نامگذاری خودکار سفارش تولید',
         content: (
           <div className="space-y-3">
-            <div>نام محصول براساس مشخصات فعلی ساخته شود؟</div>
+            <div>
+              {moduleId === 'products'
+                ? 'نام محصول براساس مشخصات فعلی ساخته شود؟'
+                : 'نام سفارش براساس شناسنامه تولید و رنگ ساخته شود؟'}
+            </div>
             <Checkbox defaultChecked={enableAuto} onChange={(e) => { enableAuto = e.target.checked; }}>
-              بروزرسانی خودکار هنگام تغییر مشخصات
+              بروزرسانی خودکار هنگام تغییر مقادیر
             </Checkbox>
           </div>
         ),
         okText: 'اعمال',
         cancelText: 'انصراف',
         onOk: async () => {
-          const nextName = buildAutoProductName(data);
+          const nextName = moduleId === 'products'
+            ? buildAutoProductName(data)
+            : buildAutoProductionOrderName(data);
           if (!nextName) {
             msg.warning('اطلاعات کافی برای نامگذاری وجود ندارد');
             return;
@@ -1373,7 +1432,7 @@ const ModuleShow: React.FC = () => {
               oldValue: data?.name ?? null,
               newValue: nextName
             });
-            msg.success('نام محصول بروزرسانی شد');
+            msg.success(moduleId === 'products' ? 'نام محصول بروزرسانی شد' : 'نام سفارش تولید بروزرسانی شد');
           } catch (e: any) {
             msg.error('خطا در بروزرسانی نام: ' + e.message);
           }
@@ -1668,7 +1727,7 @@ const ModuleShow: React.FC = () => {
           : category === 'accessory'
             ? ['acc_material']
             : category === 'fitting'
-              ? ['fitting_type', 'fitting_colors', 'fitting_size']
+              ? ['fitting_type', 'fitting_material', 'fitting_colors', 'fitting_size']
               : [];
       specKeys.forEach(key => addPart(getFieldValueLabel(key, record?.[key])));
     } else {
@@ -1679,6 +1738,21 @@ const ModuleShow: React.FC = () => {
     }
     addPart(getFieldValueLabel('brand_name', record?.brand_name));
 
+    return parts.join(' ');
+  };
+
+  const buildAutoProductionOrderName = (record: any) => {
+    if (!record) return '';
+    const parts: string[] = [];
+    const addPart = (part?: string) => {
+      if (!part) return;
+      const trimmed = String(part).trim();
+      if (trimmed) parts.push(trimmed);
+    };
+    const bomLabelRaw = getFieldValueLabel('bom_id', record?.bom_id);
+    const bomLabelClean = String(bomLabelRaw || '').replace(/\s*\([^()]*\)\s*$/, '').trim();
+    addPart(bomLabelClean);
+    addPart(getFieldValueLabel('color', record?.color));
     return parts.join(' ');
   };
 
@@ -1855,7 +1929,7 @@ const ModuleShow: React.FC = () => {
           const pieceKey = String(deliveryRow?.pieceKey || '');
           if (!pieceKey) return;
           const current = deliveredByPieceKey.get(pieceKey) || 0;
-          deliveredByPieceKey.set(pieceKey, current + toNumber(deliveryRow?.deliveredQty));
+          deliveredByPieceKey.set(pieceKey, current + calcDeliveredQty(deliveryRow));
         });
         const nextPieces = rowPieces.map((piece: any, pieceIndex: number) => {
           const normalizedPieceKey = `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`;
@@ -2359,7 +2433,7 @@ const ModuleShow: React.FC = () => {
       variant: b.variant,
       onClick: () => handleHeaderAction(b.id)
     }));
-  if (moduleId === 'products' && canUseAction('auto_name')) {
+  if ((moduleId === 'products' || moduleId === 'production_orders') && canUseAction('auto_name')) {
     headerActions.push({
       id: 'auto_name',
       label: 'نامگذاری خودکار',
@@ -2451,6 +2525,7 @@ const ModuleShow: React.FC = () => {
         onModule={() => navigate(`/${moduleId}`)}
         onPrint={() => printManager.setIsPrintModalOpen(true)}
         onRefresh={handleHeaderRefresh}
+        onCopy={canEditModule ? handleCopyRecord : undefined}
         refreshLoading={loading}
         onEdit={() => setIsEditDrawerOpen(true)}
         onDelete={handleDelete}

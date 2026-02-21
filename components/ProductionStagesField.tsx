@@ -5,7 +5,17 @@ import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import PersianDatePicker from './PersianDatePicker';
-import TaskHandoverModal, { type StageHandoverConfirm, type StageHandoverGroup, type StageHandoverDeliveryRow } from './production/TaskHandoverModal';
+import TaskHandoverModal, {
+  type StageHandoverConfirm,
+  type StageHandoverGroup,
+  type StageHandoverDeliveryRow,
+  type StageHandoverTaskOption,
+  type StageHandoverTrafficType,
+} from './production/TaskHandoverModal';
+import TaskHandoverFormsModal, {
+  type StageHandoverFormListRow,
+  type StageHandoverSummaryRow,
+} from './production/TaskHandoverFormsModal';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
@@ -51,6 +61,33 @@ type StageHandoverContext = {
   receiverConfirmation: StageHandoverConfirm;
   previousTotalsByProduct: Record<string, number>;
   previousWasteByProduct: Record<string, number>;
+  sourceTotalsByProduct: Record<string, number>;
+  orderTotalsByProduct: Record<string, number>;
+};
+
+type StageHandoverForm = {
+  id: string;
+  direction?: StageHandoverTrafficType;
+  sourceTaskId: string | null;
+  destinationTaskId?: string | null;
+  sourceStageName: string;
+  sourceShelfId: string | null;
+  targetShelfId: string | null;
+  giver: StageAssignee;
+  receiver: StageAssignee;
+  groups: StageHandoverGroup[];
+  wasteByProduct: Record<string, number>;
+  giverConfirmation: StageHandoverConfirm;
+  receiverConfirmation: StageHandoverConfirm;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type OpenHandoverOptions = {
+  openFormId?: string | null;
+  openEditor?: boolean;
+  createNewForm?: boolean;
+  sourceOverrideTask?: any | null;
 };
 
 const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, showWageSummary = false }) => {
@@ -73,10 +110,24 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const isBom = moduleId === 'production_boms';
   const [currentUser, setCurrentUser] = useState<{ id: string | null; roleId: string | null; fullName: string }>({ id: null, roleId: null, fullName: 'کاربر' });
   const [handoverTask, setHandoverTask] = useState<any | null>(null);
+  const [handoverOrderTitle, setHandoverOrderTitle] = useState<string | null>(null);
   const [handoverContext, setHandoverContext] = useState<StageHandoverContext | null>(null);
   const [handoverGroups, setHandoverGroups] = useState<StageHandoverGroup[]>([]);
+  const [handoverForms, setHandoverForms] = useState<StageHandoverForm[]>([]);
+  const [nextStageTotalsByProduct, setNextStageTotalsByProduct] = useState<Record<string, number>>({});
+  const [nextStageSubTotalsByProduct, setNextStageSubTotalsByProduct] = useState<Record<string, number>>({});
+  const [handoverNextTask, setHandoverNextTask] = useState<any | null>(null);
+  const [activeHandoverFormId, setActiveHandoverFormId] = useState<string | null>(null);
+  const [handoverFormsModalOpen, setHandoverFormsModalOpen] = useState(false);
+  const [handoverEditorOpen, setHandoverEditorOpen] = useState(false);
   const [handoverLoading, setHandoverLoading] = useState(false);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
+  const [allShelfOptions, setAllShelfOptions] = useState<Array<{ label: string; value: string; warehouseName: string }>>([]);
+  const [handoverTrafficType, setHandoverTrafficType] = useState<StageHandoverTrafficType>('incoming');
+  const [handoverTrafficTypeEditable, setHandoverTrafficTypeEditable] = useState<boolean>(true);
+  const [handoverSourceStageValue, setHandoverSourceStageValue] = useState<string | null>(null);
+  const [handoverSourceShelfId, setHandoverSourceShelfId] = useState<string | null>(null);
+  const [handoverDestinationStageId, setHandoverDestinationStageId] = useState<string | null>(null);
   const [openTaskPopoverId, setOpenTaskPopoverId] = useState<string | null>(null);
 
   const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
@@ -151,21 +202,27 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const normalizeHandoverDeliveryRow = useCallback((group: StageHandoverGroup, rawRow?: any): StageHandoverDeliveryRow => {
     const firstPiece = Array.isArray(group?.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
+    const length = Math.max(0, toNumber(rawRow?.length ?? firstPiece?.length ?? 0));
+    const width = Math.max(0, toNumber(rawRow?.width ?? firstPiece?.width ?? 0));
+    const quantity = Math.max(0, toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1));
     return {
       key: String(rawRow?.key || buildHandoverRowKey()),
       pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
       name: String(rawRow?.name ?? firstPiece?.name ?? ''),
-      length: Math.max(0, toNumber(rawRow?.length ?? firstPiece?.length ?? 0)),
-      width: Math.max(0, toNumber(rawRow?.width ?? firstPiece?.width ?? 0)),
-      quantity: Math.max(0, toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1)),
+      length,
+      width,
+      quantity,
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
-      deliveredQty: Math.max(0, toNumber(rawRow?.deliveredQty ?? rawRow?.handoverQty ?? 0)),
+      deliveredQty: length * width * quantity,
     };
   }, [buildHandoverRowKey, toNumber]);
 
   const sumDeliveredRows = useCallback((rows: StageHandoverDeliveryRow[]) => {
-    return rows.reduce((sum, row) => sum + Math.max(0, toNumber(row?.deliveredQty)), 0);
+    return rows.reduce(
+      (sum, row) => sum + (Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity))),
+      0
+    );
   }, [toNumber]);
 
   const recalcHandoverGroup = useCallback((group: StageHandoverGroup): StageHandoverGroup => {
@@ -253,18 +310,21 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         .from('shelves')
         .select('id, shelf_number, name, warehouses(name)')
         .limit(500);
-      const filtered = (shelves || []).filter((row: any) => {
-        const warehouseName = String(row?.warehouses?.name || '');
-        return warehouseName.includes('تولید') || /production/i.test(warehouseName);
-      });
-      const source = filtered.length ? filtered : (shelves || []);
-      const options = source.map((row: any) => ({
+      const allOptions = (shelves || []).map((row: any) => ({
         value: String(row.id),
         label: `${row?.shelf_number || row?.name || row?.id}${row?.warehouses?.name ? ` - ${row.warehouses.name}` : ''}`,
+        warehouseName: String(row?.warehouses?.name || ''),
       }));
-      setProductionShelfOptions(options);
+      setAllShelfOptions(allOptions);
+      const filtered = allOptions.filter((row: any) => {
+        const warehouseName = String(row?.warehouseName || '');
+        return warehouseName.includes('تولید') || /production/i.test(warehouseName);
+      });
+      const source = filtered.length ? filtered : allOptions;
+      setProductionShelfOptions(source.map(({ value, label }) => ({ value, label })));
     } catch (err) {
       console.warn('Could not fetch production shelves', err);
+      setAllShelfOptions([]);
       setProductionShelfOptions([]);
     }
   }, []);
@@ -376,7 +436,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       if (!normalizedProductId) return;
       const deliveryRows = Array.isArray(anyGroup?.deliveryRows) ? anyGroup.deliveryRows : [];
       const qty = deliveryRows.length > 0
-        ? deliveryRows.reduce((sum: number, row: any) => sum + toNumber(row?.deliveredQty ?? row?.handoverQty ?? 0), 0)
+        ? deliveryRows.reduce(
+            (sum: number, row: any) =>
+              sum + (Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity))),
+            0
+          )
         : (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).reduce(
             (sum: number, piece: any) => sum + toNumber(piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0),
             0
@@ -385,6 +449,74 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
     return totals;
   }, [toNumber]);
+
+  const toGroupSubTotals = useCallback((groups: StageHandoverGroup[]) => {
+    const totals: Record<string, number> = {};
+    groups.forEach((group) => {
+      const anyGroup = group as any;
+      const pickedPiece = (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).find(
+        (piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id
+      );
+      const productId =
+        anyGroup?.selectedProductId
+        || anyGroup?.selected_product_id
+        || pickedPiece?.selectedProductId
+        || pickedPiece?.selected_product_id
+        || pickedPiece?.product_id
+        || null;
+      const normalizedProductId = productId ? String(productId) : '';
+      if (!normalizedProductId) return;
+
+      const deliveryRows = Array.isArray(anyGroup?.deliveryRows) ? anyGroup.deliveryRows : [];
+      const qty = deliveryRows.length > 0
+        ? deliveryRows.reduce((sum: number, row: any) => {
+            const quantity = Math.max(0, toNumber(row?.quantity || 0));
+            const base = toNumber(row?.subQty ?? row?.sub_qty);
+            const usage = toNumber(row?.subUsage ?? row?.sub_usage ?? row?.qty_sub);
+            const resolved = base > 0 ? base : (usage > 0 ? usage * (quantity || 1) : 0);
+            return sum + Math.max(0, resolved);
+          }, 0)
+        : (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).reduce(
+            (sum: number, piece: any) => sum + Math.max(0, toNumber(piece?.subQty ?? piece?.sub_qty ?? piece?.subUsage ?? piece?.sub_usage ?? piece?.qty_sub ?? 0)),
+            0
+          );
+      totals[normalizedProductId] = (totals[normalizedProductId] || 0) + qty;
+    });
+    return totals;
+  }, [toNumber]);
+
+  const toSourceTotals = useCallback((groups: StageHandoverGroup[]) => {
+    const totals: Record<string, number> = {};
+    groups.forEach((group) => {
+      const productId = group?.selectedProductId ? String(group.selectedProductId) : '';
+      if (!productId) return;
+      const qty = (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
+        (sum: number, piece: any) => sum + Math.max(0, toNumber(piece?.sourceQty)),
+        0
+      );
+      totals[productId] = (totals[productId] || 0) + qty;
+    });
+    return totals;
+  }, [toNumber]);
+
+  const toOrderTotals = useCallback((groups: StageHandoverGroup[]) => {
+    const totals: Record<string, number> = {};
+    groups.forEach((group) => {
+      const productId = group?.selectedProductId ? String(group.selectedProductId) : '';
+      if (!productId) return;
+      const qty = (Array.isArray(group?.orderPieces) ? group.orderPieces : []).reduce(
+        (sum: number, piece: any) => sum + Math.max(0, toNumber(piece?.sourceQty)),
+        0
+      );
+      totals[productId] = (totals[productId] || 0) + qty;
+    });
+    return totals;
+  }, [toNumber]);
+
+  const buildHandoverFormId = useCallback(
+    () => `handover_form_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    []
+  );
 
   const buildPiecesFromOrderRow = useCallback((row: any, rowIndex: number, orderQty: number, useDeliveredQty: boolean) => {
     const rowPieces = Array.isArray(row?.pieces) && row.pieces.length > 0 ? row.pieces : [row];
@@ -603,18 +735,23 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         supabase.from('tasks').select('*').eq('id', task.id).maybeSingle(),
         supabase
           .from('production_orders')
-          .select('id, quantity, assignee_id, assignee_type, grid_materials, production_shelf_id')
+          .select('id, name, system_code, quantity, assignee_id, assignee_type, grid_materials, production_shelf_id')
           .eq('id', recordId)
           .maybeSingle(),
       ]);
       const currentTask = latestTask || task;
       const lineId = currentTask?.production_line_id ? String(currentTask.production_line_id) : null;
-      const lineTasks = getLineTaskChain(lineId, providedTasks);
+      const allTasks = (providedTasks && providedTasks.length > 0) ? providedTasks : tasks;
+      const lineTasks = getLineTaskChain(lineId, allTasks);
       const currentTaskIndex = lineTasks.findIndex((item: any) => String(item?.id) === String(currentTask.id));
       const previousTask = currentTaskIndex > 0 ? lineTasks[currentTaskIndex - 1] : null;
+      const nextTask = currentTaskIndex >= 0 && currentTaskIndex < lineTasks.length - 1
+        ? lineTasks[currentTaskIndex + 1]
+        : null;
 
       const previousHandover = previousTask ? getHandoverFromTask(previousTask) : null;
       const currentHandover = getHandoverFromTask(currentTask);
+      const nextHandover = nextTask ? getHandoverFromTask(nextTask) : null;
 
       const sourceStageName = previousTask?.name || 'شروع تولید';
       const sourceShelfId = previousTask?.production_shelf_id
@@ -661,46 +798,214 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         })
       );
 
-      const giverSourceId = previousTask?.assignee_id || order?.assignee_id || null;
-      const giverSourceType = previousTask?.assignee_type || order?.assignee_type || null;
-      const giver: StageAssignee = {
-        id: giverSourceId ? String(giverSourceId) : null,
-        type: giverSourceType === 'role' ? 'role' : (giverSourceType === 'user' ? 'user' : null),
-        label: assigneeLabelFromIds(giverSourceId, giverSourceType),
+      const defaultGiverSourceId = previousTask?.assignee_id || order?.assignee_id || null;
+      const defaultGiverSourceType = previousTask?.assignee_type || order?.assignee_type || null;
+      const defaultGiver: StageAssignee = {
+        id: defaultGiverSourceId ? String(defaultGiverSourceId) : null,
+        type: defaultGiverSourceType === 'role' ? 'role' : (defaultGiverSourceType === 'user' ? 'user' : null),
+        label: assigneeLabelFromIds(defaultGiverSourceId, defaultGiverSourceType),
       };
-      const receiver: StageAssignee = {
+      const defaultReceiver: StageAssignee = {
         id: currentTask?.assignee_id ? String(currentTask.assignee_id) : null,
         type: currentTask?.assignee_type === 'role' ? 'role' : (currentTask?.assignee_type === 'user' ? 'user' : null),
         label: assigneeLabelFromIds(currentTask?.assignee_id, currentTask?.assignee_type),
       };
 
-      const previousTotalsByProduct = toGroupTotals((Array.isArray(currentHandover?.groups) ? currentHandover.groups : []) as any);
-      const previousWasteByProduct = currentHandover?.wasteByProduct && typeof currentHandover.wasteByProduct === 'object'
-        ? currentHandover.wasteByProduct
-        : {};
+      const normalizeForm = (rawForm: any): StageHandoverForm => {
+        const formId = String(rawForm?.id || buildHandoverFormId());
+        const rawDirection = String(rawForm?.direction || '').toLowerCase();
+        const derivedDirection: StageHandoverTrafficType =
+          rawDirection === 'outgoing' || rawDirection === 'incoming'
+            ? (rawDirection as StageHandoverTrafficType)
+            : (rawForm?.sourceTaskId && String(rawForm.sourceTaskId) === String(currentTask?.id) ? 'outgoing' : 'incoming');
+        const destinationTaskId = rawForm?.destinationTaskId
+          ? String(rawForm.destinationTaskId)
+          : (derivedDirection === 'outgoing' && nextTask?.id ? String(nextTask.id) : null);
+        const destinationTask = destinationTaskId
+          ? lineTasks.find((taskItem: any) => String(taskItem?.id || '') === String(destinationTaskId))
+          : null;
+        const destinationShelfId = destinationTask?.production_shelf_id ? String(destinationTask.production_shelf_id) : null;
+        const normalizedSourceTaskId = rawForm?.sourceTaskId
+          ? String(rawForm.sourceTaskId)
+          : (derivedDirection === 'outgoing'
+            ? String(currentTask?.id || '')
+            : (previousTask?.id ? String(previousTask.id) : null));
+        const mergedFormGroups = mergeSavedGroups(withOrderGroups, rawForm?.groups || []).map((group) =>
+          recalcHandoverGroup({
+            ...group,
+            sourceShelfId: derivedDirection === 'incoming'
+              ? (sourceShelfId ? String(sourceShelfId) : null)
+              : (targetShelfId ? String(targetShelfId) : null),
+            targetShelfId: rawForm?.targetShelfId
+              ? String(rawForm.targetShelfId)
+              : (derivedDirection === 'outgoing'
+                ? (destinationShelfId || null)
+                : (targetShelfId ? String(targetShelfId) : null)),
+          })
+        );
+        return {
+          id: formId,
+          direction: derivedDirection,
+          sourceTaskId: normalizedSourceTaskId || null,
+          destinationTaskId,
+          sourceStageName: String(
+            rawForm?.sourceStageName
+            || (derivedDirection === 'outgoing' ? (currentTask?.name || currentTask?.title || 'مرحله') : sourceStageName)
+            || 'شروع تولید'
+          ),
+          sourceShelfId: rawForm?.sourceShelfId
+            ? String(rawForm.sourceShelfId)
+            : (derivedDirection === 'incoming'
+              ? (sourceShelfId ? String(sourceShelfId) : null)
+              : (targetShelfId ? String(targetShelfId) : null)),
+          targetShelfId: rawForm?.targetShelfId
+            ? String(rawForm.targetShelfId)
+            : (derivedDirection === 'outgoing'
+              ? (destinationShelfId || null)
+              : (targetShelfId ? String(targetShelfId) : null)),
+          giver: rawForm?.giver && typeof rawForm.giver === 'object' ? rawForm.giver : defaultGiver,
+          receiver: rawForm?.receiver && typeof rawForm.receiver === 'object' ? rawForm.receiver : defaultReceiver,
+          groups: mergedFormGroups,
+          wasteByProduct: rawForm?.wasteByProduct && typeof rawForm.wasteByProduct === 'object'
+            ? rawForm.wasteByProduct
+            : {},
+          giverConfirmation: rawForm?.giverConfirmation?.confirmed
+            ? rawForm.giverConfirmation
+            : { confirmed: false },
+          receiverConfirmation: rawForm?.receiverConfirmation?.confirmed
+            ? rawForm.receiverConfirmation
+            : { confirmed: false },
+          createdAt: rawForm?.createdAt || rawForm?.updatedAt || new Date().toISOString(),
+          updatedAt: rawForm?.updatedAt || rawForm?.createdAt || new Date().toISOString(),
+        };
+      };
+
+      const existingFormsRaw = Array.isArray(currentHandover?.forms) ? currentHandover.forms : [];
+      const legacyForm =
+        existingFormsRaw.length === 0 && Array.isArray(currentHandover?.groups)
+          ? [{
+              id: currentHandover?.activeFormId || buildHandoverFormId(),
+              sourceTaskId: currentHandover?.sourceTaskId || (previousTask?.id ? String(previousTask.id) : null),
+              sourceStageName: currentHandover?.sourceStageName || sourceStageName,
+              sourceShelfId: currentHandover?.sourceShelfId || sourceShelfId,
+              targetShelfId: currentHandover?.targetShelfId || targetShelfId,
+              giverConfirmation: currentHandover?.giverConfirmation || { confirmed: false },
+              receiverConfirmation: currentHandover?.receiverConfirmation || { confirmed: false },
+              wasteByProduct: currentHandover?.wasteByProduct || {},
+              groups: currentHandover?.groups || [],
+              updatedAt: currentHandover?.updatedAt || new Date().toISOString(),
+            }]
+          : [];
+      const seedForms = existingFormsRaw.length > 0 ? existingFormsRaw : legacyForm;
+      const normalizedForms: StageHandoverForm[] = (seedForms.length > 0
+        ? seedForms
+        : [{
+            id: buildHandoverFormId(),
+            direction: 'incoming',
+            groups: mergedGroups,
+            sourceTaskId: previousTask?.id ? String(previousTask.id) : null,
+            destinationTaskId: null,
+            sourceStageName,
+            sourceShelfId,
+            targetShelfId,
+            giverConfirmation: { confirmed: false },
+            receiverConfirmation: { confirmed: false },
+            wasteByProduct: {},
+            updatedAt: new Date().toISOString(),
+          }]
+      ).map((form: any) => normalizeForm(form));
+
+      const preferredFormId = String(currentHandover?.activeFormId || normalizedForms[0]?.id || '');
+      const activeForm = normalizedForms.find((form) => String(form.id) === preferredFormId) || normalizedForms[0];
+      const sourceTotalsByProduct = toSourceTotals(withOrderGroups);
+      const orderTotalsByProduct = toOrderTotals(withOrderGroups);
+
+      const nextTotals: Record<string, number> = {};
+      const nextSubTotals: Record<string, number> = {};
+      const currentTaskIdStr = String(currentTask.id);
+      const nextFormsRaw = Array.isArray(nextHandover?.forms) ? nextHandover.forms : [];
+      const nextLegacyForms =
+        nextFormsRaw.length === 0 && Array.isArray(nextHandover?.groups)
+          ? [{
+              id: nextHandover?.activeFormId || `handover_legacy_${String(nextTask?.id || '')}`,
+              sourceTaskId: nextHandover?.sourceTaskId || null,
+              sourceStageName: nextHandover?.sourceStageName || null,
+              giverConfirmation: nextHandover?.giverConfirmation || null,
+              receiverConfirmation: nextHandover?.receiverConfirmation || null,
+              createdAt: nextHandover?.updatedAt || null,
+              updatedAt: nextHandover?.updatedAt || null,
+              groups: nextHandover?.groups || [],
+            }]
+          : [];
+      const nextSeeded = nextFormsRaw.length > 0 ? nextFormsRaw : nextLegacyForms;
+      nextSeeded.forEach((rawForm: any) => {
+        const sourceId = rawForm?.sourceTaskId ? String(rawForm.sourceTaskId) : '';
+        if (sourceId !== currentTaskIdStr) return;
+        const totals = toGroupTotals((rawForm?.groups || []) as any);
+        const subTotals = toGroupSubTotals((rawForm?.groups || []) as any);
+        Object.entries(totals).forEach(([productId, qty]) => {
+          const pid = String(productId || '').trim();
+          if (!pid) return;
+          nextTotals[pid] = (nextTotals[pid] || 0) + toNumber(qty);
+        });
+        Object.entries(subTotals).forEach(([productId, qty]) => {
+          const pid = String(productId || '').trim();
+          if (!pid) return;
+          nextSubTotals[pid] = (nextSubTotals[pid] || 0) + toNumber(qty);
+        });
+      });
 
       setHandoverTask(currentTask);
-      setHandoverGroups(mergedGroups);
+      setHandoverOrderTitle(() => {
+        const name = String(order?.name || '').trim();
+        const code = String(order?.system_code || '').trim();
+        if (name && code) return `${name} (${code})`;
+        return name || code || null;
+      });
+      setHandoverForms(normalizedForms);
+      setNextStageTotalsByProduct(nextTotals);
+      setNextStageSubTotalsByProduct(nextSubTotals);
+      setHandoverNextTask(nextTask || null);
+      setActiveHandoverFormId(activeForm?.id || null);
+      setHandoverGroups(activeForm?.groups || []);
       setHandoverContext({
         taskId: String(currentTask.id),
         orderId: String(recordId),
         lineId,
-        sourceTaskId: previousTask?.id ? String(previousTask.id) : null,
-        sourceStageName,
-        sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
-        targetShelfId: targetShelfId ? String(targetShelfId) : null,
-        giver,
-        receiver,
-        groups: mergedGroups,
-        giverConfirmation: currentHandover?.giverConfirmation?.confirmed
-          ? currentHandover.giverConfirmation
-          : { confirmed: false },
-        receiverConfirmation: currentHandover?.receiverConfirmation?.confirmed
-          ? currentHandover.receiverConfirmation
-          : { confirmed: false },
-        previousTotalsByProduct,
-        previousWasteByProduct,
+        sourceTaskId: activeForm?.sourceTaskId || (previousTask?.id ? String(previousTask.id) : null),
+        sourceStageName: activeForm?.sourceStageName || sourceStageName,
+        sourceShelfId: activeForm?.sourceShelfId || (sourceShelfId ? String(sourceShelfId) : null),
+        targetShelfId: activeForm?.targetShelfId || (targetShelfId ? String(targetShelfId) : null),
+        giver: activeForm?.giver || defaultGiver,
+        receiver: activeForm?.receiver || defaultReceiver,
+        groups: withOrderGroups,
+        giverConfirmation: activeForm?.giverConfirmation || { confirmed: false },
+        receiverConfirmation: activeForm?.receiverConfirmation || { confirmed: false },
+        previousTotalsByProduct: toGroupTotals((activeForm?.groups || []) as any),
+        previousWasteByProduct: activeForm?.wasteByProduct || {},
+        sourceTotalsByProduct,
+        orderTotalsByProduct,
       });
+      const initialTrafficType: StageHandoverTrafficType = activeForm?.direction === 'outgoing' ? 'outgoing' : 'incoming';
+      setHandoverTrafficType(initialTrafficType);
+      setHandoverTrafficTypeEditable(!(activeForm?.giverConfirmation?.confirmed || activeForm?.receiverConfirmation?.confirmed));
+      setHandoverSourceStageValue(
+        initialTrafficType === 'incoming'
+          ? (activeForm?.sourceTaskId ? String(activeForm.sourceTaskId) : '__central__')
+          : (activeForm?.sourceTaskId ? String(activeForm.sourceTaskId) : String(currentTask.id))
+      );
+      setHandoverSourceShelfId(
+        initialTrafficType === 'incoming' && !activeForm?.sourceTaskId
+          ? (activeForm?.sourceShelfId || null)
+          : null
+      );
+      setHandoverDestinationStageId(
+        activeForm?.destinationTaskId
+          ? String(activeForm.destinationTaskId)
+          : (initialTrafficType === 'outgoing' && nextTask?.id ? String(nextTask.id) : null)
+      );
+      setHandoverFormsModalOpen(true);
+      setHandoverEditorOpen(false);
     } catch (error: any) {
       message.error(error?.message || 'خطا در بارگذاری فرم تحویل');
     } finally {
@@ -721,7 +1026,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     recalcHandoverGroup,
     resolveCategoryLabel,
     assigneeLabelFromIds,
+    buildHandoverFormId,
+    toOrderTotals,
+    toSourceTotals,
     toGroupTotals,
+    toGroupSubTotals,
+    tasks,
   ]);
 
   const setHandoverGroupCollapsed = useCallback((groupIndex: number, collapsed: boolean) => {
@@ -820,11 +1130,15 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'quantity', 'deliveredQty'];
+      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'quantity'];
       const nextValue = numericFields.includes(field)
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
-      deliveryRows[rowIndex] = { ...currentRow, [field]: nextValue };
+      const updatedRow = { ...currentRow, [field]: nextValue };
+      deliveryRows[rowIndex] = {
+        ...updatedRow,
+        deliveredQty: Math.max(0, toNumber(updatedRow.length)) * Math.max(0, toNumber(updatedRow.width)) * Math.max(0, toNumber(updatedRow.quantity)),
+      };
       next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
     });
@@ -873,12 +1187,67 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const saveHandover = useCallback(async (confirmSide?: StageHandoverSide) => {
     if (!handoverContext || !handoverTask) return false;
-    if (!handoverContext.targetShelfId) {
+
+    const currentTaskId = String(handoverContext.taskId);
+    const lineId = handoverTask?.production_line_id ? String(handoverTask.production_line_id) : null;
+    const stageOptionsForSave: StageHandoverTaskOption[] = getLineTaskChain(lineId, tasks)
+      .filter((task: any) => String(task?.id || '') && String(task.id) !== currentTaskId)
+      .map((task: any) => {
+        const stageName = String(task?.name || task?.title || 'مرحله');
+        const stageShelfId = task?.production_shelf_id ? String(task.production_shelf_id) : null;
+        return {
+          value: String(task.id),
+          label: stageName,
+          shelfId: stageShelfId,
+          shelfLabel: stageShelfId || 'قفسه تعیین نشده',
+        };
+      });
+    const selectedSourceStageId =
+      handoverSourceStageValue && handoverSourceStageValue !== '__central__'
+        ? String(handoverSourceStageValue)
+        : null;
+    const selectedSourceStage = selectedSourceStageId
+      ? stageOptionsForSave.find((item) => String(item.value) === selectedSourceStageId) || null
+      : null;
+    const selectedDestinationStage = handoverDestinationStageId
+      ? stageOptionsForSave.find((item) => String(item.value) === String(handoverDestinationStageId)) || null
+      : null;
+
+    const computedSourceShelfId = handoverTrafficType === 'incoming'
+      ? (selectedSourceStageId
+        ? (selectedSourceStage?.shelfId || null)
+        : (handoverSourceShelfId || null))
+      : (handoverContext.targetShelfId || null);
+    const computedTargetShelfId = handoverTrafficType === 'incoming'
+      ? (handoverContext.targetShelfId || null)
+      : (selectedDestinationStage?.shelfId || null);
+
+    const computedSourceTaskId = handoverTrafficType === 'incoming'
+      ? selectedSourceStageId
+      : currentTaskId;
+    const computedDestinationTaskId = handoverTrafficType === 'outgoing'
+      ? (handoverDestinationStageId ? String(handoverDestinationStageId) : null)
+      : null;
+    const computedSourceStageName = handoverTrafficType === 'incoming'
+      ? (selectedSourceStageId
+        ? String(selectedSourceStage?.label || handoverContext.sourceStageName || 'مرحله')
+        : 'انبار مرکزی')
+      : String(handoverTask?.name || handoverTask?.title || 'مرحله');
+
+    if (handoverTrafficType === 'incoming' && !handoverContext.targetShelfId) {
       message.error('قفسه این مرحله انتخاب نشده است.');
       return false;
     }
-    if (!handoverContext.sourceShelfId) {
-      message.error('قفسه مرحله قبلی/منبع مشخص نشده است.');
+    if (!computedSourceShelfId) {
+      message.error('قفسه مبدا مشخص نشده است.');
+      return false;
+    }
+    if (!computedTargetShelfId) {
+      message.error('قفسه مقصد مشخص نشده است.');
+      return false;
+    }
+    if (handoverTrafficType === 'outgoing' && !computedDestinationTaskId) {
+      message.error('مرحله مقصد برای تحویل خروجی انتخاب نشده است.');
       return false;
     }
 
@@ -896,23 +1265,56 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ? recurrence.production_handover
         : {};
 
-      const previousGroups = Array.isArray(existing?.groups) ? existing.groups : [];
-      const previousWasteByProduct = existing?.wasteByProduct && typeof existing.wasteByProduct === 'object'
-        ? existing.wasteByProduct
+      const existingFormsRaw = Array.isArray(existing?.forms) ? existing.forms : [];
+      const fallbackLegacyForm = Array.isArray(existing?.groups)
+        ? [{
+            id: existing?.activeFormId || activeHandoverFormId || buildHandoverFormId(),
+            groups: existing.groups,
+            wasteByProduct: existing?.wasteByProduct || {},
+            giverConfirmation: existing?.giverConfirmation || { confirmed: false },
+            receiverConfirmation: existing?.receiverConfirmation || { confirmed: false },
+            direction: existing?.direction || handoverTrafficType,
+            sourceTaskId: existing?.sourceTaskId || computedSourceTaskId,
+            destinationTaskId: existing?.destinationTaskId || computedDestinationTaskId,
+            sourceStageName: existing?.sourceStageName || computedSourceStageName,
+            sourceShelfId: existing?.sourceShelfId || computedSourceShelfId,
+            targetShelfId: existing?.targetShelfId || computedTargetShelfId,
+            createdAt: existing?.createdAt || existing?.updatedAt || new Date().toISOString(),
+            updatedAt: existing?.updatedAt || existing?.createdAt || new Date().toISOString(),
+          }]
+        : [];
+      const existingForms = existingFormsRaw.length > 0 ? existingFormsRaw : fallbackLegacyForm;
+
+      const formId = String(activeHandoverFormId || existing?.activeFormId || existingForms[0]?.id || buildHandoverFormId());
+      const existingForm = existingForms.find((item: any) => String(item?.id || '') === formId) || null;
+
+      const previousGroups = Array.isArray(existingForm?.groups) ? existingForm.groups : [];
+      const previousWasteByProduct = existingForm?.wasteByProduct && typeof existingForm.wasteByProduct === 'object'
+        ? existingForm.wasteByProduct
         : {};
       const hasImmutableConfirmation = Boolean(
-        existing?.giverConfirmation?.confirmed || existing?.receiverConfirmation?.confirmed
+        existingForm?.giverConfirmation?.confirmed || existingForm?.receiverConfirmation?.confirmed
       );
       const effectiveGroups = (hasImmutableConfirmation ? previousGroups : handoverGroups) as any[];
+      const effectiveDirection: StageHandoverTrafficType = hasImmutableConfirmation
+        ? (existingForm?.direction === 'outgoing' ? 'outgoing' : 'incoming')
+        : handoverTrafficType;
+      const effectiveSourceTaskId = hasImmutableConfirmation
+        ? (existingForm?.sourceTaskId ? String(existingForm.sourceTaskId) : null)
+        : computedSourceTaskId;
+      const effectiveDestinationTaskId = hasImmutableConfirmation
+        ? (existingForm?.destinationTaskId ? String(existingForm.destinationTaskId) : null)
+        : computedDestinationTaskId;
+      const effectiveSourceStageName = hasImmutableConfirmation
+        ? String(existingForm?.sourceStageName || computedSourceStageName)
+        : computedSourceStageName;
+      const effectiveSourceShelfId = hasImmutableConfirmation
+        ? (existingForm?.sourceShelfId ? String(existingForm.sourceShelfId) : computedSourceShelfId)
+        : computedSourceShelfId;
       const effectiveTargetShelfId = hasImmutableConfirmation
-        ? (existing?.targetShelfId ? String(existing.targetShelfId) : handoverContext.targetShelfId)
-        : handoverContext.targetShelfId;
-      const previousTotalsByProduct = (
-        handoverContext?.previousTotalsByProduct
-        && typeof handoverContext.previousTotalsByProduct === 'object'
-      )
-        ? handoverContext.previousTotalsByProduct
-        : toGroupTotals(previousGroups as any);
+        ? (existingForm?.targetShelfId ? String(existingForm.targetShelfId) : computedTargetShelfId)
+        : computedTargetShelfId;
+      const previousTotalsByProduct = toGroupTotals(previousGroups as any);
       const nextTotalsByProduct = toGroupTotals(effectiveGroups as any);
 
       const nextWasteByProduct: Record<string, number> = {};
@@ -934,7 +1336,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         );
         const deliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
         const handoverQty = deliveryRows.length > 0
-          ? deliveryRows.reduce((sum: number, row: any) => sum + toNumber(row?.deliveredQty ?? row?.handoverQty), 0)
+          ? deliveryRows.reduce(
+              (sum: number, row: any) =>
+                sum + (Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity))),
+              0
+            )
           : (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
               (sum: number, piece: any) => sum + toNumber(piece?.handoverQty),
               0
@@ -943,22 +1349,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         if (waste > 0) nextWasteByProduct[normalizedProductId] = (nextWasteByProduct[normalizedProductId] || 0) + waste;
       });
 
-      const shortageTotal = Object.values(nextWasteByProduct).reduce((sum, value) => sum + toNumber(value), 0);
-      let registerWaste = false;
-      if (shortageTotal > 0) {
-        registerWaste = await new Promise<boolean>((resolve) => {
-          Modal.confirm({
-            title: 'ثبت ضایعات',
-            content: 'مقدار تحویل شده از مقداری که تحویل گرفته بودید کمتر است، بعنوان ضایعات ثبت شود؟',
-            okText: 'بله',
-            cancelText: 'خیر',
-            onOk: () => resolve(true),
-            onCancel: () => resolve(false),
-          });
-        });
-      }
-
-      const finalWasteByProduct = registerWaste ? nextWasteByProduct : {};
+      const finalWasteByProduct = nextWasteByProduct;
       const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
       const transferLogs: any[] = [];
       const userId = currentUser.id;
@@ -972,7 +1363,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const nextQty = toNumber(nextTotalsByProduct[productId]);
         const delta = nextQty - prevQty;
         if (!delta) return;
-        const sourceShelfId = String(handoverContext.sourceShelfId);
+        const sourceShelfId = String(effectiveSourceShelfId || '');
         const targetShelfId = String(effectiveTargetShelfId);
         if (!sourceShelfId || !targetShelfId || sourceShelfId === targetShelfId) return;
         if (delta > 0) {
@@ -1015,22 +1406,22 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const prevWaste = toNumber(previousWasteByProduct[productId]);
         const nextWaste = toNumber(finalWasteByProduct[productId]);
         const wasteDelta = nextWaste - prevWaste;
-        if (!wasteDelta || !handoverContext.sourceShelfId) return;
+        if (!wasteDelta || !effectiveSourceShelfId) return;
         if (wasteDelta > 0) {
-          deltas.push({ productId, shelfId: String(handoverContext.sourceShelfId), delta: -wasteDelta });
+          deltas.push({ productId, shelfId: String(effectiveSourceShelfId), delta: -wasteDelta });
           transferLogs.push({
             transfer_type: 'waste',
             product_id: productId,
             required_qty: wasteDelta,
             delivered_qty: wasteDelta,
             production_order_id: handoverContext.orderId,
-            from_shelf_id: String(handoverContext.sourceShelfId),
+            from_shelf_id: String(effectiveSourceShelfId),
             to_shelf_id: null,
             sender_id: userId,
             receiver_id: userId,
           });
         } else {
-          deltas.push({ productId, shelfId: String(handoverContext.sourceShelfId), delta: Math.abs(wasteDelta) });
+          deltas.push({ productId, shelfId: String(effectiveSourceShelfId), delta: Math.abs(wasteDelta) });
         }
       });
 
@@ -1048,11 +1439,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       }
 
       const nowIso = new Date().toISOString();
-      const nextGiverConfirmation: StageHandoverConfirm = existing?.giverConfirmation?.confirmed
-        ? existing.giverConfirmation
+      const nextGiverConfirmation: StageHandoverConfirm = existingForm?.giverConfirmation?.confirmed
+        ? existingForm.giverConfirmation
         : { confirmed: false };
-      const nextReceiverConfirmation: StageHandoverConfirm = existing?.receiverConfirmation?.confirmed
-        ? existing.receiverConfirmation
+      const nextReceiverConfirmation: StageHandoverConfirm = existingForm?.receiverConfirmation?.confirmed
+        ? existingForm.receiverConfirmation
         : { confirmed: false };
       if (confirmSide === 'giver') {
         nextGiverConfirmation.confirmed = true;
@@ -1067,17 +1458,50 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         nextReceiverConfirmation.at = nowIso;
       }
 
-      const nextHandover = {
-        sourceTaskId: handoverContext.sourceTaskId,
-        sourceStageName: handoverContext.sourceStageName,
-        sourceShelfId: handoverContext.sourceShelfId,
+      const nextForm: StageHandoverForm = {
+        id: formId,
+        direction: effectiveDirection,
+        sourceTaskId: effectiveSourceTaskId,
+        destinationTaskId: effectiveDestinationTaskId,
+        sourceStageName: effectiveSourceStageName,
+        sourceShelfId: effectiveSourceShelfId,
         targetShelfId: effectiveTargetShelfId,
         giver: handoverContext.giver,
         receiver: handoverContext.receiver,
-        groups: effectiveGroups,
+        groups: effectiveGroups as any,
         wasteByProduct: finalWasteByProduct,
         giverConfirmation: nextGiverConfirmation,
         receiverConfirmation: nextReceiverConfirmation,
+        createdAt: existingForm?.createdAt || nowIso,
+        updatedAt: nowIso,
+      };
+
+      const nextForms = (() => {
+        let replaced = false;
+        const mapped = existingForms.map((form: any) => {
+          if (String(form?.id || '') !== formId) return form;
+          replaced = true;
+          return nextForm;
+        });
+        if (!replaced) mapped.push(nextForm);
+        return mapped;
+      })();
+
+      const nextHandover = {
+        direction: effectiveDirection,
+        sourceTaskId: effectiveSourceTaskId,
+        destinationTaskId: effectiveDestinationTaskId,
+        sourceStageName: effectiveSourceStageName,
+        sourceShelfId: effectiveSourceShelfId,
+        targetShelfId: effectiveTargetShelfId,
+        giver: handoverContext.giver,
+        receiver: handoverContext.receiver,
+        groups: nextForm.groups,
+        wasteByProduct: nextForm.wasteByProduct,
+        giverConfirmation: nextForm.giverConfirmation,
+        receiverConfirmation: nextForm.receiverConfirmation,
+        forms: nextForms,
+        activeFormId: formId,
         updatedAt: nowIso,
       };
 
@@ -1088,7 +1512,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
       const updatePayload: any = {
         recurrence_info: nextRecurrence,
-        production_shelf_id: effectiveTargetShelfId,
+        production_shelf_id: handoverContext.targetShelfId || freshTask?.production_shelf_id || null,
       };
       const { error: updateError } = await supabase
         .from('tasks')
@@ -1106,17 +1530,22 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           ? {
               ...item,
               recurrence_info: nextRecurrence,
-              production_shelf_id: effectiveTargetShelfId,
+              production_shelf_id: handoverContext.targetShelfId || item?.production_shelf_id || null,
             }
           : item
       )));
       setHandoverTask(updatedTask);
+      setHandoverForms(nextForms as StageHandoverForm[]);
+      setActiveHandoverFormId(formId);
       setHandoverContext((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
-          targetShelfId: effectiveTargetShelfId,
-          groups: effectiveGroups as any,
+          sourceTaskId: effectiveSourceTaskId,
+          sourceStageName: effectiveSourceStageName,
+          sourceShelfId: effectiveSourceShelfId,
+          targetShelfId: handoverContext.targetShelfId || effectiveTargetShelfId,
+          groups: prev.groups,
           previousTotalsByProduct: nextTotalsByProduct,
           previousWasteByProduct: finalWasteByProduct,
           giverConfirmation: nextGiverConfirmation,
@@ -1132,13 +1561,20 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       setHandoverLoading(false);
     }
   }, [
+    activeHandoverFormId,
+    buildHandoverFormId,
     currentUser.fullName,
     currentUser.id,
     handoverContext,
+    handoverDestinationStageId,
     handoverGroups,
+    handoverSourceShelfId,
+    handoverSourceStageValue,
     handoverTask,
-    mergeSavedGroups,
+    handoverTrafficType,
+    getLineTaskChain,
     parseRecurrenceInfo,
+    tasks,
     toGroupTotals,
     toNumber,
   ]);
@@ -1156,16 +1592,223 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     if (normalized === 'in_progress' && !isFirstStage) return;
 
     const handover = getHandoverFromTask(currentTask);
-    const isComplete = handover?.giverConfirmation?.confirmed && handover?.receiverConfirmation?.confirmed;
+    const forms = Array.isArray(handover?.forms) ? handover.forms : [];
+    const isComplete = forms.length > 0
+      ? forms.every((form: any) => form?.giverConfirmation?.confirmed && form?.receiverConfirmation?.confirmed)
+      : (handover?.giverConfirmation?.confirmed && handover?.receiverConfirmation?.confirmed);
     if (isComplete) return;
 
     await openTaskHandoverModal(currentTask, allTasks);
   }, [recordId, isBom, tasks, getLineTaskChain, getHandoverFromTask, openTaskHandoverModal]);
 
+  const openHandoverEditorForForm = useCallback((formId: string | null) => {
+    if (!formId) return;
+    const form = handoverForms.find((item) => String(item.id) === String(formId));
+    if (!form) return;
+    const trafficType: StageHandoverTrafficType = form.direction === 'outgoing' ? 'outgoing' : 'incoming';
+    setActiveHandoverFormId(String(form.id));
+    setHandoverGroups(Array.isArray(form.groups) ? form.groups : []);
+    setHandoverContext((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        sourceTaskId: form.sourceTaskId || prev.sourceTaskId,
+        sourceStageName: form.sourceStageName || prev.sourceStageName,
+        sourceShelfId: form.sourceShelfId || prev.sourceShelfId,
+        targetShelfId: form.targetShelfId || prev.targetShelfId,
+        giver: form.giver || prev.giver,
+        receiver: form.receiver || prev.receiver,
+        giverConfirmation: form.giverConfirmation || { confirmed: false },
+        receiverConfirmation: form.receiverConfirmation || { confirmed: false },
+        previousTotalsByProduct: toGroupTotals((form.groups || []) as any),
+        previousWasteByProduct: form.wasteByProduct || {},
+      };
+    });
+    setHandoverTrafficType(trafficType);
+    setHandoverTrafficTypeEditable(!(form?.giverConfirmation?.confirmed || form?.receiverConfirmation?.confirmed));
+    setHandoverSourceStageValue(
+      trafficType === 'incoming'
+        ? (form.sourceTaskId ? String(form.sourceTaskId) : '__central__')
+        : (form.sourceTaskId ? String(form.sourceTaskId) : (handoverTask?.id ? String(handoverTask.id) : null))
+    );
+    setHandoverSourceShelfId(
+      trafficType === 'incoming' && !form.sourceTaskId
+        ? (form.sourceShelfId || null)
+        : null
+    );
+    setHandoverDestinationStageId(form.destinationTaskId ? String(form.destinationTaskId) : null);
+    setHandoverEditorOpen(true);
+    setHandoverFormsModalOpen(false);
+  }, [handoverForms, toGroupTotals, handoverTask?.id]);
+
+  const handleCreateHandoverForm = useCallback(() => {
+    if (!handoverContext) return;
+    const emptyGroups = (handoverContext.groups || []).map((group) =>
+      recalcHandoverGroup({
+        ...group,
+        pieces: (Array.isArray((group as any)?.pieces) ? (group as any).pieces : []).map((piece: any) => ({
+          ...piece,
+          handoverQty: 0,
+        })),
+        deliveryRows: [],
+        totalHandoverQty: 0,
+        isConfirmed: false,
+        collapsed: true,
+      })
+    );
+    const nowIso = new Date().toISOString();
+    const newForm: StageHandoverForm = {
+      id: buildHandoverFormId(),
+      direction: 'incoming',
+      sourceTaskId: handoverContext.sourceTaskId,
+      destinationTaskId: null,
+      sourceStageName: handoverContext.sourceStageName,
+      sourceShelfId: handoverContext.sourceShelfId,
+      targetShelfId: handoverContext.targetShelfId,
+      giver: handoverContext.giver,
+      receiver: handoverContext.receiver,
+      groups: emptyGroups,
+      wasteByProduct: {},
+      giverConfirmation: { confirmed: false },
+      receiverConfirmation: { confirmed: false },
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    setActiveHandoverFormId(newForm.id);
+    setHandoverGroups(newForm.groups);
+    setHandoverContext((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        targetShelfId: newForm.targetShelfId,
+        giverConfirmation: newForm.giverConfirmation,
+        receiverConfirmation: newForm.receiverConfirmation,
+        previousTotalsByProduct: {},
+        previousWasteByProduct: {},
+      };
+    });
+    setHandoverTrafficType('incoming');
+    setHandoverTrafficTypeEditable(true);
+    setHandoverSourceStageValue(handoverContext.sourceTaskId ? String(handoverContext.sourceTaskId) : '__central__');
+    setHandoverSourceShelfId(handoverContext.sourceTaskId ? null : (handoverContext.sourceShelfId || null));
+    setHandoverDestinationStageId(null);
+    setHandoverEditorOpen(true);
+    setHandoverFormsModalOpen(false);
+  }, [buildHandoverFormId, handoverContext, recalcHandoverGroup]);
+
+  const openTaskHandoverModalWithOptions = useCallback(async (task: any, providedTasks?: any[], options?: OpenHandoverOptions) => {
+    if (!task?.id) return;
+    await openTaskHandoverModal(task, providedTasks);
+    if (!options) return;
+    const openFormId = options.openFormId ? String(options.openFormId) : null;
+    const createNewForm = options.createNewForm === true;
+    const sourceOverrideTask = options.sourceOverrideTask || null;
+
+    if (sourceOverrideTask) {
+      const giverId = sourceOverrideTask?.assignee_id ? String(sourceOverrideTask.assignee_id) : null;
+      const giverTypeRaw = String(sourceOverrideTask?.assignee_type || '');
+      const giverType = giverTypeRaw === 'role' ? 'role' : (giverTypeRaw === 'user' ? 'user' : null);
+      const giverLabel = assigneeLabelFromIds(sourceOverrideTask?.assignee_id, sourceOverrideTask?.assignee_type);
+      const giver: StageAssignee = { id: giverId, type: giverType as any, label: giverLabel };
+      const giverShelfId = sourceOverrideTask?.production_shelf_id ? String(sourceOverrideTask.production_shelf_id) : null;
+      const giverStageName = String(sourceOverrideTask?.name || sourceOverrideTask?.title || 'مرحله');
+      if (!giverShelfId) {
+        message.error('برای تحویل خروجی، قفسه مرحله مبدا تعیین نشده است.');
+        return;
+      }
+      setHandoverContext((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          sourceTaskId: sourceOverrideTask?.id ? String(sourceOverrideTask.id) : null,
+          sourceStageName: giverStageName,
+          sourceShelfId: giverShelfId,
+          giver,
+        };
+      });
+    }
+
+    if (createNewForm) {
+      // Create an unsaved draft form (no list insertion). It will be persisted on "ثبت فرم".
+      setTimeout(() => {
+        handleCreateHandoverForm();
+      }, 0);
+      return;
+    }
+
+    if (openFormId) {
+      setTimeout(() => {
+        openHandoverEditorForForm(openFormId);
+      }, 0);
+      return;
+    }
+
+    if (options.openEditor === true) {
+      setHandoverEditorOpen(true);
+      setHandoverFormsModalOpen(false);
+    }
+  }, [assigneeLabelFromIds, handleCreateHandoverForm, openHandoverEditorForForm, openTaskHandoverModal]);
+
+  const handleOpenHandoverForm = useCallback((formId: string, ownerTaskId: string) => {
+    if (!formId || !ownerTaskId) return;
+    if (handoverTask?.id && String(ownerTaskId) === String(handoverTask.id)) {
+      openHandoverEditorForForm(formId);
+      return;
+    }
+    const allTasks = tasks;
+    const targetTask = allTasks.find((task: any) => String(task?.id || '') === String(ownerTaskId));
+    if (!targetTask) {
+      message.error('مرحله مقصد یافت نشد.');
+      return;
+    }
+    void openTaskHandoverModalWithOptions(targetTask, allTasks, { openFormId: formId, openEditor: true });
+  }, [handoverTask, openHandoverEditorForForm, openTaskHandoverModalWithOptions, tasks]);
+
+  const closeHandoverEditor = useCallback(() => {
+    setHandoverEditorOpen(false);
+    setHandoverFormsModalOpen(true);
+    setActiveHandoverFormId((prevId) => {
+      const exists = handoverForms.some((form) => String(form.id) === String(prevId));
+      if (exists) return prevId;
+      const fallback = handoverForms[0]?.id ? String(handoverForms[0].id) : null;
+      if (fallback) {
+        const fallbackForm = handoverForms.find((form) => String(form.id) === fallback) || null;
+        if (fallbackForm) {
+          setHandoverGroups(Array.isArray(fallbackForm.groups) ? fallbackForm.groups : []);
+          setHandoverContext((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              targetShelfId: fallbackForm.targetShelfId || prev.targetShelfId,
+              giverConfirmation: fallbackForm.giverConfirmation || { confirmed: false },
+              receiverConfirmation: fallbackForm.receiverConfirmation || { confirmed: false },
+              previousTotalsByProduct: toGroupTotals((fallbackForm.groups || []) as any),
+              previousWasteByProduct: fallbackForm.wasteByProduct || {},
+            };
+          });
+        }
+      }
+      return fallback;
+    });
+  }, [handoverForms, toGroupTotals]);
+
   const closeHandoverModal = useCallback(() => {
+    setHandoverFormsModalOpen(false);
+    setHandoverEditorOpen(false);
     setHandoverTask(null);
+    setHandoverOrderTitle(null);
     setHandoverContext(null);
     setHandoverGroups([]);
+    setHandoverForms([]);
+    setNextStageTotalsByProduct({});
+    setNextStageSubTotalsByProduct({});
+    setHandoverNextTask(null);
+    setActiveHandoverFormId(null);
+    setHandoverTrafficType('incoming');
+    setHandoverTrafficTypeEditable(true);
+    setHandoverSourceStageValue(null);
+    setHandoverSourceShelfId(null);
+    setHandoverDestinationStageId(null);
   }, []);
 
   const handleConfirmGiver = useCallback(async () => {
@@ -1356,6 +1999,17 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     return option?.label || String(shelfId);
   }, [productionShelfOptions]);
 
+  const centralSourceShelfOptions = useMemo(
+    () =>
+      allShelfOptions
+        .filter((item) => {
+          const warehouseName = String(item.warehouseName || '');
+          return !(warehouseName.includes('تولید') || /production/i.test(warehouseName));
+        })
+        .map(({ label, value }) => ({ label, value })),
+    [allShelfOptions]
+  );
+
   const renderDate = (dateVal: any) => {
     if (!dateVal) return null;
     try {
@@ -1373,6 +2027,265 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       return null;
     }
   };
+
+  const handoverSummaryRows = useMemo<StageHandoverSummaryRow[]>(() => {
+    if (!handoverContext) return [];
+    const productMeta = new Map<string, { name: string; code: string; unit: string; subUnit: string }>();
+    const orderPiecesByProduct: Record<string, any[]> = {};
+    const orderSubTotalsByProduct: Record<string, number> = {};
+    (handoverContext.groups || []).forEach((group) => {
+      const productId = group?.selectedProductId ? String(group.selectedProductId) : '';
+      if (!productId) return;
+      const firstPiece = Array.isArray(group?.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
+      if (!productMeta.has(productId)) {
+        productMeta.set(productId, {
+          name: String(group?.selectedProductName || '-'),
+          code: String(group?.selectedProductCode || ''),
+          unit: String(firstPiece?.mainUnit || ''),
+          subUnit: String(firstPiece?.subUnit || ''),
+        });
+      }
+
+      const orderPieces = Array.isArray(group?.orderPieces) ? group.orderPieces : [];
+      orderPiecesByProduct[productId] = orderPieces.map((piece: any, pieceIndex: number) => {
+        const mainQty = Math.max(0, toNumber(piece?.sourceQty));
+        const subQty = Math.max(0, toNumber(piece?.subQty ?? piece?.subUsage ?? piece?.sub_usage ?? piece?.qty_sub ?? 0));
+        return {
+          key: String(piece?.key || `${productId}_order_${pieceIndex}`),
+          name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
+          length: Math.max(0, toNumber(piece?.length)),
+          width: Math.max(0, toNumber(piece?.width)),
+          quantity: Math.max(0, toNumber(piece?.quantity)),
+          mainUnit: String(piece?.mainUnit || piece?.main_unit || ''),
+          subUnit: String(piece?.subUnit || piece?.sub_unit || ''),
+          mainQty,
+          subQty,
+        };
+      });
+      orderSubTotalsByProduct[productId] = (orderPiecesByProduct[productId] || []).reduce(
+        (sum: number, piece: any) => sum + Math.max(0, toNumber(piece?.subQty)),
+        0
+      );
+    });
+
+    const incomingTotals: Record<string, number> = {};
+    const incomingSubTotals: Record<string, number> = {};
+    handoverForms.forEach((form) => {
+      if (String(form?.direction || 'incoming') === 'outgoing') return;
+      const totals = toGroupTotals((form?.groups || []) as any);
+      const subTotals = toGroupSubTotals((form?.groups || []) as any);
+      Object.entries(totals).forEach(([productId, qty]) => {
+        incomingTotals[productId] = (incomingTotals[productId] || 0) + toNumber(qty);
+      });
+      Object.entries(subTotals).forEach(([productId, qty]) => {
+        incomingSubTotals[productId] = (incomingSubTotals[productId] || 0) + toNumber(qty);
+      });
+    });
+
+    const allProductIds = new Set<string>([
+      ...Object.keys(handoverContext.orderTotalsByProduct || {}),
+      ...Object.keys(orderSubTotalsByProduct || {}),
+      ...Object.keys(incomingTotals || {}),
+      ...Object.keys(incomingSubTotals || {}),
+      ...Object.keys(nextStageTotalsByProduct || {}),
+      ...Object.keys(nextStageSubTotalsByProduct || {}),
+    ]);
+
+    return Array.from(allProductIds).map((productId) => {
+      const meta = productMeta.get(productId) || { name: '-', code: '', unit: '', subUnit: '' };
+      return {
+        orderId: handoverContext.orderId,
+        orderTitle: handoverOrderTitle,
+        productId,
+        productName: meta.name,
+        productCode: meta.code,
+        unit: meta.unit,
+        subUnit: meta.subUnit,
+        sourceQty: toNumber(incomingTotals?.[productId]),
+        sourceSubQty: toNumber(incomingSubTotals?.[productId]),
+        orderQty: toNumber(handoverContext.orderTotalsByProduct?.[productId]),
+        orderSubQty: toNumber(orderSubTotalsByProduct?.[productId]),
+        deliveredQty: toNumber(nextStageTotalsByProduct?.[productId]),
+        deliveredSubQty: toNumber(nextStageSubTotalsByProduct?.[productId]),
+        orderPieces: orderPiecesByProduct[productId] || [],
+      };
+    });
+  }, [
+    handoverContext,
+    handoverForms,
+    handoverOrderTitle,
+    nextStageSubTotalsByProduct,
+    nextStageTotalsByProduct,
+    toGroupSubTotals,
+    toGroupTotals,
+    toNumber,
+  ]);
+
+  const handoverStageOptions = useMemo<StageHandoverTaskOption[]>(() => {
+    if (!handoverTask?.id) return [];
+    const currentTaskId = String(handoverTask.id);
+    const lineId = handoverTask?.production_line_id ? String(handoverTask.production_line_id) : null;
+    const chain = getLineTaskChain(lineId, tasks);
+    return chain
+      .filter((task: any) => String(task?.id || '') && String(task.id) !== currentTaskId)
+      .map((task: any) => {
+        const stageName = String(task?.name || task?.title || 'مرحله');
+        const stageShelfId = task?.production_shelf_id ? String(task.production_shelf_id) : null;
+        const stageShelfLabel = stageShelfId ? getShelfLabel(stageShelfId) : 'قفسه تعیین نشده';
+        const sortOrder = task?.sort_order !== undefined && task?.sort_order !== null
+          ? ` (ترتیب: ${toPersianNumber(task.sort_order)})`
+          : '';
+        return {
+          value: String(task.id),
+          label: `${stageName}${sortOrder}`,
+          shelfId: stageShelfId,
+          shelfLabel: stageShelfLabel,
+        };
+      });
+  }, [getLineTaskChain, getShelfLabel, handoverTask, tasks]);
+
+  const handoverFormRows = useMemo<StageHandoverFormListRow[]>(() => {
+    if (!handoverTask?.id) return [];
+    const currentTaskId = String(handoverTask.id);
+    const currentStageName = String(handoverTask?.name || handoverTask?.title || 'مرحله');
+    const lineId = handoverTask?.production_line_id ? String(handoverTask.production_line_id) : null;
+    const chain = getLineTaskChain(lineId, tasks);
+    const taskById = new Map<string, any>(chain.map((task: any) => [String(task?.id || ''), task]));
+    const buildPiecesByProduct = (groups: any[]): Record<string, any[]> => {
+      const result: Record<string, any[]> = {};
+      (Array.isArray(groups) ? groups : []).forEach((group: any, groupIndex: number) => {
+        const productId = String(group?.selectedProductId || group?.selected_product_id || '').trim();
+        if (!productId) return;
+        const rows = Array.isArray(group?.deliveryRows) && group.deliveryRows.length > 0
+          ? group.deliveryRows
+          : (Array.isArray(group?.pieces) ? group.pieces : []);
+        const mapped = rows.map((row: any, rowIndex: number) => {
+          const length = Math.max(0, toNumber(row?.length));
+          const width = Math.max(0, toNumber(row?.width));
+          const quantity = Math.max(0, toNumber(row?.quantity));
+          const mainQty = row?.deliveredQty !== undefined
+            ? Math.max(0, toNumber(row?.deliveredQty))
+            : (length * width * quantity);
+          const baseSubQty = Math.max(0, toNumber(row?.subQty ?? row?.sub_qty));
+          const subUsage = Math.max(0, toNumber(row?.subUsage ?? row?.sub_usage ?? row?.qty_sub));
+          const subQty = baseSubQty > 0 ? baseSubQty : (subUsage > 0 ? subUsage * (quantity || 1) : 0);
+          return {
+            key: String(row?.key || `${productId}_${groupIndex}_${rowIndex}`),
+            name: String(row?.name || `قطعه ${rowIndex + 1}`),
+            length,
+            width,
+            quantity,
+            mainUnit: String(row?.mainUnit || row?.main_unit || ''),
+            subUnit: String(row?.subUnit || row?.sub_unit || ''),
+            mainQty,
+            subQty,
+          };
+        });
+        result[productId] = [...(result[productId] || []), ...mapped];
+      });
+      return result;
+    };
+
+    const getSubTotalsFromPieces = (piecesByProduct: Record<string, any[]>) => {
+      const totals: Record<string, number> = {};
+      Object.entries(piecesByProduct || {}).forEach(([productId, rows]) => {
+        totals[productId] = (rows || []).reduce(
+          (sum: number, row: any) => sum + Math.max(0, toNumber(row?.subQty ?? 0)),
+          0
+        );
+      });
+      return totals;
+    };
+
+    const incomingRows: StageHandoverFormListRow[] = handoverForms.map((form, index) => {
+      const direction: 'incoming' | 'outgoing' = form.direction === 'outgoing' ? 'outgoing' : 'incoming';
+      const destinationTask = form.destinationTaskId ? taskById.get(String(form.destinationTaskId)) : null;
+      const receiverLabel = direction === 'outgoing'
+        ? (form.receiver?.label || assigneeLabelFromIds(destinationTask?.assignee_id, destinationTask?.assignee_type) || null)
+        : (form.receiver?.label || assigneeLabelFromIds(handoverTask?.assignee_id, handoverTask?.assignee_type) || null);
+      const receiverStage = direction === 'outgoing'
+        ? String(destinationTask?.name || destinationTask?.title || 'مرحله بعدی')
+        : currentStageName;
+      const giverStage = direction === 'outgoing'
+        ? currentStageName
+        : (form.sourceStageName || 'مرحله قبلی');
+      const piecesByProduct = buildPiecesByProduct((form.groups || []) as any);
+      return {
+        id: String(form.id),
+        ownerTaskId: currentTaskId,
+        direction,
+        title: `فرم ${toPersianNumber(index + 1)}`,
+        giverName: form.giver?.label || null,
+        giverStage,
+        receiverName: receiverLabel,
+        receiverStage,
+        createdAt: form.createdAt || null,
+        updatedAt: form.updatedAt || null,
+        giverConfirmed: !!form.giverConfirmation?.confirmed,
+        receiverConfirmed: !!form.receiverConfirmation?.confirmed,
+        totalsByProduct: toGroupTotals((form.groups || []) as any),
+        totalsSubByProduct: getSubTotalsFromPieces(piecesByProduct),
+        piecesByProduct,
+      };
+    });
+
+    const outgoingRows: StageHandoverFormListRow[] = [];
+    chain.forEach((task: any) => {
+      const ownerTaskId = String(task?.id || '');
+      if (!ownerTaskId || ownerTaskId === currentTaskId) return;
+      const ownerStageName = String(task?.name || task?.title || 'مرحله');
+      const ownerReceiverName = assigneeLabelFromIds(task?.assignee_id, task?.assignee_type);
+      const handover = getHandoverFromTask(task);
+      if (!handover) return;
+
+      const rawForms = Array.isArray(handover?.forms) ? handover.forms : [];
+      const legacyForms =
+        rawForms.length === 0 && Array.isArray(handover?.groups)
+          ? [{
+              id: handover?.activeFormId || `handover_legacy_${ownerTaskId}`,
+              sourceTaskId: handover?.sourceTaskId || null,
+              sourceStageName: handover?.sourceStageName || null,
+              giver: handover?.giver || null,
+              receiver: handover?.receiver || null,
+              giverConfirmation: handover?.giverConfirmation || null,
+              receiverConfirmation: handover?.receiverConfirmation || null,
+              createdAt: handover?.updatedAt || null,
+              updatedAt: handover?.updatedAt || null,
+              groups: handover?.groups || [],
+            }]
+          : [];
+
+      const seeded = rawForms.length > 0 ? rawForms : legacyForms;
+      seeded.forEach((form: any, index: number) => {
+        const sourceId = form?.sourceTaskId ? String(form.sourceTaskId) : '';
+        if (sourceId !== currentTaskId) return;
+        const piecesByProduct = buildPiecesByProduct((form?.groups || []) as any);
+        outgoingRows.push({
+          id: String(form?.id || `handover_form_${ownerTaskId}_${index}`),
+          ownerTaskId,
+          direction: 'outgoing',
+          title: `فرم ${toPersianNumber(index + 1)}`,
+          giverName: form?.giver?.label || assigneeLabelFromIds(handoverTask?.assignee_id, handoverTask?.assignee_type) || null,
+          giverStage: String(form?.sourceStageName || currentStageName || ''),
+          receiverName: form?.receiver?.label || ownerReceiverName || null,
+          receiverStage: ownerStageName,
+          createdAt: form?.createdAt || form?.updatedAt || null,
+          updatedAt: form?.updatedAt || form?.createdAt || null,
+          giverConfirmed: !!form?.giverConfirmation?.confirmed,
+          receiverConfirmed: !!form?.receiverConfirmation?.confirmed,
+          totalsByProduct: toGroupTotals((form?.groups || []) as any),
+          totalsSubByProduct: getSubTotalsFromPieces(piecesByProduct),
+          piecesByProduct,
+        });
+      });
+    });
+
+    return [...incomingRows, ...outgoingRows].sort((a, b) => {
+      const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [assigneeLabelFromIds, getHandoverFromTask, getLineTaskChain, handoverForms, handoverTask, tasks, toGroupTotals, toNumber]);
 
   const renderPopupContent = (task: any) => (
     <div className="w-72 p-1 font-['Vazirmatn']">
@@ -1452,7 +2365,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             void openTaskHandoverModal(task);
           }}
         >
-          فرم تحویل کالا
+          فرم‌های تحویل کالا
         </Button>
         <Link to={`/tasks/${task.id}`} target="_blank">
           <Button size="small" type="link" icon={<ArrowRightOutlined />} className="text-xs text-amber-700 hover:text-amber-600">
@@ -2015,21 +2928,66 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         </Form>
       </Modal>
 
+      <TaskHandoverFormsModal
+        open={handoverFormsModalOpen && !!handoverTask && !!handoverContext}
+        loading={handoverLoading}
+        taskName={String(handoverTask?.name || handoverTask?.title || 'مرحله')}
+        orderTitle={handoverOrderTitle}
+        sourceStageName={String(handoverContext?.sourceStageName || 'شروع تولید')}
+        summaries={handoverSummaryRows}
+        forms={handoverFormRows}
+        nextStageName={handoverNextTask?.name || handoverNextTask?.title || null}
+        selectedFormId={activeHandoverFormId}
+        onSelectForm={(formId) => setActiveHandoverFormId(formId)}
+        onCreateForm={handleCreateHandoverForm}
+        onOpenForm={handleOpenHandoverForm}
+        onClose={closeHandoverModal}
+      />
+
       <TaskHandoverModal
-        open={!!handoverTask && !!handoverContext}
+        open={handoverEditorOpen && !!handoverTask && !!handoverContext}
         loading={handoverLoading}
         locked={!!(handoverContext?.giverConfirmation?.confirmed || handoverContext?.receiverConfirmation?.confirmed)}
         taskName={String(handoverTask?.name || handoverTask?.title || 'مرحله')}
         sourceStageName={String(handoverContext?.sourceStageName || 'شروع تولید')}
+        nextStageName={handoverNextTask?.name || handoverNextTask?.title || null}
         giverName={String(handoverContext?.giver?.label || 'تعیین نشده')}
         receiverName={String(handoverContext?.receiver?.label || 'تعیین نشده')}
+        trafficType={handoverTrafficType}
+        trafficTypeEditable={handoverTrafficTypeEditable}
+        sourceStageValue={handoverSourceStageValue}
+        sourceShelfId={handoverSourceShelfId}
+        destinationStageId={handoverDestinationStageId}
+        stageOptions={handoverStageOptions}
+        centralSourceShelfOptions={centralSourceShelfOptions}
         groups={handoverGroups}
         shelfOptions={productionShelfOptions}
         targetShelfId={handoverContext?.targetShelfId || null}
         giverConfirmation={handoverContext?.giverConfirmation || { confirmed: false }}
         receiverConfirmation={handoverContext?.receiverConfirmation || { confirmed: false }}
-        onCancel={closeHandoverModal}
+        onCancel={closeHandoverEditor}
         onSave={() => { void saveHandover(); }}
+        onTrafficTypeChange={(nextType) => {
+          setHandoverTrafficType(nextType);
+          if (nextType === 'incoming') {
+            setHandoverDestinationStageId(null);
+            setHandoverSourceStageValue((prev) => prev || '__central__');
+          } else {
+            setHandoverSourceStageValue((prev) => prev || (handoverTask?.id ? String(handoverTask.id) : null));
+            setHandoverSourceShelfId(null);
+            if (!handoverDestinationStageId && handoverNextTask?.id) {
+              setHandoverDestinationStageId(String(handoverNextTask.id));
+            }
+          }
+        }}
+        onSourceStageChange={(value) => {
+          setHandoverSourceStageValue(value);
+          if (value && value !== '__central__') {
+            setHandoverSourceShelfId(null);
+          }
+        }}
+        onSourceShelfChange={(shelfId) => setHandoverSourceShelfId(shelfId)}
+        onDestinationStageChange={(taskId) => setHandoverDestinationStageId(taskId)}
         onToggleGroup={setHandoverGroupCollapsed}
         onConfirmGroup={confirmHandoverGroup}
         onDeliveryRowAdd={addHandoverDeliveryRow}

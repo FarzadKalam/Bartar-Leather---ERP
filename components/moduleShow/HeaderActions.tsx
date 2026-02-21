@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, Tooltip, Popover, QRCode } from 'antd';
-import { ArrowRightOutlined, PrinterOutlined, ShareAltOutlined, QrcodeOutlined, EditOutlined, DeleteOutlined, AppstoreOutlined, PlusOutlined, StarOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ArrowRightOutlined, PrinterOutlined, ShareAltOutlined, QrcodeOutlined, EditOutlined, DeleteOutlined, AppstoreOutlined, PlusOutlined, StarOutlined, ReloadOutlined, CopyOutlined } from '@ant-design/icons';
 
 interface HeaderActionsProps {
   moduleTitle: string;
@@ -11,6 +11,7 @@ interface HeaderActionsProps {
   onModule: () => void;
   onPrint: () => void;
   onRefresh?: () => void;
+  onCopy?: () => void;
   onEdit: () => void;
   onDelete: () => void;
   refreshLoading?: boolean;
@@ -24,6 +25,7 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
   onBack,
   onPrint,
   onRefresh,
+  onCopy,
   onEdit,
   onDelete,
   refreshLoading = false,
@@ -82,6 +84,16 @@ const HeaderActions: React.FC<HeaderActionsProps> = ({
             className="hover:text-leather-600 hover:border-leather-600"
           />
         </Popover>
+        {onCopy && (
+          <Tooltip title="کپی رکورد">
+            <Button
+              icon={<CopyOutlined />}
+              onClick={onCopy}
+              size="middle"
+              className="hover:text-leather-600 hover:border-leather-600"
+            />
+          </Tooltip>
+        )}
         {canEdit && (
           <Tooltip title="ویرایش">
             <Button

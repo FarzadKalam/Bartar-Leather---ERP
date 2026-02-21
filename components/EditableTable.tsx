@@ -19,6 +19,36 @@ import { MODULES } from '../moduleRegistry';
 
 const { Text } = Typography;
 
+const normalizeDigitsToEnglish = (raw: any): string => {
+  if (raw === null || raw === undefined) return '';
+  return String(raw)
+    .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
+    .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660));
+};
+
+const normalizeNumericString = (raw: any): string => {
+  if (raw === null || raw === undefined) return '';
+  const englishDigits = normalizeDigitsToEnglish(raw)
+    .replace(/[\u066C\u060C]/g, ',')
+    .replace(/\s+/g, '')
+    .replace(/,/g, '');
+  const sign = englishDigits.startsWith('-') ? '-' : '';
+  const unsigned = englishDigits.replace(/-/g, '');
+  const cleaned = unsigned.replace(/[^0-9.]/g, '');
+  const parts = cleaned.split('.');
+  const integerPart = parts[0] ?? '';
+  const decimalPart = parts.slice(1).join('');
+  const hasDot = cleaned.includes('.');
+  return `${sign}${integerPart}${hasDot ? `.${decimalPart}` : ''}`;
+};
+
+const toSafeNumber = (raw: any): number => {
+  const normalized = normalizeNumericString(raw);
+  if (!normalized || normalized === '-' || normalized === '.' || normalized === '-.') return 0;
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 interface EditableTableProps {
   block: any;
   initialData: any[];
@@ -404,6 +434,16 @@ const EditableTable: React.FC<EditableTableProps> = ({
       }
     }
 
+    if (isAnyInvoiceItems && ['quantity', 'main_unit', 'sub_unit'].includes(key)) {
+      const qtyMain = toSafeNumber(newData[index]?.quantity);
+      const mainUnit = String(newData[index]?.main_unit || '');
+      const subUnit = String(newData[index]?.sub_unit || '');
+      const converted = mainUnit && subUnit
+        ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+        : 0;
+      newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
+    }
+
     if (key === 'selected_product_id' && !value) {
       newData[index]['selected_shelf_id'] = null;
       newData[index]['selected_product_name'] = null;
@@ -417,7 +457,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       }
     }
 
-    if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'length', 'width', 'main_quantity'].includes(key)) {
+    if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'length', 'width', 'main_quantity', 'sub_quantity'].includes(key)) {
       newData[index]['total_price'] = calculateRow(newData[index], block.rowCalculationType);
     }
 
@@ -494,10 +534,19 @@ const EditableTable: React.FC<EditableTableProps> = ({
             if (col.key === 'buy_price' && record['buy_price']) {
               currentRow[col.key] = record['buy_price'];
             }
-            if (isAnyInvoiceItems && col.key === 'unit' && record['main_unit']) {
-              currentRow[col.key] = record['main_unit'];
-            }
           });
+
+          if (isAnyInvoiceItems && key === 'product_id') {
+            currentRow.main_unit = record?.main_unit || currentRow.main_unit || null;
+            currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || null;
+            const qtyMain = toSafeNumber(currentRow?.quantity);
+            const mainUnit = String(currentRow?.main_unit || '');
+            const subUnit = String(currentRow?.sub_unit || '');
+            const converted = mainUnit && subUnit
+              ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+              : 0;
+            currentRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
+          }
 
           if (isInvoiceItems && key === 'product_id') {
             currentRow.source_shelf_id = null;
@@ -589,15 +638,55 @@ const EditableTable: React.FC<EditableTableProps> = ({
     if (mode === 'local' && onChange) onChange(newData);
   };
 
+  const normalizeRowForEdit = (row: any) => {
+    const nextRow = { ...row };
+    (block.tableColumns || []).forEach((col: any) => {
+      const key = String(col?.key || '');
+      if (!key || !(key in nextRow)) return;
+      const value = nextRow[key];
+      if (value === null || value === undefined) return;
+
+      const isNumeric = [
+        FieldType.NUMBER,
+        FieldType.PRICE,
+        FieldType.PERCENTAGE,
+        FieldType.PERCENTAGE_OR_AMOUNT,
+        FieldType.STOCK,
+      ].includes(col?.type);
+
+      if (isNumeric) {
+        const normalized = normalizeNumericString(value);
+        nextRow[key] = normalized === '' ? null : normalized;
+        return;
+      }
+
+      if ([FieldType.SELECT, FieldType.STATUS, FieldType.RELATION].includes(col?.type)) {
+        nextRow[key] = String(value);
+      }
+    });
+
+    if (isAnyInvoiceItems) {
+      const qtyMain = toSafeNumber(nextRow?.quantity);
+      const mainUnit = String(nextRow?.main_unit || '');
+      const subUnit = String(nextRow?.sub_unit || '');
+      if (mainUnit && subUnit) {
+        const converted = convertArea(qtyMain, mainUnit as any, subUnit as any);
+        nextRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
+      }
+    }
+
+    return nextRow;
+  };
+
   const startEdit = () => {
     if (isReadOnly) return;
     setUserToggledCollapse(true);
     setIsCollapsed(false);
     setIsEditing(true);
     const preparedData = data.map((row, i) => ({
-      ...row,
+      ...normalizeRowForEdit(row),
       key: row.key || row.id || `edit_${i}`,
-      total_price: calculateRow(row, block.rowCalculationType),
+      total_price: calculateRow(normalizeRowForEdit(row), block.rowCalculationType),
     }));
     const withDefaults = preparedData.map((row: any) => {
       const nextRow = { ...row };

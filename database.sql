@@ -265,6 +265,10 @@ ADD COLUMN IF NOT EXISTS production_started_at timestamptz,
 ADD COLUMN IF NOT EXISTS production_stopped_at timestamptz,
 ADD COLUMN IF NOT EXISTS production_completed_at timestamptz;
 
+ALTER TABLE IF EXISTS public.production_orders
+ADD COLUMN IF NOT EXISTS color text,
+ADD COLUMN IF NOT EXISTS auto_name_enabled boolean DEFAULT true;
+
 -- اضافه کردن فیلد تصویر به محصولات و مشتریان
 ALTER TABLE public.products ADD COLUMN image_url text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS brand_name text;
@@ -334,6 +338,7 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS lining_dims text;
 -- فیلدهای خرجکار و یراق
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS acc_material text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_type text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_material text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_size text;
 
 -- فیلد برای ذخیره اقلام جدول (BOM) به صورت JSON
@@ -1336,6 +1341,55 @@ ON public.purchase_invoices
 FOR INSERT
 WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('purchase_invoices', 'edit'));
 
+-- production_group_orders
+CREATE TABLE IF NOT EXISTS public.production_group_orders (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  system_code text,
+  status text DEFAULT 'pending',
+  production_order_ids jsonb DEFAULT '[]'::jsonb,
+  started_at timestamptz,
+  completed_at timestamptz,
+  created_by uuid REFERENCES public.profiles(id),
+  updated_by uuid REFERENCES public.profiles(id),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.production_group_orders ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Role view production_group_orders" ON public.production_group_orders;
+DROP POLICY IF EXISTS "Role edit production_group_orders" ON public.production_group_orders;
+DROP POLICY IF EXISTS "Role delete production_group_orders" ON public.production_group_orders;
+DROP POLICY IF EXISTS "Role create production_group_orders" ON public.production_group_orders;
+
+CREATE POLICY "Role view production_group_orders"
+ON public.production_group_orders
+FOR SELECT
+USING (public.has_module_permission('production_group_orders', 'view'));
+
+CREATE POLICY "Role edit production_group_orders"
+ON public.production_group_orders
+FOR UPDATE
+USING (public.has_module_permission('production_group_orders', 'edit'))
+WITH CHECK (public.has_module_permission('production_group_orders', 'edit'));
+
+CREATE POLICY "Role delete production_group_orders"
+ON public.production_group_orders
+FOR DELETE
+USING (public.has_module_permission('production_group_orders', 'delete'));
+
+CREATE POLICY "Role create production_group_orders"
+ON public.production_group_orders
+FOR INSERT
+WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('production_group_orders', 'edit'));
+
+ALTER TABLE public.production_orders
+ADD COLUMN IF NOT EXISTS production_group_order_id uuid REFERENCES public.production_group_orders(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_production_orders_group_order_id
+ON public.production_orders(production_group_order_id);
+
 -- workflows
 CREATE TABLE IF NOT EXISTS public.workflows (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -1384,5 +1438,167 @@ CREATE POLICY "Role create workflows"
 ON public.workflows
 FOR INSERT
 WITH CHECK (auth.role() = 'authenticated' AND public.has_module_permission('workflows', 'edit'));
+
+-- ==========================================================
+-- Migration: ensure required columns for production transfers/group orders
+-- Date: 2026-02-20
+-- ==========================================================
+
+ALTER TABLE IF EXISTS public.stock_transfers
+  ADD COLUMN IF NOT EXISTS assignee_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user',
+  ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS transfer_datetime timestamptz,
+  ADD COLUMN IF NOT EXISTS reference_id uuid,
+  ADD COLUMN IF NOT EXISTS reference_type text,
+  ADD COLUMN IF NOT EXISTS notes text,
+  ADD COLUMN IF NOT EXISTS stage_task_id uuid REFERENCES public.tasks(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS source_task_id uuid REFERENCES public.tasks(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS destination_task_id uuid REFERENCES public.tasks(id) ON DELETE SET NULL;
+
+UPDATE public.stock_transfers
+SET assignee_type = 'user'
+WHERE assignee_type IS NULL OR btrim(assignee_type) = '';
+
+ALTER TABLE IF EXISTS public.stock_transfers
+  ALTER COLUMN assignee_type SET DEFAULT 'user';
+
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_assignee_id
+  ON public.stock_transfers(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_stage_task_id
+  ON public.stock_transfers(stage_task_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_source_task_id
+  ON public.stock_transfers(source_task_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_destination_task_id
+  ON public.stock_transfers(destination_task_id);
+
+DROP TRIGGER IF EXISTS update_stock_transfers_modtime ON public.stock_transfers;
+CREATE TRIGGER update_stock_transfers_modtime
+BEFORE UPDATE ON public.stock_transfers
+FOR EACH ROW
+EXECUTE PROCEDURE public.update_updated_at_column();
+
+ALTER TABLE IF EXISTS public.production_group_orders
+  ADD COLUMN IF NOT EXISTS assignee_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user',
+  ADD COLUMN IF NOT EXISTS production_shelf_id uuid REFERENCES public.shelves(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS production_moves jsonb DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS production_started_at timestamptz,
+  ADD COLUMN IF NOT EXISTS production_stopped_at timestamptz,
+  ADD COLUMN IF NOT EXISTS production_completed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+UPDATE public.production_group_orders
+SET assignee_type = 'user'
+WHERE assignee_type IS NULL OR btrim(assignee_type) = '';
+
+ALTER TABLE IF EXISTS public.production_group_orders
+  ALTER COLUMN assignee_type SET DEFAULT 'user';
+
+CREATE INDEX IF NOT EXISTS idx_production_group_orders_assignee_id
+  ON public.production_group_orders(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_production_group_orders_status
+  ON public.production_group_orders(status);
+
+DROP TRIGGER IF EXISTS update_production_group_orders_modtime ON public.production_group_orders;
+CREATE TRIGGER update_production_group_orders_modtime
+BEFORE UPDATE ON public.production_group_orders
+FOR EACH ROW
+EXECUTE PROCEDURE public.update_updated_at_column();
+
+ALTER TABLE IF EXISTS public.production_orders
+  ADD COLUMN IF NOT EXISTS assignee_id uuid,
+  ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user',
+  ADD COLUMN IF NOT EXISTS production_started_at timestamptz,
+  ADD COLUMN IF NOT EXISTS production_stopped_at timestamptz,
+  ADD COLUMN IF NOT EXISTS production_completed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS production_group_order_id uuid REFERENCES public.production_group_orders(id) ON DELETE SET NULL;
+
+UPDATE public.production_orders
+SET assignee_type = 'user'
+WHERE assignee_type IS NULL OR btrim(assignee_type) = '';
+
+ALTER TABLE IF EXISTS public.production_orders
+  ALTER COLUMN assignee_type SET DEFAULT 'user';
+
+ALTER TABLE IF EXISTS public.tasks
+  ADD COLUMN IF NOT EXISTS assignee_id uuid,
+  ADD COLUMN IF NOT EXISTS assignee_type text DEFAULT 'user',
+  ADD COLUMN IF NOT EXISTS production_line_id uuid REFERENCES public.production_lines(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS production_shelf_id uuid REFERENCES public.shelves(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS produced_qty numeric DEFAULT 0;
+
+UPDATE public.tasks
+SET assignee_type = 'user'
+WHERE assignee_type IS NULL OR btrim(assignee_type) = '';
+
+ALTER TABLE IF EXISTS public.tasks
+  ALTER COLUMN assignee_type SET DEFAULT 'user';
+
+-- ==========================================================
+-- Compatibility view: product -> production order links
+-- Used by products related tab (joinTable = product_lines)
+-- ==========================================================
+CREATE OR REPLACE VIEW public.product_lines
+WITH (security_invoker = true) AS
+WITH raw_groups AS (
+  SELECT
+    po.id AS production_order_id,
+    grp AS group_item
+  FROM public.production_orders po
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(po.grid_materials) = 'array' THEN po.grid_materials
+      ELSE '[]'::jsonb
+    END
+  ) AS grp
+),
+group_products AS (
+  SELECT
+    production_order_id,
+    CASE
+      WHEN (group_item ->> 'selectedProductId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        THEN (group_item ->> 'selectedProductId')::uuid
+      WHEN (group_item ->> 'selected_product_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        THEN (group_item ->> 'selected_product_id')::uuid
+      WHEN (group_item ->> 'product_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        THEN (group_item ->> 'product_id')::uuid
+      ELSE NULL
+    END AS product_id
+  FROM raw_groups
+),
+piece_products AS (
+  SELECT
+    rg.production_order_id,
+    CASE
+      WHEN (piece ->> 'selectedProductId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        THEN (piece ->> 'selectedProductId')::uuid
+      WHEN (piece ->> 'selected_product_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        THEN (piece ->> 'selected_product_id')::uuid
+      WHEN (piece ->> 'product_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        THEN (piece ->> 'product_id')::uuid
+      ELSE NULL
+    END AS product_id
+  FROM raw_groups rg
+  CROSS JOIN LATERAL jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(rg.group_item -> 'pieces') = 'array' THEN rg.group_item -> 'pieces'
+      ELSE '[]'::jsonb
+    END
+  ) AS piece
+)
+SELECT DISTINCT product_id, production_order_id
+FROM (
+  SELECT product_id, production_order_id FROM group_products
+  UNION ALL
+  SELECT product_id, production_order_id FROM piece_products
+) AS links
+WHERE product_id IS NOT NULL;
+
+GRANT SELECT ON public.product_lines TO authenticated;
+GRANT SELECT ON public.product_lines TO anon;
 
 COMMIT;

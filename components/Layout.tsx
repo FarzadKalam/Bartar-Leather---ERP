@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Layout as AntLayout, Menu, Button, Avatar, Dropdown, message, Modal, Input, Spin } from 'antd';
 import type { InputRef } from 'antd';
 import { 
@@ -21,7 +21,7 @@ import {
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { supabase } from '../supabaseClient'; // 👈 ایمپورت سوپابیس
+import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import QrScanPopover from './QrScanPopover';
 import NotificationsPopover from './NotificationsPopover';
@@ -39,7 +39,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
   const [collapsed, setCollapsed] = useState(true);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [currentUser, setCurrentUser] = useState<any>(null); // برای نمایش آواتار واقعی
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentUserProfile, setCurrentUserProfile] = useState<any>(null);
   const [breadcrumb, setBreadcrumb] = useState<{ moduleTitle?: string; moduleId?: string; recordName?: string } | null>(null);
   const [globalSearch, setGlobalSearch] = useState('');
@@ -122,7 +122,8 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
       label: 'انبار',
       children: [
         { key: '/warehouses', label: 'انبارها' },
-        { key: '/shelves', label: 'قفسه‌ها' }
+        { key: '/shelves', label: 'قفسه‌ها' },
+        { key: '/stock_transfers', label: 'تردد کالاها' }
       ]
     },
     { 
@@ -224,7 +225,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
         key: 'profile',
         label: 'پروفایل کاربری',
         icon: <UserOutlined />,
-        onClick: () => navigate('/profile'), // هدایت به پروفایل
+        onClick: () => navigate('/profile'),
       },
       { type: 'divider' as const },
       { 
@@ -232,7 +233,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
         label: 'خروج', 
         icon: <LogoutOutlined />, 
         danger: true,
-        onClick: handleLogout // اتصال تابع خروج
+        onClick: handleLogout
       },
     ],
   };
@@ -336,14 +337,14 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
           <div className="relative flex items-center gap-4" ref={searchBoxRef}>          
             <div className="flex items-center bg-gray-100 dark:bg-[#1a1a1a] rounded-xl px-3 py-1.5 border border-gray-200 dark:border-gray-800 w-48 sm:w-72 transition-colors">
               <SearchOutlined className="text-gray-400" />
-              <Input
-                ref={searchRef}
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="جستجو در همه جا..."
-                className="bg-transparent border-none outline-none text-xs text-gray-700 dark:text-gray-200 w-full mr-2 placeholder-gray-400"
-                bordered={false}
-              />
+                <Input
+                  ref={searchRef}
+                  value={globalSearch}
+                  onChange={(e) => setGlobalSearch(e.target.value)}
+                  placeholder="جستجو در همه جا..."
+                  className="bg-transparent border-none outline-none text-xs text-gray-700 dark:text-gray-200 w-full mr-2 placeholder-gray-400"
+                  bordered={false}
+                />
             </div>
 
             {(searchLoading || searchResults.length > 0) && globalSearch.trim() && (
@@ -401,10 +402,8 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
             />
             <div className="w-[1px] h-6 bg-gray-300 dark:bg-gray-700 mx-1"></div>
             <NotificationsPopover isMobile={isMobile} />
-            {/* اصلاح: قرار دادن آواتار در div برای رفع وارنینگ */}
             <Dropdown menu={userMenu} placement="bottomLeft" trigger={['click']}>
                 <div className="cursor-pointer transition-transform hover:scale-105">
-                   {/* استفاده از متادیتای کاربر لاگین شده برای آواتار */}
                    <Avatar 
                      size="small" 
                      src={currentUserProfile?.avatar_url || currentUser?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=a1"} 
@@ -475,3 +474,4 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
 };
 
 export default Layout;
+

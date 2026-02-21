@@ -24,6 +24,8 @@ import { ModuleCreate } from "./pages/ModuleCreate";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import InquiryForm from "./pages/InquiryForm";
+import ProductionGroupOrdersList from "./pages/ProductionGroupOrdersList";
+import ProductionGroupOrderWizard from "./pages/ProductionGroupOrderWizard";
 
 const APP_TITLE = "مهربانو اتوماسیون";
 
@@ -150,6 +152,9 @@ function App() {
               >
                 <Route index element={<Dashboard />} />
                 <Route path="/profile" element={<ProfilePage />} />
+                <Route path="/production_group_orders" element={<ProductionGroupOrdersList />} />
+                <Route path="/production_group_orders/create" element={<ProductionGroupOrderWizard />} />
+                <Route path="/production_group_orders/:id" element={<ProductionGroupOrderWizard />} />
                 
                 <Route path="/:moduleId">
                   <Route index element={<ModuleListRefine />} />

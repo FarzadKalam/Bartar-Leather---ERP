@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, InputNumber, Modal, Select, Table, Tabs } from 'antd';
+import { Button, Input, InputNumber, Modal, Select, Table } from 'antd';
 import { CheckOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
@@ -62,14 +62,31 @@ export type StageHandoverConfirm = {
   at?: string | null;
 };
 
+export type StageHandoverTrafficType = 'incoming' | 'outgoing';
+
+export type StageHandoverTaskOption = {
+  value: string;
+  label: string;
+  shelfId?: string | null;
+  shelfLabel?: string | null;
+};
+
 interface TaskHandoverModalProps {
   open: boolean;
   loading: boolean;
   locked?: boolean;
   taskName: string;
   sourceStageName: string;
+  nextStageName?: string | null;
   giverName: string;
   receiverName: string;
+  trafficType: StageHandoverTrafficType;
+  trafficTypeEditable: boolean;
+  sourceStageValue: string | null; // "__central__" for central warehouse
+  sourceShelfId: string | null;
+  destinationStageId: string | null;
+  stageOptions: StageHandoverTaskOption[];
+  centralSourceShelfOptions: { label: string; value: string }[];
   groups: StageHandoverGroup[];
   shelfOptions: { label: string; value: string }[];
   targetShelfId: string | null;
@@ -77,6 +94,10 @@ interface TaskHandoverModalProps {
   receiverConfirmation: StageHandoverConfirm;
   onCancel: () => void;
   onSave: () => void;
+  onTrafficTypeChange: (nextType: StageHandoverTrafficType) => void;
+  onSourceStageChange: (value: string | null) => void;
+  onSourceShelfChange: (shelfId: string | null) => void;
+  onDestinationStageChange: (taskId: string | null) => void;
   onToggleGroup: (groupIndex: number, collapsed: boolean) => void;
   onConfirmGroup: (groupIndex: number) => void;
   onDeliveryRowAdd: (groupIndex: number) => void;
@@ -133,9 +154,11 @@ const toQty = (value: number) => {
   return formatGroupedInput(rounded);
 };
 
-const toNumber = (value: any) => {
-  const parsed = parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+const calcDeliveredQty = (row?: Partial<StageHandoverDeliveryRow> | null) => {
+  const length = parseNumberInput((row as any)?.length);
+  const width = parseNumberInput((row as any)?.width);
+  const quantity = parseNumberInput((row as any)?.quantity);
+  return Math.max(0, length * width * quantity);
 };
 
 const getUnitSummaryLabel = (units: Array<string | null | undefined>) => {
@@ -174,8 +197,16 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   locked = false,
   taskName,
   sourceStageName,
+  nextStageName = null,
   giverName,
   receiverName,
+  trafficType,
+  trafficTypeEditable,
+  sourceStageValue,
+  sourceShelfId,
+  destinationStageId,
+  stageOptions,
+  centralSourceShelfOptions,
   groups,
   shelfOptions,
   targetShelfId,
@@ -183,6 +214,10 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   receiverConfirmation,
   onCancel,
   onSave,
+  onTrafficTypeChange,
+  onSourceStageChange,
+  onSourceShelfChange,
+  onDestinationStageChange,
   onToggleGroup,
   onConfirmGroup,
   onDeliveryRowAdd,
@@ -195,7 +230,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   onConfirmReceiver,
 }) => {
   const [selectedRowKeysByGroup, setSelectedRowKeysByGroup] = useState<Record<string, string[]>>({});
-  const [sourceTabByGroup, setSourceTabByGroup] = useState<Record<string, 'previous' | 'order'>>({});
   const [transferDialog, setTransferDialog] = useState<{
     sourceGroupIndex: number;
     rowKeys: string[];
@@ -220,22 +254,30 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   }, [groups]);
 
   useEffect(() => {
-    setSourceTabByGroup((prev) => {
-      const next: Record<string, 'previous' | 'order'> = {};
-      groups.forEach((group) => {
-        next[group.key] = prev[group.key] || 'previous';
-      });
-      return next;
-    });
-  }, [groups]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') return;
     const onResize = () => setIsMobile(window.innerWidth < 768);
     onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  const stageOptionMap = useMemo(() => {
+    const map = new Map<string, StageHandoverTaskOption>();
+    (stageOptions || []).forEach((option) => {
+      map.set(String(option.value), option);
+    });
+    return map;
+  }, [stageOptions]);
+
+  const sourceStageOption = useMemo(() => {
+    if (!sourceStageValue || sourceStageValue === '__central__') return null;
+    return stageOptionMap.get(String(sourceStageValue)) || null;
+  }, [sourceStageValue, stageOptionMap]);
+
+  const destinationStageOption = useMemo(() => {
+    if (!destinationStageId) return null;
+    return stageOptionMap.get(String(destinationStageId)) || null;
+  }, [destinationStageId, stageOptionMap]);
 
   const transferTargets = useMemo(
     () => groups.map((group, index) => ({
@@ -293,8 +335,89 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
       ]}
     >
       <div className="space-y-4">
-        <div className="text-sm text-gray-700">
-          مقادیر تحویل از مرحله "{sourceStageName}" به مرحله "{taskName}" را ثبت کنید.
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <div className="text-xs text-gray-500 mb-1">نوع تردد کالا</div>
+              <Select
+                value={trafficType}
+                onChange={(value) => onTrafficTypeChange(value as StageHandoverTrafficType)}
+                disabled={!trafficTypeEditable || locked}
+                options={[
+                  { value: 'incoming', label: `ورود به مرحله "${taskName}"` },
+                  { value: 'outgoing', label: `خروج از مرحله "${taskName}"` },
+                ]}
+                className="w-full"
+                getPopupContainer={() => document.body}
+              />
+            </div>
+
+            {trafficType === 'incoming' ? (
+              <>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">ورود از مرحله</div>
+                  <Select
+                    value={sourceStageValue || '__central__'}
+                    onChange={(value) => onSourceStageChange(value || null)}
+                    disabled={!trafficTypeEditable || locked}
+                    options={[
+                      { value: '__central__', label: 'انبار مرکزی' },
+                      ...(stageOptions || []).map((option) => ({ value: option.value, label: option.label })),
+                    ]}
+                    className="w-full"
+                    getPopupContainer={() => document.body}
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">قفسه برداشت</div>
+                  {sourceStageValue && sourceStageValue !== '__central__' ? (
+                    <Input
+                      value={sourceStageOption?.shelfLabel || 'قفسه تعیین نشده'}
+                      readOnly
+                    />
+                  ) : (
+                    <Select
+                      value={sourceShelfId}
+                      onChange={(value) => onSourceShelfChange(value || null)}
+                      options={centralSourceShelfOptions}
+                      className="w-full"
+                      getPopupContainer={() => document.body}
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder="انتخاب قفسه از انبار مرکزی"
+                      disabled={!trafficTypeEditable || locked}
+                    />
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">تحویل به مرحله</div>
+                  <Select
+                    value={destinationStageId}
+                    onChange={(value) => onDestinationStageChange(value || null)}
+                    disabled={!trafficTypeEditable || locked}
+                    options={(stageOptions || []).map((option) => ({ value: option.value, label: option.label }))}
+                    className="w-full"
+                    getPopupContainer={() => document.body}
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="انتخاب مرحله مقصد"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">قفسه تحویل مقصد</div>
+                  <Input
+                    value={destinationStageOption?.shelfLabel || 'قفسه مقصد تعیین نشده (قابل ثبت توسط تحویل‌گیرنده)'}
+                    readOnly
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {groups.length === 0 ? (
@@ -304,13 +427,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
         ) : (
           groups.map((group, groupIndex) => {
             const selectedRowKeys = getSelectedRowKeys(group.key);
-            const activeSourceTab = sourceTabByGroup[group.key] || 'previous';
-            const sourceRows = activeSourceTab === 'order'
-              ? ((group.orderPieces && group.orderPieces.length > 0) ? group.orderPieces : group.pieces)
-              : (group.pieces || []);
-            const sourceTotal = sourceRows.reduce((sum, row) => sum + toNumber(row.sourceQty), 0);
-            const sourceUnitLabel = getUnitSummaryLabel((sourceRows || []).map((piece) => piece.mainUnit));
-            const deliveryUnitLabel = getUnitSummaryLabel((group.deliveryRows || []).map((row) => row.mainUnit)) || sourceUnitLabel;
+            const deliveryUnitLabel = getUnitSummaryLabel((group.deliveryRows || []).map((row) => row.mainUnit));
 
             return (
               <div key={group.key} className="rounded-xl border border-gray-200">
@@ -346,98 +463,11 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
 
                 {!group.collapsed && (
                   <div className="p-3">
-                    <Tabs
-                      size="small"
-                      activeKey={activeSourceTab}
-                      onChange={(key) => setSourceTabByGroup((prev) => ({ ...prev, [group.key]: key as 'previous' | 'order' }))}
-                      items={[
-                        { key: 'previous', label: 'مقدار تحویل شده از مرحله قبلی' },
-                        { key: 'order', label: 'مقدار ثبت شده در سفارش تولید' },
-                      ]}
-                    />
-                    <Table
-                      size="small"
-                      pagination={false}
-                      dataSource={sourceRows}
-                      rowKey="key"
-                      scroll={{ x: true }}
-                      columns={[
-                        {
-                          title: 'نام قطعه',
-                          dataIndex: 'name',
-                          key: 'name',
-                          width: 170,
-                          render: (value: string) => <span className="font-medium">{value || '-'}</span>,
-                        },
-                        {
-                          title: 'طول',
-                          dataIndex: 'length',
-                          key: 'length',
-                          width: 70,
-                          render: (value: number) => toQty(value),
-                        },
-                        {
-                          title: 'عرض',
-                          dataIndex: 'width',
-                          key: 'width',
-                          width: 70,
-                          render: (value: number) => toQty(value),
-                        },
-                        {
-                          title: 'تعداد در یک تولید',
-                          dataIndex: 'quantity',
-                          key: 'quantity',
-                          width: 100,
-                          render: (value: number) => toQty(value),
-                        },
-                        {
-                          title: 'تعداد کل',
-                          dataIndex: 'totalQuantity',
-                          key: 'totalQuantity',
-                          width: 90,
-                          render: (value: number) => toQty(value),
-                        },
-                        {
-                          title: 'واحد اصلی',
-                          dataIndex: 'mainUnit',
-                          key: 'mainUnit',
-                          width: 90,
-                          render: (value: string) => value || '-',
-                        },
-                        {
-                          title: 'واحد فرعی',
-                          dataIndex: 'subUnit',
-                          key: 'subUnit',
-                          width: 90,
-                          render: (value: string) => value || '-',
-                        },
-                        {
-                          title: 'مقدار واحد فرعی',
-                          dataIndex: 'subUsage',
-                          key: 'subUsage',
-                          width: 120,
-                          render: (value: number) => toQty(value),
-                        },
-                        {
-                          title: activeSourceTab === 'order' ? 'مقدار ثبت شده' : 'مقدار دریافتی',
-                          dataIndex: 'sourceQty',
-                          key: 'sourceQty',
-                          width: 120,
-                          render: (value: number) => toQty(value),
-                        },
-                      ]}
-                    />
-                    <div className="mt-2 text-xs text-gray-600 flex flex-wrap gap-4">
-                      <span>
-                        {activeSourceTab === 'order' ? 'جمع ثبت شده سفارش:' : 'جمع دریافتی از مرحله قبلی:'}{' '}
-                        <span className="font-medium">{toQty(sourceTotal)}</span>
-                        {sourceUnitLabel ? <span className="font-medium mr-1">{sourceUnitLabel}</span> : null}
-                      </span>
-                    </div>
-
                     <div className="mt-3 rounded-lg border border-[#c9b29a] bg-[#f7f1ea] p-3 space-y-3">
                       <div className="text-xs font-medium text-[#6f4a2d]">
-                        از مرحله "{sourceStageName}" به مرحله "{taskName}" چه مقدار تحویل می‌دهید؟
+                        {trafficType === 'incoming'
+                          ? `از مرحله "${sourceStageName}" به مرحله "${taskName}" چه مقدار تحویل می‌دهید؟`
+                          : `از مرحله "${taskName}" به مرحله "${destinationStageOption?.label || nextStageName || 'مرحله مقصد'}" چه مقدار تحویل می‌دهید؟`}
                       </div>
 
                       <div className="flex items-center gap-2 flex-wrap">
@@ -581,18 +611,10 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             dataIndex: 'deliveredQty',
                             key: 'deliveredQty',
                             width: isMobile ? 230 : 170,
-                            render: (value: number, record: StageHandoverDeliveryRow) => (
-                              <InputNumber
-                                size="large"
-                                min={0}
-                                value={value}
-                                onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'deliveredQty', nextValue)}
-                                className="w-full persian-number"
-                                stringMode
-                                formatter={(val) => formatGroupedInput(val)}
-                                parser={(val) => parseNumberInput(val)}
-                                disabled={locked}
-                              />
+                            render: (_value: number, record: StageHandoverDeliveryRow) => (
+                              <span className="font-semibold text-[#6f4a2d]">
+                                {toQty(calcDeliveredQty(record))}
+                              </span>
                             ),
                           },
                           {
