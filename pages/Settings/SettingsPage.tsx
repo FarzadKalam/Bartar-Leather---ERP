@@ -1,10 +1,11 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Tabs, Empty, Spin } from 'antd';
-import { BankOutlined, UsergroupAddOutlined, ClusterOutlined, FunctionOutlined, ApartmentOutlined, ApiOutlined } from '@ant-design/icons';
+import { BankOutlined, UsergroupAddOutlined, ClusterOutlined, FunctionOutlined, ApartmentOutlined, ApiOutlined, RiseOutlined } from '@ant-design/icons';
 import CompanyTab from './CompanyTab';
 import UsersTab from './UsersTab';
 import RolesTab from './RolesTab';
 import ConnectionsTab from './ConnectionsTab';
+import CustomerLevelingTab from './CustomerLevelingTab';
 import ModuleListRefine from '../ModuleList_Refine';
 import { supabase } from '../../supabaseClient';
 import { SETTINGS_PERMISSION_KEY, WORKFLOWS_PERMISSION_KEY } from '../../utils/permissions';
@@ -62,6 +63,7 @@ const SettingsPage: React.FC = () => {
               roles: false,
               formulas: false,
               connections: false,
+              customer_leveling: false,
               workflows: false,
             });
           } else {
@@ -71,6 +73,7 @@ const SettingsPage: React.FC = () => {
               roles: fields.roles !== false,
               formulas: fields.formulas !== false,
               connections: fields.connections !== false,
+              customer_leveling: fields.customer_leveling !== false,
               workflows:
                 fields.workflows !== false &&
                 workflowsPerms.view !== false &&
@@ -119,6 +122,11 @@ const SettingsPage: React.FC = () => {
         key: 'connections',
         label: <span className="flex items-center gap-2 text-base"><ApiOutlined /> اتصالات</span>,
         children: <ConnectionsTab />,
+      },
+      {
+        key: 'customer_leveling',
+        label: <span className="flex items-center gap-2 text-base"><RiseOutlined /> تنظیمات سطح بندی</span>,
+        children: <CustomerLevelingTab />,
       },
       {
         key: 'workflows',

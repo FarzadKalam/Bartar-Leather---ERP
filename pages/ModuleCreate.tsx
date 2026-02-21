@@ -8,6 +8,7 @@ import { ArrowRightOutlined, SaveOutlined } from "@ant-design/icons";
 import { supabase } from "../supabaseClient";
 import { applyInvoiceFinalizationInventory } from "../utils/invoiceInventoryWorkflow";
 import { runWorkflowsForEvent } from "../utils/workflowRuntime";
+import { syncCustomerLevelsByInvoiceCustomers } from "../utils/customerLeveling";
 
 export const ModuleCreate = () => {
   const { moduleId } = useParams();
@@ -160,6 +161,12 @@ export const ModuleCreate = () => {
                   invoiceItems: values?.invoiceItems ?? [],
                   userId,
                 });
+                if (moduleId === "invoices") {
+                  await syncCustomerLevelsByInvoiceCustomers({
+                    supabase: supabase as any,
+                    customerIds: [inserted?.customer_id || values?.customer_id],
+                  });
+                }
                 if (moduleId) {
                   await runWorkflowsForEvent({
                     moduleId,
