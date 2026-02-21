@@ -795,6 +795,7 @@ ALTER TABLE public.invoices
   ADD COLUMN IF NOT EXISTS invoice_date date,
   ADD COLUMN IF NOT EXISTS system_code text,
   ADD COLUMN IF NOT EXISTS sale_source text,
+  ADD COLUMN IF NOT EXISTS description text,
   ADD COLUMN IF NOT EXISTS marketer_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS "invoiceItems" jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -817,6 +818,7 @@ ALTER TABLE public.purchase_invoices
   ADD COLUMN IF NOT EXISTS supplier_id uuid REFERENCES public.suppliers(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS buyer_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS purchase_source text,
+  ADD COLUMN IF NOT EXISTS description text,
   ADD COLUMN IF NOT EXISTS "invoiceItems" jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS payments jsonb NOT NULL DEFAULT '[]'::jsonb,
   ADD COLUMN IF NOT EXISTS total_invoice_amount numeric NOT NULL DEFAULT 0,
@@ -828,6 +830,19 @@ ALTER TABLE public.purchase_invoices
   ADD COLUMN IF NOT EXISTS updated_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+-- 3.1) تنظیمات سطح‌بندی مشتری و فیلدهای آماری مشتری
+ALTER TABLE public.company_settings
+  ADD COLUMN IF NOT EXISTS customer_leveling_config jsonb NOT NULL DEFAULT
+  '{"enabled":true,"eligible_statuses":["final","settled","completed"],"silver":{"min_purchase_count":3,"min_total_spend":30000000,"min_acquaintance_days":30},"gold":{"min_purchase_count":8,"min_total_spend":120000000,"min_acquaintance_days":120},"vip":{"min_purchase_count":15,"min_total_spend":300000000,"min_acquaintance_days":365}}'::jsonb;
+
+ALTER TABLE public.customers
+  ADD COLUMN IF NOT EXISTS first_purchase_date date,
+  ADD COLUMN IF NOT EXISTS last_purchase_date date,
+  ADD COLUMN IF NOT EXISTS purchase_count int4 NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_spend numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_paid_amount numeric NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS rank text NOT NULL DEFAULT 'normal';
 
 CREATE INDEX IF NOT EXISTS idx_purchase_invoices_status
   ON public.purchase_invoices(status);

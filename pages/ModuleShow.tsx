@@ -35,6 +35,11 @@ import {
 } from '../utils/productionWorkflow';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 import { canAccessAssignedRecord } from '../utils/permissions';
+import {
+  calculateCustomerStatsFromInvoices,
+  getDefaultLevelingConfig,
+  syncCustomerLevelsByInvoiceCustomers,
+} from '../utils/customerLeveling';
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -673,6 +678,35 @@ const ModuleShow: React.FC = () => {
               nextRecord = { ...nextRecord, sub_stock: computedSubStock };
             }
           }
+        }
+        if (moduleId === 'customers') {
+          try {
+            const { data: invoices } = await supabase
+              .from('invoices')
+              .select('status, total_invoice_amount, invoice_date, created_at, payments')
+              .eq('customer_id', id);
+            const stats = calculateCustomerStatsFromInvoices(
+              invoices || [],
+              getDefaultLevelingConfig(),
+              nextRecord?.created_at || null
+            );
+            nextRecord = {
+              ...nextRecord,
+              purchase_count: stats.purchaseCount,
+              total_spend: stats.totalSpend,
+              total_paid_amount: stats.totalPaidAmount,
+              first_purchase_date: stats.firstPurchaseDate,
+              last_purchase_date: stats.lastPurchaseDate,
+            };
+          } catch (statsErr) {
+            console.warn('Live customer stats fallback failed', statsErr);
+          }
+          syncCustomerLevelsByInvoiceCustomers({
+            supabase: supabase as any,
+            customerIds: [id],
+          }).catch((syncErr) => {
+            console.warn('Background customer sync failed', syncErr);
+          });
         }
         setData(nextRecord);
     } catch (err: any) {
@@ -1526,6 +1560,15 @@ const ModuleShow: React.FC = () => {
           userId,
         });
       }
+      if (
+        moduleId === 'invoices'
+        && ['status', 'customer_id', 'total_invoice_amount', 'invoice_date'].includes(key)
+      ) {
+        await syncCustomerLevelsByInvoiceCustomers({
+          supabase: supabase as any,
+          customerIds: [data?.customer_id, key === 'customer_id' ? newValue : null],
+        });
+      }
       setData((prev: any) => ({ ...prev, [key]: newValue }));
       await insertChangelog({
         action: 'update',
@@ -1571,6 +1614,12 @@ const ModuleShow: React.FC = () => {
           invoiceItems: values?.invoiceItems ?? previous?.invoiceItems ?? [],
           userId,
         });
+        if (moduleId === 'invoices') {
+          await syncCustomerLevelsByInvoiceCustomers({
+            supabase: supabase as any,
+            customerIds: [previous?.customer_id, values?.customer_id],
+          });
+        }
       }
 
       for (const key of changedKeys) {

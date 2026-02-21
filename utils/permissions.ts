@@ -19,6 +19,7 @@ export const SETTINGS_TAB_PERMISSIONS = [
   { key: 'roles', label: 'چارت سازمانی' },
   { key: 'formulas', label: 'فرمول های محاسباتی' },
   { key: 'connections', label: 'اتصالات' },
+  { key: 'customer_leveling', label: 'تنظیمات سطح بندی' },
   { key: 'workflows', label: 'گردش کارها' },
 ];
 

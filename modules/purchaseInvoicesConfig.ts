@@ -131,6 +131,7 @@ export const purchaseInvoicesConfig: ModuleDefinition = {
       ],
       nature: FieldNature.STANDARD
     },
+    { key: 'description', labels: { fa: 'توضیحات فاکتور', en: 'Invoice Description' }, type: FieldType.LONG_TEXT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 3, nature: FieldNature.STANDARD },
 
     { key: 'total_invoice_amount', labels: { fa: 'مبلغ کل فاکتور', en: 'Total Amount' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'summary', order: 1, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },
     { key: 'total_received_amount', labels: { fa: 'مبلغ پرداخت شده', en: 'Paid Amount' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'summary', order: 2, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },

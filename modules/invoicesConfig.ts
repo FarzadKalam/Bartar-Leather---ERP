@@ -108,6 +108,7 @@ export const invoicesConfig: ModuleDefinition = {
       { key: 'sale_source', labels: { fa: 'منبع فروش', en: 'Source' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 2, options: [
           { label: 'حضوری', value: 'in_person' }, { label: 'تلفنی', value: 'phone' }, { label: 'سایت', value: 'website' }, { label: 'سوشال', value: 'social' }
       ], nature: FieldNature.STANDARD },
+      { key: 'description', labels: { fa: 'توضیحات فاکتور', en: 'Invoice Description' }, type: FieldType.LONG_TEXT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 3, nature: FieldNature.STANDARD },
 
       // --- فیلدهای محاسباتی (Readonly) ---
       // این فیلدها باید اینجا باشند تا SmartForm بداند که باید مقدارشان را از summaryConfig بگیرد و نمایش دهد

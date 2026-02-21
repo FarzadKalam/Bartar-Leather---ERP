@@ -14,6 +14,7 @@ import { convertArea } from '../utils/unitConversions';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
+import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -551,6 +552,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
               invoiceItems: values?.invoiceItems ?? initialRecord?.invoiceItems ?? [],
               userId,
             });
+            if (module.id === 'invoices') {
+              await syncCustomerLevelsByInvoiceCustomers({
+                supabase: supabase as any,
+                customerIds: [initialRecord?.customer_id, values?.customer_id],
+              });
+            }
           }
 
           const changes: any[] = [];
@@ -603,6 +610,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 invoiceItems: values?.invoiceItems ?? [],
                 userId,
               });
+              if (module.id === 'invoices') {
+                await syncCustomerLevelsByInvoiceCustomers({
+                  supabase: supabase as any,
+                  customerIds: [values?.customer_id],
+                });
+              }
             }
             if (module.id === 'production_orders') {
               const postPayload: any = {};
