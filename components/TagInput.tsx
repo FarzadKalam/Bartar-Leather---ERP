@@ -177,7 +177,7 @@ const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [
       <Dropdown 
         open={inputVisible} 
         onOpenChange={setInputVisible}
-        dropdownRender={dropdownRender} 
+        popupRender={dropdownRender} 
         trigger={['click']}
         placement="bottomLeft"
       >

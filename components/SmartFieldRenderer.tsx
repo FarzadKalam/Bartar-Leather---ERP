@@ -578,7 +578,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     popupMatchSelectWidth={false}
                     dropdownStyle={{ zIndex: 4000, minWidth: 320 }}
                     filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-                    dropdownRender={(menu) => (
+                    popupRender={(menu) => (
                         <>
                           {menu}
                           {!compactMode && canQuickCreate && (

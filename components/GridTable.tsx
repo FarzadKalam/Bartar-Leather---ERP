@@ -62,6 +62,8 @@ const createEmptyRow = () => ({
     category: null,
     selected_product_id: null,
     selected_product_name: null,
+    selected_product_stock: null,
+    selected_product_main_unit: null,
   },
   specs: {},
   pieces: [{ key: createPieceKey(), ...defaultPiece() }],
@@ -97,6 +99,13 @@ const parseNumberInput = (value: any) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const formatStockLabel = (value: any) => {
+  if (value === null || value === undefined || value === '') return '-';
+  const parsed = parseFloat(value);
+  if (!Number.isFinite(parsed)) return '-';
+  return toPersianNumber(parsed.toLocaleString('en-US'));
+};
+
 const GridTable: React.FC<GridTableProps> = ({
   block,
   initialData,
@@ -127,7 +136,14 @@ const GridTable: React.FC<GridTableProps> = ({
   const [tempData, setTempData] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading] = useState(false);
-  const [productOptions, setProductOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const [productOptions, setProductOptions] = useState<Array<{
+    label: string;
+    value: string;
+    category?: string | null;
+    product_type?: string | null;
+    stock?: number;
+    main_unit?: string | null;
+  }>>([]);
   const [productOptionsLoading, setProductOptionsLoading] = useState(false);
   const [localDynamicOptions, setLocalDynamicOptions] = useState<Record<string, any[]>>({});
   const [selectedPieceKeysByRow, setSelectedPieceKeysByRow] = useState<Record<string, string[]>>({});
@@ -327,6 +343,68 @@ const GridTable: React.FC<GridTableProps> = ({
   const toNumber = (value: any) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const focusSameColumnInSiblingRow = (target: EventTarget | null, direction: 'up' | 'down') => {
+    const el = target as HTMLElement | null;
+    if (!el) return;
+    const td = el.closest('td') as HTMLTableCellElement | null;
+    const tr = td?.closest('tr') as HTMLTableRowElement | null;
+    if (!td || !tr) return;
+    const tbody = tr.parentElement;
+    if (!tbody) return;
+    const rows = Array.from(tbody.children).filter((child) => child.tagName === 'TR') as HTMLTableRowElement[];
+    const currentRowIndex = rows.indexOf(tr);
+    if (currentRowIndex < 0) return;
+    const nextRowIndex = direction === 'down' ? currentRowIndex + 1 : currentRowIndex - 1;
+    if (nextRowIndex < 0 || nextRowIndex >= rows.length) return;
+    const currentCellIndex = Array.from(tr.children).indexOf(td);
+    if (currentCellIndex < 0) return;
+    const nextCell = rows[nextRowIndex].children[currentCellIndex] as HTMLElement | undefined;
+    if (!nextCell) return;
+    const focusable = nextCell.querySelector<HTMLElement>('input, textarea, .ant-select-selector, [tabindex]:not([tabindex="-1"])');
+    if (!focusable) return;
+    focusable.focus();
+    if (focusable.classList.contains('ant-select-selector')) {
+      focusable.click();
+    }
+  };
+
+  const handlePieceEditorKeyDown = (
+    e: React.KeyboardEvent<HTMLElement>,
+    ctx: { rowIndex: number; rowKey: string; rowCanEdit: boolean }
+  ) => {
+    if (!ctx.rowCanEdit) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      e.stopPropagation();
+      focusSameColumnInSiblingRow(e.target, 'down');
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      e.stopPropagation();
+      focusSameColumnInSiblingRow(e.target, 'up');
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      if (mode === 'db' && activeEditRowKey === ctx.rowKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        void handleSave();
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      updateRow(ctx.rowIndex, { collapsed: true });
+    }
   };
 
   const applyCalculations = (gridRow: any) => {
@@ -530,7 +608,13 @@ const GridTable: React.FC<GridTableProps> = ({
     const row = { ...nextData[rowIndex] };
 
     if (!productId) {
-      row.header = { ...row.header, selected_product_id: null, selected_product_name: null };
+      row.header = {
+        ...row.header,
+        selected_product_id: null,
+        selected_product_name: null,
+        selected_product_stock: null,
+        selected_product_main_unit: null,
+      };
       row.collapsed = false;
       row.specs_locked = false;
       nextData[rowIndex] = row;
@@ -567,6 +651,8 @@ const GridTable: React.FC<GridTableProps> = ({
         ...row.header,
         selected_product_id: product?.id || productId,
         selected_product_name: product?.name || '',
+        selected_product_stock: product?.stock ?? 0,
+        selected_product_main_unit: product?.main_unit || null,
       };
       row.collapsed = false;
 
@@ -601,7 +687,7 @@ const GridTable: React.FC<GridTableProps> = ({
     try {
       const { data: products } = await supabase
         .from('products')
-        .select('id, name, system_code, category, product_type')
+        .select('id, name, system_code, category, product_type, stock, main_unit')
         .order('created_at', { ascending: false })
         .limit(200);
       const options = (products || []).map((p: any) => ({
@@ -609,6 +695,8 @@ const GridTable: React.FC<GridTableProps> = ({
         label: p.system_code ? `${p.system_code} - ${p.name}` : p.name,
         category: p.category || null,
         product_type: p.product_type || null,
+        stock: p.stock ?? 0,
+        main_unit: p.main_unit || null,
       }));
       setProductOptions(options);
     } catch (err) {
@@ -794,6 +882,8 @@ const GridTable: React.FC<GridTableProps> = ({
               category,
               selected_product_id: product?.id || transferTargetProductId,
               selected_product_name: product?.name || '',
+              selected_product_stock: product?.stock ?? 0,
+              selected_product_main_unit: product?.main_unit || null,
             },
             specs,
             specs_locked: true,
@@ -858,13 +948,15 @@ const GridTable: React.FC<GridTableProps> = ({
       try {
         const { data: products } = await supabase
           .from('products')
-          .select('id, name, system_code, category, product_type')
+          .select('id, name, system_code, category, product_type, stock, main_unit')
           .in('id', missing);
         const options = (products || []).map((p: any) => ({
           value: p.id,
           label: p.system_code ? `${p.system_code} - ${p.name}` : p.name,
           category: p.category || null,
           product_type: p.product_type || null,
+          stock: p.stock ?? 0,
+          main_unit: p.main_unit || null,
         }));
         if (options.length) {
           setProductOptions((prev) => {
@@ -1148,6 +1240,9 @@ const GridTable: React.FC<GridTableProps> = ({
                         const selectedFromRaw = selectedId
                           ? rawOptions.find((o: any) => o.value === selectedId)
                           : null;
+                        const selectedLabel = selectedFromRaw?.label || selectedName || '-';
+                        const selectedStock = row?.header?.selected_product_stock ?? selectedFromRaw?.stock ?? null;
+                        const selectedMainUnit = row?.header?.selected_product_main_unit ?? selectedFromRaw?.main_unit ?? null;
                         const filteredOptions = rawOptions
                           .filter((o: any) => {
                             if (o.product_type && o.product_type !== 'raw') return false;
@@ -1157,38 +1252,57 @@ const GridTable: React.FC<GridTableProps> = ({
                             }
                             return true;
                           })
-                          .map((o: any) => ({ label: o.label, value: o.value }));
+                          .map((o: any) => ({
+                            label: o.label,
+                            value: o.value,
+                            stock: o?.stock ?? null,
+                            main_unit: o?.main_unit ?? null,
+                          }));
                         const hasSelected = selectedId && filteredOptions.some((o: any) => o.value === selectedId);
                         if (selectedId && !hasSelected) {
                           filteredOptions.unshift({
                             value: selectedId,
                             label: selectedName || selectedFromRaw?.label || String(selectedId),
+                            stock: selectedFromRaw?.stock ?? row?.header?.selected_product_stock ?? null,
+                            main_unit: selectedFromRaw?.main_unit ?? row?.header?.selected_product_main_unit ?? null,
                           });
                         }
                         if (!rowCanEdit) {
                           return (
-                            <span className="min-w-[200px] w-full sm:w-auto text-xs text-white font-black truncate">
-                              {selectedFromRaw?.label || selectedName || '-'}
-                            </span>
+                            <div className="min-w-[220px] w-full sm:w-auto flex flex-col">
+                              <span className="text-sm sm:text-base text-white font-black truncate">{selectedLabel}</span>
+                              {selectedId ? (
+                                <span className="text-[11px] text-white/90 font-medium">
+                                  موجودی: {formatStockLabel(selectedStock)} {selectedMainUnit || ''}
+                                </span>
+                              ) : null}
+                            </div>
                           );
                         }
                         return (
-                      <Select
-                        value={row.header?.selected_product_id || null}
-                        placeholder="انتخاب محصول"
-                        className="min-w-[200px] w-full sm:w-auto"
-                        showSearch
-                        optionFilterProp="label"
-                        options={filteredOptions}
-                        loading={productOptionsLoading}
-                        onDropdownVisibleChange={(open) => {
-                          if (open && productOptions.length === 0) loadProductOptions();
-                        }}
-                        onChange={(val) => applySelectedProduct(rowIndex, val)}
-                        disabled={!rowCanEdit}
-                        getPopupContainer={() => document.body}
-                        dropdownStyle={{ zIndex: 10050 }}
-                      />
+                          <div className="min-w-[220px] w-full sm:w-auto flex flex-col gap-1">
+                            <Select
+                              value={row.header?.selected_product_id || null}
+                              placeholder="انتخاب محصول"
+                              className="min-w-[200px] w-full sm:w-auto"
+                              showSearch
+                              optionFilterProp="label"
+                              options={filteredOptions}
+                              loading={productOptionsLoading}
+                              onDropdownVisibleChange={(open) => {
+                                if (open && productOptions.length === 0) loadProductOptions();
+                              }}
+                              onChange={(val) => applySelectedProduct(rowIndex, val)}
+                              disabled={!rowCanEdit}
+                              getPopupContainer={() => document.body}
+                              dropdownStyle={{ zIndex: 10050 }}
+                            />
+                            {selectedId ? (
+                              <span className="text-[11px] text-white/90 font-medium leading-none">
+                                موجودی: {formatStockLabel(selectedStock)} {selectedMainUnit || ''}
+                              </span>
+                            ) : null}
+                          </div>
                         );
                       })()}
                       {rowCanEdit && (
@@ -1430,7 +1544,13 @@ const GridTable: React.FC<GridTableProps> = ({
                           width: 220,
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit ? (
-                              <Input className="font-medium" style={{ minWidth: 170 }} value={val} onChange={(e) => updatePiece(rowIndex, pieceIndex, { name: e.target.value })} />
+                              <Input
+                                className="font-medium"
+                                style={{ minWidth: 170 }}
+                                value={val}
+                                onChange={(e) => updatePiece(rowIndex, pieceIndex, { name: e.target.value })}
+                                onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
+                              />
                             ) : (
                               <Text className="font-medium whitespace-nowrap inline-block">{val || '-'}</Text>
                             )
@@ -1449,6 +1569,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
+                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1467,6 +1588,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
+                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1485,6 +1607,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
+                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1504,6 +1627,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
+                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1610,6 +1734,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                     onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })}
                                     formatter={(v) => formatGroupedInput(v)}
                                     parser={(v) => parseNumberInput(v)}
+                                    onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                   />
                                 )
                                 : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>

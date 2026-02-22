@@ -257,7 +257,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData?.user?.id || null;
       const productIds: string[] = [];
-      const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
+      const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
       const transfers: Record<string, unknown>[] = [];
       const changelogs: Record<string, unknown>[] = [];
 
@@ -283,7 +283,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         const q = toNum(row.opening_stock);
         const shelf = row.opening_shelf_id ? String(row.opening_shelf_id) : null;
         if (q > 0 && shelf) {
-          deltas.push({ productId: pid, shelfId: shelf, delta: q });
+          deltas.push({ productId: pid, shelfId: shelf, delta: q, unit: inserted.main_unit ? String(inserted.main_unit) : null });
           const subQty = isUnitValue(inserted.main_unit) && isUnitValue(inserted.sub_unit) ? convertArea(q, inserted.main_unit, inserted.sub_unit) : 0;
           transfers.push({
             transfer_type: 'opening_balance',

@@ -56,7 +56,7 @@ export const applyInvoiceFinalizationInventory = async ({
     return { applied: false };
   }
 
-  const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
+  const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
   const transfersPayload: any[] = [];
   const affectedProductIds: string[] = [];
 
@@ -65,6 +65,7 @@ export const applyInvoiceFinalizationInventory = async ({
     const shelfIdRaw = item?.source_shelf_id || item?.shelf_id || item?.selected_shelf_id || null;
     const shelfId = shelfIdRaw ? String(shelfIdRaw) : '';
     const qty = Math.abs(toNumber(item?.quantity ?? item?.qty ?? item?.count));
+    const unit = item?.main_unit ? String(item.main_unit) : null;
 
     if (!productId || qty <= 0) return;
     if (!shelfId) {
@@ -74,7 +75,7 @@ export const applyInvoiceFinalizationInventory = async ({
     affectedProductIds.push(productId);
 
     if (direction === 'purchase') {
-      deltas.push({ productId, shelfId, delta: qty });
+      deltas.push({ productId, shelfId, delta: qty, unit });
       transfersPayload.push({
         transfer_type: transferType,
         product_id: productId,
@@ -90,7 +91,7 @@ export const applyInvoiceFinalizationInventory = async ({
       return;
     }
 
-    deltas.push({ productId, shelfId, delta: -qty });
+    deltas.push({ productId, shelfId, delta: -qty, unit });
     transfersPayload.push({
       transfer_type: transferType,
       product_id: productId,
@@ -117,4 +118,3 @@ export const applyInvoiceFinalizationInventory = async ({
   await syncMultipleProductsStock(supabase, affectedProductIds);
   return { applied: true, affectedProducts: Array.from(new Set(affectedProductIds)) };
 };
-

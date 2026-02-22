@@ -743,20 +743,21 @@ const EditableTable: React.FC<EditableTableProps> = ({
         const toQty = (value: any) => Math.abs(parseFloat(value) || 0);
 
         const buildDeltas = (rows: any[], multiplier = 1) => {
-          const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
+          const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
           rows.forEach((row: any) => {
             const voucherType = String(row?.voucher_type || '');
             const qty = toQty(row?.main_quantity);
             if (!qty) return;
             const fromShelfId = row?.from_shelf_id ? String(row.from_shelf_id) : null;
             const toShelfId = row?.to_shelf_id ? String(row.to_shelf_id) : null;
+            const mainUnit = row?.main_unit ? String(row.main_unit) : (currentProductUnits.mainUnit || null);
             if (voucherType === 'incoming' && toShelfId) {
-              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier });
+              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier, unit: mainUnit });
             } else if (voucherType === 'outgoing' && fromShelfId) {
-              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier });
+              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier, unit: mainUnit });
             } else if (voucherType === 'transfer' && fromShelfId && toShelfId) {
-              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier });
-              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier });
+              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier, unit: mainUnit });
+              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier, unit: mainUnit });
             }
           });
           return deltas;

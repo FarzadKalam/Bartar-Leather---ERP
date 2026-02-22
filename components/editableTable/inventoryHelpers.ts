@@ -25,6 +25,12 @@ export const updateProductStock = async (supabase: SupabaseClient, productId: st
 };
 
 export const fetchShelfOptions = async (supabase: SupabaseClient, productId: string) => {
+  const { data: productRow } = await supabase
+    .from('products')
+    .select('main_unit')
+    .eq('id', productId)
+    .maybeSingle();
+  const productMainUnit = String(productRow?.main_unit || '').trim();
   const { data: rows, error } = await supabase
     .from('product_inventory')
     .select('product_id, shelf_id, stock, shelves(system_code, shelf_number, name, warehouses(name))')
@@ -39,9 +45,10 @@ export const fetchShelfOptions = async (supabase: SupabaseClient, productId: str
     const warehouseName = row?.shelves?.warehouses?.name || '';
     const shelfLabel = [systemCode, shelfNumber, warehouseName].filter(Boolean).join(' - ');
     const stockLabel = typeof row.stock === 'number' ? row.stock : parseFloat(row.stock) || 0;
+    const unitSuffix = productMainUnit ? ` ${productMainUnit}` : '';
     return {
       value: row.shelf_id,
-      label: `${shelfLabel} (موجودی: ${stockLabel})`,
+      label: `${shelfLabel} (موجودی: ${stockLabel}${unitSuffix})`,
     };
   });
 };

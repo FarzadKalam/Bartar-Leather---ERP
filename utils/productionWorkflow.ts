@@ -1,11 +1,13 @@
-﻿import { supabase } from '../supabaseClient';
+import { supabase } from '../supabaseClient';
 import { convertArea, type UnitValue } from './unitConversions';
+import { normalizeQuantityToProductMainUnit } from './inventoryTransactions';
 
 export type ProductionMove = {
   product_id: string;
   from_shelf_id: string;
   to_shelf_id: string;
   quantity: number;
+  unit?: string | null;
 };
 
 const ITEM_TABLES = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
@@ -42,6 +44,7 @@ export const collectProductionMoves = (order: any, productionShelfId: string) =>
         from_shelf_id: fromShelfId,
         to_shelf_id: productionShelfId,
         quantity: usage * quantity,
+        unit: row?.main_unit ? String(row.main_unit) : null,
       });
     });
   });
@@ -52,6 +55,39 @@ export const collectProductionMoves = (order: any, productionShelfId: string) =>
 const getShelfWarehouseId = async (shelfId: string) => {
   const { data } = await supabase.from('shelves').select('warehouse_id').eq('id', shelfId).maybeSingle();
   return data?.warehouse_id || null;
+};
+
+const productLabelCache = new Map<string, string>();
+const shelfLabelCache = new Map<string, string>();
+
+const getProductLabel = async (productId: string) => {
+  const cached = productLabelCache.get(productId);
+  if (cached) return cached;
+  const { data } = await supabase
+    .from('products')
+    .select('name, system_code')
+    .eq('id', productId)
+    .maybeSingle();
+  const label = data?.system_code
+    ? `${String(data?.name || productId)} (${String(data.system_code)})`
+    : String(data?.name || productId);
+  productLabelCache.set(productId, label);
+  return label;
+};
+
+const getShelfLabel = async (shelfId: string) => {
+  const cached = shelfLabelCache.get(shelfId);
+  if (cached) return cached;
+  const { data } = await supabase
+    .from('shelves')
+    .select('shelf_number, name, warehouses(name)')
+    .eq('id', shelfId)
+    .maybeSingle();
+  const shelfNumber = String(data?.shelf_number || data?.name || shelfId);
+  const warehouseName = String((data as any)?.warehouses?.name || '');
+  const label = warehouseName ? `${shelfNumber} - ${warehouseName}` : shelfNumber;
+  shelfLabelCache.set(shelfId, label);
+  return label;
 };
 
 const adjustStock = async (productId: string, shelfId: string, delta: number, warehouseId?: string | null) => {
@@ -67,7 +103,13 @@ const adjustStock = async (productId: string, shelfId: string, delta: number, wa
   const current = parseFloat(row?.stock) || 0;
   const next = current + delta;
   if (next < 0) {
-    throw new Error('موجودی کافی نیست');
+    const [productLabel, shelfLabel] = await Promise.all([
+      getProductLabel(productId),
+      getShelfLabel(shelfId),
+    ]);
+    throw new Error(
+      `موجودی قفسه کافی نیست. محصول: "${productLabel}"، قفسه: "${shelfLabel}"، موجودی فعلی: ${current}، مقدار موردنیاز: ${Math.abs(delta)}`
+    );
   }
 
   const payload = {
@@ -84,8 +126,25 @@ const adjustStock = async (productId: string, shelfId: string, delta: number, wa
 };
 
 export const applyProductionMoves = async (moves: ProductionMove[]) => {
+  const productMetaCache = new Map<string, { mainUnit: string | null; name: string | null }>();
+  const decisionCache = new Map<string, boolean>();
+  const normalizedMoves: ProductionMove[] = [];
+  for (const move of moves || []) {
+    const normalizedQty = await normalizeQuantityToProductMainUnit(
+      supabase as any,
+      {
+        productId: move.product_id,
+        quantity: move.quantity,
+        unit: move.unit ?? null,
+      },
+      { productMetaCache, decisionCache }
+    );
+    if (!normalizedQty) continue;
+    normalizedMoves.push({ ...move, quantity: normalizedQty });
+  }
+
   const grouped = new Map<string, ProductionMove>();
-  moves.forEach((move) => {
+  normalizedMoves.forEach((move) => {
     const key = `${move.product_id}:${move.from_shelf_id}:${move.to_shelf_id}`;
     const existing = grouped.get(key);
     if (existing) {
@@ -113,13 +172,25 @@ export const rollbackProductionMoves = async (moves: ProductionMove[]) => {
 };
 
 export const consumeProductionMaterials = async (moves: ProductionMove[], productionShelfId?: string) => {
+  const productMetaCache = new Map<string, { mainUnit: string | null; name: string | null }>();
+  const decisionCache = new Map<string, boolean>();
   const grouped = new Map<string, number>();
-  moves.forEach((move) => {
+  for (const move of moves || []) {
+    const normalizedQty = await normalizeQuantityToProductMainUnit(
+      supabase as any,
+      {
+        productId: move.product_id,
+        quantity: move.quantity,
+        unit: move.unit ?? null,
+      },
+      { productMetaCache, decisionCache }
+    );
+    if (!normalizedQty) continue;
     const targetShelfId = move?.to_shelf_id || productionShelfId;
-    if (!targetShelfId) return;
+    if (!targetShelfId) continue;
     const key = `${move.product_id}:${targetShelfId}`;
-    grouped.set(key, (grouped.get(key) || 0) + move.quantity);
-  });
+    grouped.set(key, (grouped.get(key) || 0) + normalizedQty);
+  }
   for (const [key, qty] of grouped.entries()) {
     const [productId, shelfId] = key.split(':');
     await adjustStock(productId, shelfId, -qty);
@@ -152,4 +223,7 @@ export const syncProductStock = async (productId: string) => {
     .eq('id', productId);
   if (updateError) throw updateError;
 };
+
+
+
 

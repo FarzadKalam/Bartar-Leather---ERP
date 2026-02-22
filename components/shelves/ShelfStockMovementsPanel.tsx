@@ -477,18 +477,19 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
     qtyMain: number;
     fromShelfId: string | null;
     toShelfId: string | null;
+    mainUnit?: string | null;
   }, multiplier = 1) => {
-    const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
+    const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
     const qty = toQty(payload.qtyMain) * multiplier;
     if (!qty || !payload.productId) return deltas;
 
     if (payload.voucherType === 'incoming' && payload.toShelfId) {
-      deltas.push({ productId: payload.productId, shelfId: payload.toShelfId, delta: qty });
+      deltas.push({ productId: payload.productId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null });
     } else if (payload.voucherType === 'outgoing' && payload.fromShelfId) {
-      deltas.push({ productId: payload.productId, shelfId: payload.fromShelfId, delta: -qty });
+      deltas.push({ productId: payload.productId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null });
     } else if (payload.voucherType === 'transfer' && payload.fromShelfId && payload.toShelfId) {
-      deltas.push({ productId: payload.productId, shelfId: payload.fromShelfId, delta: -qty });
-      deltas.push({ productId: payload.productId, shelfId: payload.toShelfId, delta: qty });
+      deltas.push({ productId: payload.productId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null });
+      deltas.push({ productId: payload.productId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null });
     }
     return deltas;
   };
@@ -535,6 +536,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
       qtySub,
       fromShelfId,
       toShelfId,
+      mainUnit: values?.main_unit ? String(values.main_unit) : (productMetaMap[productId]?.mainUnit || null),
     };
   };
 
@@ -582,6 +584,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
             qtyMain: toQty(editingRow?.main_quantity),
             fromShelfId: editingRow?.from_shelf_id ? String(editingRow.from_shelf_id) : null,
             toShelfId: editingRow?.to_shelf_id ? String(editingRow.to_shelf_id) : null,
+            mainUnit: editingRow?.main_unit ? String(editingRow.main_unit) : (productMetaMap[String(editingRow?.product_id || '')]?.mainUnit || null),
           }, -1)
         : [];
       const nextDeltas = buildDeltasFromPayload(normalized, 1);
@@ -666,6 +669,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
             qtyMain: toQty(row?.main_quantity),
             fromShelfId: row?.from_shelf_id ? String(row.from_shelf_id) : null,
             toShelfId: row?.to_shelf_id ? String(row.to_shelf_id) : null,
+            mainUnit: row?.main_unit ? String(row.main_unit) : (productMetaMap[String(row?.product_id || '')]?.mainUnit || null),
           }, -1);
           if (rollbackDeltas.length) {
             await applyInventoryDeltas(supabase as any, rollbackDeltas);

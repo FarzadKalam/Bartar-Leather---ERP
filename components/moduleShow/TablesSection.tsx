@@ -98,7 +98,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
             <ProductionStagesField 
               recordId={data.id} 
               moduleId={module.id}
-              readOnly={!canEditModule || productionLocked}
+              readOnly={!canEditModule || (isProductionOrder && ['completed'].includes(String(data?.status || '')))}
               compact={true}
               onQuantityChange={(qty) => onDataUpdate?.({ quantity: qty })}
               draftStages={data?.production_stages_draft || []}

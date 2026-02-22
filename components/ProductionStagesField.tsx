@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
@@ -129,6 +129,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [handoverSourceShelfId, setHandoverSourceShelfId] = useState<string | null>(null);
   const [handoverDestinationStageId, setHandoverDestinationStageId] = useState<string | null>(null);
   const [openTaskPopoverId, setOpenTaskPopoverId] = useState<string | null>(null);
+  const [lineQuantityDrafts, setLineQuantityDrafts] = useState<Record<string, number>>({});
+  const [savingLineQuantityId, setSavingLineQuantityId] = useState<string | null>(null);
+  const hasFetchedLinesRef = useRef(false);
 
   const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
 
@@ -152,6 +155,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     }
     setIsReadyToLoad(false);
   }, [lazyLoad, recordId, moduleId]);
+
+  useEffect(() => {
+    hasFetchedLinesRef.current = false;
+  }, [recordId, isBom]);
 
   useEffect(() => {
     if (!lazyLoad || isReadyToLoad) return;
@@ -339,6 +346,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         .order('line_no', { ascending: true });
       if (error) throw error;
       setLines(data || []);
+      hasFetchedLinesRef.current = true;
     } catch (error) {
       console.error('Error fetching lines:', error);
     }
@@ -393,7 +401,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   }, [recordId]);
 
   useEffect(() => {
-    if (!recordId || isBom) return;
+    if (!recordId || isBom || !hasFetchedLinesRef.current) return;
     syncOrderQuantity(lines);
   }, [lines, recordId, syncOrderQuantity, isBom]);
 
@@ -1350,7 +1358,18 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       });
 
       const finalWasteByProduct = nextWasteByProduct;
-      const deltas: Array<{ productId: string; shelfId: string; delta: number }> = [];
+      const productUnitById = new Map<string, string>();
+      effectiveGroups.forEach((group: any) => {
+        const productId = group?.selectedProductId ? String(group.selectedProductId) : '';
+        if (!productId || productUnitById.has(productId)) return;
+        const unit = String(
+          group?.deliveryRows?.find((row: any) => String(row?.mainUnit || '').trim())?.mainUnit
+          || group?.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit
+          || ''
+        ).trim();
+        if (unit) productUnitById.set(productId, unit);
+      });
+      const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
       const transferLogs: any[] = [];
       const userId = currentUser.id;
 
@@ -1366,9 +1385,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const sourceShelfId = String(effectiveSourceShelfId || '');
         const targetShelfId = String(effectiveTargetShelfId);
         if (!sourceShelfId || !targetShelfId || sourceShelfId === targetShelfId) return;
+        const mainUnit = productUnitById.get(productId) || null;
         if (delta > 0) {
-          deltas.push({ productId, shelfId: sourceShelfId, delta: -delta });
-          deltas.push({ productId, shelfId: targetShelfId, delta });
+          deltas.push({ productId, shelfId: sourceShelfId, delta: -delta, unit: mainUnit });
+          deltas.push({ productId, shelfId: targetShelfId, delta, unit: mainUnit });
           transferLogs.push({
             transfer_type: 'production_stage',
             product_id: productId,
@@ -1382,8 +1402,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           });
         } else {
           const rollbackQty = Math.abs(delta);
-          deltas.push({ productId, shelfId: sourceShelfId, delta: rollbackQty });
-          deltas.push({ productId, shelfId: targetShelfId, delta: -rollbackQty });
+          deltas.push({ productId, shelfId: sourceShelfId, delta: rollbackQty, unit: mainUnit });
+          deltas.push({ productId, shelfId: targetShelfId, delta: -rollbackQty, unit: mainUnit });
           transferLogs.push({
             transfer_type: 'production_stage',
             product_id: productId,
@@ -1407,8 +1427,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const nextWaste = toNumber(finalWasteByProduct[productId]);
         const wasteDelta = nextWaste - prevWaste;
         if (!wasteDelta || !effectiveSourceShelfId) return;
+        const mainUnit = productUnitById.get(productId) || null;
         if (wasteDelta > 0) {
-          deltas.push({ productId, shelfId: String(effectiveSourceShelfId), delta: -wasteDelta });
+          deltas.push({ productId, shelfId: String(effectiveSourceShelfId), delta: -wasteDelta, unit: mainUnit });
           transferLogs.push({
             transfer_type: 'waste',
             product_id: productId,
@@ -1421,7 +1442,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             receiver_id: userId,
           });
         } else {
-          deltas.push({ productId, shelfId: String(effectiveSourceShelfId), delta: Math.abs(wasteDelta) });
+          deltas.push({ productId, shelfId: String(effectiveSourceShelfId), delta: Math.abs(wasteDelta), unit: mainUnit });
         }
       });
 
@@ -1852,15 +1873,58 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     }
   };
 
-  const handleLineQuantityChange = async (lineId: string, quantity: number) => {
-    try {
-      const { error } = await supabase.from('production_lines').update({ quantity }).eq('id', lineId);
-      if (error) throw error;
-      setLines(prev => prev.map(line => (line.id === lineId ? { ...line, quantity } : line)));
-    } catch (err: any) {
-      message.error(`خطا: ${err.message}`);
+  const startLineQuantityEdit = useCallback((lineId: string, currentQuantity: any) => {
+    setLineQuantityDrafts((prev) => ({ ...prev, [String(lineId)]: Math.max(0, toNumber(currentQuantity)) }));
+  }, [toNumber]);
+
+  const cancelLineQuantityEdit = useCallback((lineId: string) => {
+    setLineQuantityDrafts((prev) => {
+      const next = { ...prev };
+      delete next[String(lineId)];
+      return next;
+    });
+  }, []);
+
+  const changeLineQuantityDraft = useCallback((lineId: string, value: any) => {
+    const normalized = Math.max(0, toNumber(value));
+    setLineQuantityDrafts((prev) => ({ ...prev, [String(lineId)]: normalized }));
+  }, [toNumber]);
+
+  const saveLineQuantityEdit = useCallback(async (lineId: string) => {
+    const normalizedLineId = String(lineId);
+    const currentLine = lines.find((line) => String(line.id) === normalizedLineId);
+    if (!currentLine) return;
+
+    const nextQty = Math.max(0, toNumber(lineQuantityDrafts[normalizedLineId]));
+    const prevQty = Math.max(0, toNumber(currentLine.quantity));
+    if (nextQty === prevQty) {
+      cancelLineQuantityEdit(normalizedLineId);
+      return;
     }
-  };
+
+    const previousLines = lines;
+    const nextLines = lines.map((line) =>
+      String(line.id) === normalizedLineId ? { ...line, quantity: nextQty } : line
+    );
+
+    setLines(nextLines);
+    cancelLineQuantityEdit(normalizedLineId);
+    setSavingLineQuantityId(normalizedLineId);
+
+    try {
+      const { error } = await supabase
+        .from('production_lines')
+        .update({ quantity: nextQty })
+        .eq('id', normalizedLineId);
+      if (error) throw error;
+      await syncOrderQuantity(nextLines);
+    } catch (err: any) {
+      setLines(previousLines);
+      message.error(`خطا: ${err.message}`);
+    } finally {
+      setSavingLineQuantityId((prev) => (prev === normalizedLineId ? null : prev));
+    }
+  }, [cancelLineQuantityEdit, lineQuantityDrafts, lines, syncOrderQuantity, toNumber]);
 
   const openTaskModal = (lineId: string, draftStage?: any) => {
     setActiveLineId(lineId);
@@ -2604,6 +2668,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const lineTasks = tasksByLine.get(String(line.id)) || [];
         const canEditQuantity = !readOnly && (!orderStatus || orderStatus === 'pending');
         const showInlineQty = !compact || canEditQuantity;
+        const lineId = String(line.id);
+        const isEditingQuantity = Object.prototype.hasOwnProperty.call(lineQuantityDrafts, lineId);
+        const currentQty = Math.max(0, toNumber(line.quantity));
+        const draftQty = isEditingQuantity ? Math.max(0, toNumber(lineQuantityDrafts[lineId])) : currentQty;
         const lineSegments = getLineSegments(lineTasks);
         return (
           <div key={line.id} className="space-y-2">
@@ -2614,13 +2682,43 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 {showInlineQty && (
                   <div className="flex items-center gap-2">
                     <span>تعداد تولید:</span>
-                    <InputNumber
-                      min={0}
-                      className="w-24"
-                      value={line.quantity}
-                      onChange={(val) => handleLineQuantityChange(line.id, Number(val) || 0)}
-                      disabled={!canEditQuantity}
-                    />
+                    {isEditingQuantity ? (
+                      <>
+                        <InputNumber
+                          min={0}
+                          className="w-24"
+                          value={draftQty}
+                          onChange={(val) => changeLineQuantityDraft(lineId, val)}
+                          onPressEnter={() => { void saveLineQuantityEdit(lineId); }}
+                          disabled={!canEditQuantity || savingLineQuantityId === lineId}
+                        />
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<CheckOutlined />}
+                          className="bg-green-500 hover:!bg-green-600 border-none"
+                          loading={savingLineQuantityId === lineId}
+                          onClick={() => { void saveLineQuantityEdit(lineId); }}
+                        />
+                        <Button
+                          size="small"
+                          icon={<CloseOutlined />}
+                          danger
+                          disabled={savingLineQuantityId === lineId}
+                          onClick={() => cancelLineQuantityEdit(lineId)}
+                        />
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`group flex items-center gap-1 rounded px-1 py-0.5 ${canEditQuantity ? 'hover:bg-amber-50 cursor-pointer' : 'cursor-default'}`}
+                        onClick={() => canEditQuantity && startLineQuantityEdit(lineId, line.quantity)}
+                        disabled={!canEditQuantity}
+                      >
+                        <span className="font-medium">{toPersianNumber(currentQty.toLocaleString('en-US'))}</span>
+                        {canEditQuantity && <EditOutlined className="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity text-xs" />}
+                      </button>
+                    )}
                   </div>
                 )}
                 {!readOnly && (

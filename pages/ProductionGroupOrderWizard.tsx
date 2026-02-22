@@ -871,6 +871,18 @@ const ProductionGroupOrderWizard: React.FC = () => {
       setSourceShelfOptionsByProduct({});
       return;
     }
+    const productUnits = new Map<string, string>();
+    const { data: productRows } = await supabase
+      .from('products')
+      .select('id, main_unit')
+      .in('id', ids);
+    (productRows || []).forEach((row: any) => {
+      const id = String(row?.id || '');
+      if (!id) return;
+      const mainUnit = String(row?.main_unit || '').trim();
+      if (mainUnit) productUnits.set(id, mainUnit);
+    });
+
     const { data: inventoryRows } = await supabase
       .from('product_inventory')
       .select('product_id, shelf_id, stock')
@@ -901,7 +913,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const stock = toNumber(row.stock);
       const shelfInfo = shelfMap.get(shelfId);
       if (shelfInfo?.isProductionWarehouse) return;
-      const label = `${shelfInfo?.label || shelfId} (موجودی: ${toPersianNumber(stock)})`;
+      const productUnit = productUnits.get(productId);
+      const unitSuffix = productUnit ? ` ${productUnit}` : '';
+      const label = `${shelfInfo?.label || shelfId} (موجودی: ${toPersianNumber(stock)}${unitSuffix})`;
       if (!nextOptions[productId]) nextOptions[productId] = [];
       if (!nextOptions[productId].some((item) => item.value === shelfId)) {
         nextOptions[productId].push({ value: shelfId, label, stock });
@@ -1006,6 +1020,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
       from_shelf_id: String(group.sourceShelfId),
       to_shelf_id: String(group.productionShelfId),
       quantity: toNumber(group.totalDeliveredQty),
+      unit: group.deliveryRows?.find((row: any) => String(row?.mainUnit || '').trim())?.mainUnit
+        || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit
+        || null,
     }));
 
     setIsStartingGroup(true);
@@ -1053,6 +1070,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
               from_shelf_id: String(group.sourceShelfId),
               to_shelf_id: String(group.productionShelfId),
               quantity: toNumber(allocation.deliveredQty),
+              unit: group.deliveryRows?.find((row: any) => String(row?.mainUnit || '').trim())?.mainUnit
+                || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit
+                || null,
             });
           }
         });

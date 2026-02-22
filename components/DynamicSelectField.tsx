@@ -223,7 +223,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
           </Popconfirm>
         </div>
       )}
-      dropdownRender={(menu) => (
+      popupRender={(menu) => (
         <>
           {menu}
           <Divider style={{ margin: '8px 0' }} />

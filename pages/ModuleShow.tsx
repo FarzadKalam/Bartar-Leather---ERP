@@ -511,7 +511,7 @@ const ModuleShow: React.FC = () => {
 
   const buildConsumptionMoves = useCallback((order: any, quantity: number, productionShelfId: string) => {
     const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
-    const moves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }> = [];
+    const moves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }> = [];
     tables.forEach((table) => {
       const rows = Array.isArray(order?.[table]) ? order[table] : [];
       rows.forEach((row: any) => {
@@ -524,6 +524,7 @@ const ModuleShow: React.FC = () => {
           from_shelf_id: productionShelfId,
           to_shelf_id: productionShelfId,
           quantity: usage * quantity,
+          unit: row?.main_unit ? String(row.main_unit) : null,
         });
       });
     });
@@ -531,7 +532,7 @@ const ModuleShow: React.FC = () => {
   }, []);
 
   const buildFinalStageConsumptionMoves = useCallback(async () => {
-    if (!id) return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }>;
+    if (!id) return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }>;
     try {
       const { data: taskRows, error } = await supabase
         .from('tasks')
@@ -549,7 +550,7 @@ const ModuleShow: React.FC = () => {
         byLine.get(lineKey)!.push(task);
       });
 
-      const finalMoves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }> = [];
+      const finalMoves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }> = [];
       byLine.forEach((lineTasks) => {
         const ordered = [...lineTasks].sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0));
         const lastTask = ordered[ordered.length - 1];
@@ -598,6 +599,7 @@ const ModuleShow: React.FC = () => {
             from_shelf_id: targetShelfId,
             to_shelf_id: targetShelfId,
             quantity: qty,
+            unit: selectedPiece?.mainUnit || selectedPiece?.main_unit || null,
           });
         });
       });
@@ -605,7 +607,7 @@ const ModuleShow: React.FC = () => {
       return finalMoves;
     } catch (err) {
       console.warn('Could not build final stage consumption moves', err);
-      return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number }>;
+      return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }>;
     }
   }, [data?.production_shelf_id, id]);
 
@@ -767,6 +769,18 @@ const ModuleShow: React.FC = () => {
       setSourceShelfOptionsByProduct({});
       return;
     }
+    const productUnits = new Map<string, string>();
+    const { data: productRows } = await supabase
+      .from('products')
+      .select('id, main_unit')
+      .in('id', productIds);
+    (productRows || []).forEach((row: any) => {
+      const id = String(row?.id || '');
+      if (!id) return;
+      const mainUnit = String(row?.main_unit || '').trim();
+      if (mainUnit) productUnits.set(id, mainUnit);
+    });
+
     const { data: inventoryRows } = await supabase
       .from('product_inventory')
       .select('product_id, shelf_id, stock')
@@ -798,7 +812,9 @@ const ModuleShow: React.FC = () => {
       const shelfInfo = shelfMap.get(shelfId);
       if (shelfInfo?.isProductionWarehouse) return;
       const labelBase = shelfInfo?.label || shelfId;
-      const label = `${labelBase} (موجودی: ${toPersianNumber(stock)})`;
+      const productUnit = productUnits.get(productId);
+      const unitSuffix = productUnit ? ` ${productUnit}` : '';
+      const label = `${labelBase} (موجودی: ${toPersianNumber(stock)}${unitSuffix})`;
       if (!next[productId]) next[productId] = [];
       if (!next[productId].some((opt) => opt.value === shelfId)) {
         next[productId].push({ value: shelfId, label, stock });
@@ -871,7 +887,7 @@ const ModuleShow: React.FC = () => {
         const [{ data: tasksData, error: tasksError }, { data: linesData, error: linesError }] = await Promise.all([
           supabase
             .from('tasks')
-            .select('id, name, title, production_line_id')
+            .select('id, name, production_line_id')
             .eq('related_production_order', id),
           supabase
             .from('production_lines')
@@ -1939,6 +1955,9 @@ const ModuleShow: React.FC = () => {
         from_shelf_id: String(group.sourceShelfId),
         to_shelf_id: String(group.productionShelfId),
         quantity: group.totalDeliveredQty,
+        unit: group.deliveryRows?.find((row: any) => String(row?.mainUnit || '').trim())?.mainUnit
+          || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit
+          || null,
       }));
 
       setStatusLoading(true);
