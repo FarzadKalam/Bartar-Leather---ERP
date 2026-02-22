@@ -479,7 +479,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                       filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
                       notFoundContent={mentionsLoading ? 'در حال بارگذاری...' : 'موردی یافت نشد'}
                       getPopupContainer={(node) => node.parentElement || document.body}
-                      dropdownStyle={{ zIndex: 3000, minWidth: 240 }}
+                      styles={{ popup: { root: { zIndex: 3000, minWidth: 240 } } }}
                       className="w-full"
                     />
                     {replyToId && (

@@ -96,13 +96,7 @@ const loadDynamicAndRelationOptions = async (
       }
 
       const targetField = field?.relationConfig?.targetField || 'name';
-      const selectColumns = Array.from(
-        new Set(['id', targetField, 'system_code', 'name', 'title', 'business_name', 'shelf_number'])
-      )
-        .filter(Boolean)
-        .join(', ');
-
-      const { data } = await supabase.from(targetModule).select(selectColumns).limit(300);
+      const { data } = await supabase.from(targetModule).select('*').limit(300);
       relationOptions[field.key] = (data || []).map((row: any) => {
         const label =
           row?.[targetField] ||
@@ -255,7 +249,7 @@ const WorkflowEditorModal: React.FC<WorkflowEditorModalProps> = ({
       onCancel={onClose}
       title={isEditMode ? 'ویرایش گردش کار' : 'ایجاد گردش کار جدید'}
       width={1120}
-      destroyOnClose
+      destroyOnHidden
       footer={[
         <Button key="cancel" onClick={onClose}>
           انصراف

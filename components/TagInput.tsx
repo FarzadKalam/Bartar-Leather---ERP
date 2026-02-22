@@ -115,7 +115,7 @@ const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [
 
   const filteredTags = allTags.filter(t => t.title.toLowerCase().includes(inputValue.toLowerCase()) && !tags.some(selected => selected.id === t.id));
 
-  const dropdownRender = () => (
+  const popupRender = () => (
       <div className="bg-white dark:bg-[#1f1f1f] border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-2 w-64">
           <Input
             ref={inputRef}
@@ -177,7 +177,7 @@ const TagInput: React.FC<TagInputProps> = ({ recordId, moduleId, initialTags = [
       <Dropdown 
         open={inputVisible} 
         onOpenChange={setInputVisible}
-        popupRender={dropdownRender} 
+        popupRender={popupRender} 
         trigger={['click']}
         placement="bottomLeft"
       >

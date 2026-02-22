@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Input, message } from 'antd';
+import { App as AntdApp, Button, Card, Input } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 
 const Login = () => {
+  const { message } = AntdApp.useApp();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');

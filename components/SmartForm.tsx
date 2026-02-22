@@ -841,10 +841,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     <span className="text-xs text-gray-400 shrink-0">مسئول:</span>
                     <Form.Item name="assignee_combo" noStyle>
                       <Select
-                        bordered={false}
+                        variant="borderless"
                         placeholder="انتخاب کنید"
                         className="min-w-[180px] font-bold text-gray-700 dark:text-gray-300"
-                        dropdownStyle={{ minWidth: 200, zIndex: 4000 }}
+                        styles={{ popup: { root: { minWidth: 200, zIndex: 4000 } } }}
                         options={assigneeOptions}
                         optionRender={(option) => (
                           <Space>

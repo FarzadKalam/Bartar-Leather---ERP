@@ -1,4 +1,5 @@
 import React from 'react';
+import { PRINT_PAPER_DIMENSIONS, PrintPaperSize } from '../printSizing';
 
 interface InvoiceCardProps {
   data: any;
@@ -9,6 +10,7 @@ interface InvoiceCardProps {
   templateId?: string;
   customer?: any;
   seller?: any;
+  printSize?: PrintPaperSize;
 }
 
 const L = {
@@ -89,11 +91,14 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
   templateId = 'invoice_sales_official',
   customer,
   seller,
+  printSize = 'A5',
 }) => {
   if (!data) return null;
 
   const isOfficialTemplate = templateId === 'invoice_sales_official';
-  const isMobilePrint = typeof window !== 'undefined' && window.innerWidth < 768;
+  // Keep invoice layout stable for printing regardless of viewport/devtools width.
+  const isMobilePrint = false;
+  const pageSize = PRINT_PAPER_DIMENSIONS[printSize];
 
   const getRelationLabel = (fieldKey: string, value: any) => {
     if (!value) return '';
@@ -273,8 +278,8 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
     <div
       className="print-card invoice-print-card"
       style={{
-        width: '148mm',
-        minHeight: '210mm',
+        width: `${pageSize.widthMm}mm`,
+        minHeight: `${pageSize.heightMm}mm`,
         padding: isMobilePrint ? '8px' : '10px',
         display: 'flex',
         flexDirection: 'column',

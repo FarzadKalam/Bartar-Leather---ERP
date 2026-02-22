@@ -345,7 +345,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       confirmLoading={saving}
       width={1320}
       zIndex={2600}
-      destroyOnClose
+      destroyOnHidden
       styles={{ body: { maxHeight: '74vh', overflowY: 'auto', paddingTop: 12 } }}
     >
       <div className="space-y-4">
@@ -358,7 +358,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
               onChange={(v) => setProductType(String(v))}
               className="w-full"
               getPopupContainer={() => document.body}
-              dropdownStyle={{ zIndex: 3000 }}
+              styles={{ popup: { root: { zIndex: 3000 } } }}
             />
           </div>
           {productType === 'raw' ? (
@@ -370,7 +370,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
                 onChange={(v) => setRawCategory(String(v))}
                 className="w-full"
                 getPopupContainer={() => document.body}
-                dropdownStyle={{ zIndex: 3000 }}
+                styles={{ popup: { root: { zIndex: 3000 } } }}
               />
             </div>
           ) : (
@@ -384,7 +384,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
                 showSearch
                 optionFilterProp="label"
                 getPopupContainer={() => document.body}
-                dropdownStyle={{ zIndex: 3000 }}
+                styles={{ popup: { root: { zIndex: 3000 } } }}
               />
             </div>
           )}

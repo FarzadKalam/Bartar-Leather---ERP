@@ -351,23 +351,75 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
     const userId = profile.id;
     const roleId = profile.role_id;
     const requestedStatuses = (Array.isArray(statuses) ? statuses : []).map((item) => String(item));
-    const queryStatuses = Array.from(new Set([...requestedStatuses, 'done']));
-    const fallbackStatuses = ['todo', 'in_progress', 'review', 'done'];
+    const queryStatuses = Array.from(new Set(requestedStatuses));
+    const fallbackStatuses = ['todo', 'in_progress', 'review', 'done', 'completed'];
+    const baseSelect = '*';
 
-    let query = supabase
-      .from('tasks')
-      .select('id, name, status, priority, produced_qty, created_at, due_date, completed_at, assignee_id, assignee_type, production_line_id, related_to_module, related_product, related_customer, related_supplier, related_production_order, related_invoice')
-      .in('status', queryStatuses.length ? queryStatuses : fallbackStatuses)
-      .order('created_at', { ascending: false })
-      .limit(50);
+    const buildBaseQuery = () => {
+      let q = supabase
+        .from('tasks')
+        .select(baseSelect)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (queryStatuses.length) {
+        q = q.in('status', queryStatuses);
+      } else {
+        q = q.in('status', fallbackStatuses);
+      }
+      return q;
+    };
+
+    let data: any[] = [];
+    let queryError: any = null;
 
     if (roleId) {
-      query = query.or(`and(assignee_type.eq.user,assignee_id.eq.${userId}),and(assignee_type.eq.role,assignee_id.eq.${roleId})`);
+      const roleOrFilter = `and(assignee_type.eq.user,assignee_id.eq.${userId}),and(assignee_type.eq.role,assignee_id.eq.${roleId})`;
+      const primary = await buildBaseQuery().or(roleOrFilter);
+      data = primary.data || [];
+      queryError = primary.error;
+
+      if (queryError) {
+        const [userResult, roleResult] = await Promise.all([
+          buildBaseQuery().eq('assignee_type', 'user').eq('assignee_id', userId),
+          buildBaseQuery().eq('assignee_type', 'role').eq('assignee_id', roleId),
+        ]);
+        const merged = [...(userResult.data || []), ...(roleResult.data || [])];
+        data = Array.from(new Map(merged.map((row: any) => [String(row.id), row])).values())
+          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 50);
+        queryError = userResult.error || roleResult.error || queryError;
+      }
     } else {
-      query = query.eq('assignee_id', userId).eq('assignee_type', 'user');
+      const userOnly = await buildBaseQuery().eq('assignee_id', userId).eq('assignee_type', 'user');
+      data = userOnly.data || [];
+      queryError = userOnly.error;
     }
 
-    const { data } = await query;
+    if (queryError) {
+      const relaxed = await supabase
+        .from('tasks')
+        .select(baseSelect)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (relaxed.error) {
+        console.warn('Tasks query failed in notifications popover', {
+          primaryError: queryError,
+          relaxedError: relaxed.error,
+          requestedStatuses,
+          userId,
+          roleId,
+        });
+        return [];
+      }
+      data = (relaxed.data || []).filter((task: any) => {
+        const isUserAssignee = String(task?.assignee_type || '') === 'user' && String(task?.assignee_id || '') === String(userId);
+        const isRoleAssignee = roleId
+          ? String(task?.assignee_type || '') === 'role' && String(task?.assignee_id || '') === String(roleId)
+          : false;
+        return isUserAssignee || isRoleAssignee;
+      });
+    }
+
     const tasksList = (data || []).filter((task: any) => {
       const normalizedStatus = String(task?.status || '').toLowerCase();
       const isCompleted = normalizedStatus === 'done' || normalizedStatus === 'completed';
@@ -764,7 +816,7 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
               optionFilterProp="label"
               className="w-full"
               getPopupContainer={(node) => node.parentElement || document.body}
-              dropdownStyle={{ zIndex: 3000, minWidth: 240 }}
+              styles={{ popup: { root: { zIndex: 3000, minWidth: 240 } } }}
             />
             {noteReplyTo && (
               <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -1039,24 +1091,25 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
   );
 
   const contentMobile = (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <Tabs
+        className="h-full min-h-0 flex-1 notifications-mobile-tabs"
         defaultActiveKey="tasks"
         items={[
           {
             key: 'notes',
             label: <Badge count={formatBadgeCount(notesCount)} color="#ef4444">یادداشت‌ها</Badge>,
-            children: <div className="h-[calc(90vh-56px)] flex flex-col">{renderNotes()}</div>,
+            children: <div className="h-full min-h-0 flex flex-col overflow-hidden">{renderNotes()}</div>,
           },
           {
             key: 'tasks',
             label: <Badge count={formatBadgeCount(tasksCount)} color="#ef4444">وظایف من</Badge>,
-            children: <div className="h-[calc(90vh-56px)] flex flex-col overflow-hidden">{renderTasks()}</div>,
+            children: <div className="h-full min-h-0 flex flex-col notif-mobile-scroll">{renderTasks()}</div>,
           },
           {
             key: 'resp',
             label: <Badge count={formatBadgeCount(responsibilitiesCount)} color="#ef4444">مسئولیت‌های من</Badge>,
-            children: <div className="h-[calc(90vh-56px)] flex flex-col overflow-hidden">{renderResponsibilities()}</div>,
+            children: <div className="h-full min-h-0 flex flex-col notif-mobile-scroll">{renderResponsibilities()}</div>,
           },
         ]}
       />
@@ -1091,8 +1144,10 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
           height="90vh"
           open={open}
           onClose={handleClose}
-          bodyStyle={{ padding: 16 }}
-          headerStyle={{ background: '#8b5a2b' }}
+          styles={{
+            body: { padding: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
+            header: { background: '#8b5a2b' },
+          }}
           closeIcon={<CloseOutlined className="text-white" />}
         >
           {contentMobile}
@@ -1114,8 +1169,10 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
           width={900}
           open={open}
           onClose={handleClose}
-          bodyStyle={{ padding: 0 }}
-          headerStyle={{ background: '#8b5a2b' }}
+          styles={{
+            body: { padding: 0 },
+            header: { background: '#8b5a2b' },
+          }}
           closeIcon={<CloseOutlined className="text-white" />}
         >
           {contentDesktop}

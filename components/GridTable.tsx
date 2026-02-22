@@ -1224,7 +1224,7 @@ const GridTable: React.FC<GridTableProps> = ({
                       placeholder="انتخاب کنید"
                       className="min-w-[160px]"
                       getPopupContainer={() => document.body}
-                      dropdownStyle={{ zIndex: 10050 }}
+                      styles={{ popup: { root: { zIndex: 10050 } } }}
                     />
                   ) : (
                     <span className="min-w-[160px] text-xs text-white font-black truncate">
@@ -1295,7 +1295,7 @@ const GridTable: React.FC<GridTableProps> = ({
                               onChange={(val) => applySelectedProduct(rowIndex, val)}
                               disabled={!rowCanEdit}
                               getPopupContainer={() => document.body}
-                              dropdownStyle={{ zIndex: 10050 }}
+                              styles={{ popup: { root: { zIndex: 10050 } } }}
                             />
                             {selectedId ? (
                               <span className="text-[11px] text-white/90 font-medium leading-none">
@@ -1646,7 +1646,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                 onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
                                 style={{ minWidth: 120 }}
                                 getPopupContainer={() => document.body}
-                                dropdownStyle={{ zIndex: 10050 }}
+                                styles={{ popup: { root: { zIndex: 10050 } } }}
                               />
                             ) : (
                               <Text className="font-medium whitespace-nowrap inline-block">{val || '-'}</Text>
@@ -1666,7 +1666,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                 onBlur={() => updatePiece(rowIndex, pieceIndex, {})}
                                 style={{ minWidth: 120 }}
                                 getPopupContainer={() => document.body}
-                                dropdownStyle={{ zIndex: 10050 }}
+                                styles={{ popup: { root: { zIndex: 10050 } } }}
                               />
                             ) : (
                               <Text className="font-medium whitespace-nowrap inline-block">{val || '-'}</Text>
@@ -1699,7 +1699,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                 onChange={(v) => updatePiece(rowIndex, pieceIndex, { formula_id: v })}
                                 style={{ minWidth: 150 }}
                                 getPopupContainer={() => document.body}
-                                dropdownStyle={{ zIndex: 10050 }}
+                                styles={{ popup: { root: { zIndex: 10050 } } }}
                               />
                             ) : (
                               <Text className="font-medium whitespace-nowrap inline-block">

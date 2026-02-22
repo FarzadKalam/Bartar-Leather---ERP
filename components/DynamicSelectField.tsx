@@ -16,6 +16,7 @@ interface DynamicSelectFieldProps {
   mode?: 'multiple' | 'tags';
   onOptionsUpdate?: () => void;
   getPopupContainer?: (trigger: HTMLElement) => HTMLElement;
+  popupRootStyle?: React.CSSProperties;
   dropdownStyle?: React.CSSProperties;
 }
 
@@ -61,6 +62,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   mode = undefined,
   onOptionsUpdate,
   getPopupContainer = () => document.body,
+  popupRootStyle,
   dropdownStyle,
 }) => {
   const { message: msg } = App.useApp();
@@ -72,6 +74,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     maxWidth: isMobileViewport ? '92vw' : 520,
     width: isMobileViewport ? '92vw' : undefined,
     ...dropdownStyle,
+    ...popupRootStyle,
   };
 
   const normalizedOptions = useMemo(() => {
@@ -183,7 +186,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       options={normalizedOptions}
       popupMatchSelectWidth={isMobileViewport}
       notFoundContent={loading ? 'در حال بارگذاری...' : 'موردی یافت نشد'}
-      dropdownStyle={mergedDropdownStyle}
+      styles={{ popup: { root: mergedDropdownStyle } }}
       optionRender={(option) => (
         <div
           style={{

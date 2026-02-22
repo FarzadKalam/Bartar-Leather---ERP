@@ -170,10 +170,20 @@ const isInRange = (value: dayjs.Dayjs | null, start: dayjs.Dayjs, end: dayjs.Day
   return t >= start.valueOf() && t <= end.valueOf();
 };
 
-const parseMonthParam = (rawMonth: string | null): Dayjs => {
-  if (!rawMonth) return dayjs();
-  const parsed = dayjs(`${rawMonth}-01`);
-  return parsed.isValid() ? parsed : dayjs();
+const parseDateParam = (rawDate: string | null): Dayjs | null => {
+  if (!rawDate) return null;
+  const parsed = dayjs(rawDate);
+  return parsed.isValid() ? parsed : null;
+};
+
+const getInitialRangeFromQuery = (): [Dayjs, Dayjs] => {
+  const query = new URLSearchParams(window.location.search);
+  const from = parseDateParam(query.get('from'));
+  const to = parseDateParam(query.get('to'));
+  if (from && to && from.valueOf() <= to.valueOf()) {
+    return [from.startOf('day'), to.endOf('day')];
+  }
+  return [dayjs().startOf('month').startOf('day'), dayjs().endOf('month').endOf('day')];
 };
 
 const toStatusLabel = (rawStatus: string | null | undefined) => {
@@ -415,12 +425,10 @@ const HRPage: React.FC = () => {
   const navigate = useNavigate();
   const { employeeId } = useParams();
   const { message } = App.useApp();
+  const [isMobile, setIsMobile] = useState<boolean>(window.innerWidth < 768);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<Dayjs>(() => {
-    const query = new URLSearchParams(window.location.search);
-    return parseMonthParam(query.get('month'));
-  });
+  const [selectedRange, setSelectedRange] = useState<[Dayjs, Dayjs]>(() => getInitialRangeFromQuery());
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [lineQuantityById, setLineQuantityById] = useState<Record<string, number>>({});
@@ -431,9 +439,20 @@ const HRPage: React.FC = () => {
   const [savingProfileConfig, setSavingProfileConfig] = useState(false);
   const [configForm] = Form.useForm<PayrollFormValues>();
 
-  const monthStart = useMemo(() => selectedMonth.startOf('month').startOf('day'), [selectedMonth]);
-  const monthEnd = useMemo(() => selectedMonth.endOf('month').endOf('day'), [selectedMonth]);
-  const selectedMonthParam = selectedMonth.format('YYYY-MM');
+  const monthStart = useMemo(() => selectedRange[0].startOf('day'), [selectedRange]);
+  const monthEnd = useMemo(() => selectedRange[1].endOf('day'), [selectedRange]);
+  const selectedRangeQuery = `from=${monthStart.format('YYYY-MM-DD')}&to=${monthEnd.format('YYYY-MM-DD')}`;
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const onDateRangeChange = (values: [Dayjs | null, Dayjs | null] | null) => {
+    if (!values || !values[0] || !values[1]) return;
+    setSelectedRange([values[0].startOf('day'), values[1].endOf('day')]);
+  };
 
   const fetchData = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
@@ -636,8 +655,65 @@ const HRPage: React.FC = () => {
   }
 
   const goToEmployeeDetails = (profileId: string) => {
-    navigate(`/hr/${profileId}?month=${selectedMonthParam}`);
+    navigate(`/hr/${profileId}?${selectedRangeQuery}`);
   };
+
+  const renderSummaryMobileCard = (row: EmployeeSummaryRow) => (
+    <Card
+      key={row.key}
+      className="mb-3 cursor-pointer"
+      onClick={() => goToEmployeeDetails(String(row.profile.id))}
+      styles={{ body: { padding: 12 } }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-bold text-leather-700">{row.name}</div>
+        <Button
+          size="small"
+          icon={<SettingOutlined />}
+          onClick={(event) => {
+            event.stopPropagation();
+            openConfigModal(row.profile);
+          }}
+        >
+          ضرایب
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-1 mb-2">
+        <Tag color="blue">کل {toPersianNumber(row.totalTasks)}</Tag>
+        <Tag color="green">انجام‌شده {toPersianNumber(row.doneCount)}</Tag>
+        <Tag color="red">عقب‌افتاده {toPersianNumber(row.overdueOpenCount)}</Tag>
+      </div>
+      <div className="text-xs text-gray-600 leading-6">
+        <div>پایه: <span className="persian-number">{formatPersianPrice(row.baseSalary)} تومان</span></div>
+        <div>کارکرد: <span className="persian-number">{formatPersianPrice(row.taskWageTotal)} تومان</span></div>
+        <div className="font-bold text-gray-800">قابل پرداخت: <span className="persian-number">{formatPersianPrice(row.netPayable)} تومان</span></div>
+      </div>
+    </Card>
+  );
+
+  const renderTaskMobileCard = (row: TaskDetailRow) => (
+    <Card key={row.key} className="mb-3" styles={{ body: { padding: 12 } }}>
+      <div className="mb-1">
+        <a href={`/tasks/${row.taskId}`} className="font-bold text-leather-700 hover:underline">
+          {row.name}
+        </a>
+      </div>
+      <div className="flex flex-wrap gap-1 mb-2">
+        <Tag>{toModuleLabel(row.relatedModule)}</Tag>
+        <Tag>{toStatusLabel(row.status)}</Tag>
+        <Tag color={row.performanceColor}>{row.performanceLabel}</Tag>
+      </div>
+      <div className="text-xs text-gray-600 leading-6">
+        <div>موعد: {row.dueAt ? toPersianNumber(safeJalaliFormat(row.dueAt, 'YYYY/MM/DD HH:mm')) : '-'}</div>
+        <div>تکمیل: {row.completedAt ? toPersianNumber(safeJalaliFormat(row.completedAt, 'YYYY/MM/DD HH:mm')) : '-'}</div>
+        <div>زودتر: <span className="persian-number text-green-700">{toPersianNumber(row.earlyHours.toFixed(1))}</span> ساعت</div>
+        <div>دیرتر: <span className="persian-number text-red-700">{toPersianNumber(row.lateHours.toFixed(1))}</span> ساعت</div>
+        <div>دستمزد وظیفه: <span className="persian-number">{formatPersianPrice(row.wageBase)} تومان</span></div>
+        <div>ضریب تولید: <span className="persian-number">{toPersianNumber(row.wageMultiplier)}</span></div>
+        <div className="font-bold text-gray-800">دستمزد نهایی: <span className="persian-number">{formatPersianPrice(row.wageFinal)} تومان</span></div>
+      </div>
+    </Card>
+  );
 
   const summaryColumns = [
     {
@@ -789,10 +865,10 @@ const HRPage: React.FC = () => {
 
   const detailHeader = selectedEmployeeSummary ? (
     <div className="mb-4 flex items-start justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         <Button
           icon={<ArrowRightOutlined />}
-          onClick={() => navigate(`/hr?month=${selectedMonthParam}`)}
+          onClick={() => navigate(`/hr?${selectedRangeQuery}`)}
         >
           بازگشت
         </Button>
@@ -805,32 +881,35 @@ const HRPage: React.FC = () => {
           </Typography.Text>
         </div>
       </div>
-      <Space>
-        <DatePicker
-          picker="month"
-          value={selectedMonth}
-          onChange={(value) => setSelectedMonth(value || dayjs())}
+      <div className={`grid gap-2 w-full ${isMobile ? 'grid-cols-1' : 'grid-cols-[280px_auto_auto]'}`}>
+        <DatePicker.RangePicker
+          value={selectedRange}
+          onChange={onDateRangeChange}
           allowClear={false}
+          className="w-full"
+          popupClassName="hr-range-popup"
         />
         <Button
           icon={<ReloadOutlined />}
           onClick={() => fetchData(true)}
           loading={refreshing}
+          className="w-full"
         >
           بروزرسانی
         </Button>
         <Button
           icon={<SettingOutlined />}
           onClick={() => openConfigModal(selectedEmployeeSummary.profile)}
+          className="w-full"
         >
           تنظیم ضرایب
         </Button>
-      </Space>
+      </div>
     </div>
   ) : null;
 
   return (
-    <div className="p-4 md:p-6 max-w-[1700px] mx-auto pb-20">
+    <div className="p-3 md:p-6 max-w-[1700px] mx-auto pb-20">
       {employeeId ? (
         <>
           {detailHeader}
@@ -874,12 +953,17 @@ const HRPage: React.FC = () => {
                 {selectedEmployeeSummary.detailRows.length === 0 ? (
                   <Empty description="برای این نیرو در این بازه موردی یافت نشد." />
                 ) : (
-                  <Table
-                    rowKey="key"
-                    columns={detailColumns}
-                    dataSource={selectedEmployeeSummary.detailRows}
-                    pagination={{ pageSize: 30, showSizeChanger: false }}
-                  />
+                  isMobile ? (
+                    <div>{selectedEmployeeSummary.detailRows.map(renderTaskMobileCard)}</div>
+                  ) : (
+                    <Table
+                      rowKey="key"
+                      columns={detailColumns}
+                      dataSource={selectedEmployeeSummary.detailRows}
+                      pagination={{ pageSize: 30, showSizeChanger: false }}
+                      scroll={{ x: 1300 }}
+                    />
+                  )
                 )}
               </Card>
             </>
@@ -894,12 +978,13 @@ const HRPage: React.FC = () => {
                 بازه گزارش: {toPersianNumber(safeJalaliFormat(monthStart.toISOString(), 'YYYY/MM/DD'))} تا {toPersianNumber(safeJalaliFormat(monthEnd.toISOString(), 'YYYY/MM/DD'))}
               </Typography.Text>
             </div>
-            <Space wrap>
-              <DatePicker
-                picker="month"
-                value={selectedMonth}
-                onChange={(value) => setSelectedMonth(value || dayjs())}
+            <div className={`grid gap-2 w-full ${isMobile ? 'grid-cols-1' : 'grid-cols-[280px_minmax(220px,1fr)_auto]'}`}>
+              <DatePicker.RangePicker
+                value={selectedRange}
+                onChange={onDateRangeChange}
                 allowClear={false}
+                className="w-full"
+                popupClassName="hr-range-popup"
               />
               <Select
                 mode="multiple"
@@ -908,16 +993,17 @@ const HRPage: React.FC = () => {
                 value={selectedEmployeeIds}
                 onChange={(values) => setSelectedEmployeeIds(values as string[])}
                 options={employeeOptions}
-                className="min-w-[220px]"
+                className="w-full min-w-0"
               />
               <Button
                 icon={<ReloadOutlined />}
                 onClick={() => fetchData(true)}
                 loading={refreshing}
+                className="w-full"
               >
                 بروزرسانی
               </Button>
-            </Space>
+            </div>
           </div>
 
           <Row gutter={[12, 12]} className="mb-4">
@@ -951,16 +1037,21 @@ const HRPage: React.FC = () => {
             {visibleSummaries.length === 0 ? (
               <Empty description="برای این بازه داده‌ای یافت نشد." />
             ) : (
-              <Table
-                rowKey="key"
-                columns={summaryColumns}
-                dataSource={visibleSummaries}
-                pagination={{ pageSize: 20, showSizeChanger: false }}
-                onRow={(row: EmployeeSummaryRow) => ({
-                  onClick: () => goToEmployeeDetails(String(row.profile.id)),
-                  style: { cursor: 'pointer' },
-                })}
-              />
+              isMobile ? (
+                <div>{visibleSummaries.map(renderSummaryMobileCard)}</div>
+              ) : (
+                <Table
+                  rowKey="key"
+                  columns={summaryColumns}
+                  dataSource={visibleSummaries}
+                  pagination={{ pageSize: 20, showSizeChanger: false }}
+                  onRow={(row: EmployeeSummaryRow) => ({
+                    onClick: () => goToEmployeeDetails(String(row.profile.id)),
+                    style: { cursor: 'pointer' },
+                  })}
+                  scroll={{ x: 1100 }}
+                />
+              )
             )}
           </Card>
         </>
@@ -993,6 +1084,14 @@ const HRPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      <style>{`
+        .hr-range-popup .ant-picker-panels > *:last-child {
+          display: none !important;
+        }
+        .hr-range-popup .ant-picker-panels {
+          min-width: auto !important;
+        }
+      `}</style>
     </div>
   );
 };

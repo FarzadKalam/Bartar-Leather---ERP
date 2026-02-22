@@ -343,7 +343,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
                   onChange={(e) => setGlobalSearch(e.target.value)}
                   placeholder="جستجو در همه جا..."
                   className="bg-transparent border-none outline-none text-xs text-gray-700 dark:text-gray-200 w-full mr-2 placeholder-gray-400"
-                  bordered={false}
+                  variant="borderless"
                 />
             </div>
 

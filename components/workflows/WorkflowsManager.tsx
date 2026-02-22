@@ -317,7 +317,7 @@ const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
       }
       footer={null}
       width={1200}
-      destroyOnClose={false}
+      destroyOnHidden={false}
     >
       {content}
     </Modal>

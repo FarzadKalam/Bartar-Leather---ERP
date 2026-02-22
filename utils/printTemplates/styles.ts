@@ -34,13 +34,13 @@ export const printStyles = `
   .print-label { width: 36%; background: #f8fafc; font-weight: 700; color: #374151; }
   .print-value { color: #111827; word-break: break-word; }
   
-  #print-root { display: none; }
+  #print-root { display: none !important; }
   @media print {
     @page { size: A6; margin: 6mm; }
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body * { visibility: hidden; }
     #print-root, #print-root * { visibility: visible; }
-    #print-root { display: block; position: fixed; left: 0; top: 0; width: 105mm; height: 148mm; }
+    #print-root { display: block !important; position: fixed; left: 0; top: 0; width: 105mm; height: 148mm; }
     .print-card { border: none; box-shadow: none; border-radius: 0; }
   }
 `;

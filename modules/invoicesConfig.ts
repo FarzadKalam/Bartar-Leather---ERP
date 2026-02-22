@@ -161,12 +161,8 @@ export const invoicesConfig: ModuleDefinition = {
         { label: 'تکمیل شده', value: 'completed', color: 'gray' },
       ],
     },
-      // --- اطلاعات پایه ---
-      { key: 'customer_id', labels: { fa: 'نام مشتری', en: 'Customer' }, type: FieldType.RELATION, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1, relationConfig: { targetModule: 'customers', targetField: 'last_name' }, validation: { required: true }, nature: FieldNature.STANDARD },
-      { key: 'sale_source', labels: { fa: 'منبع فروش', en: 'Source' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 2, options: [
-          { label: 'حضوری', value: 'in_person' }, { label: 'تلفنی', value: 'phone' }, { label: 'سایت', value: 'website' }, { label: 'سوشال', value: 'social' }
-      ], nature: FieldNature.STANDARD },
-      { key: 'description', labels: { fa: 'توضیحات فاکتور', en: 'Invoice Description' }, type: FieldType.LONG_TEXT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 3, nature: FieldNature.STANDARD },
+    // --- اطلاعات پایه ---
+    { key: 'description', labels: { fa: 'توضیحات فاکتور', en: 'Invoice Description' }, type: FieldType.LONG_TEXT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 3, nature: FieldNature.STANDARD },
 
     {
       key: 'customer_id',

@@ -505,7 +505,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
                     getPopupContainer={() => document.body}
-                    dropdownStyle={{ zIndex: 4000 }}
+                    popupRootStyle={{ zIndex: 4000 }}
                 />
             );
         }
@@ -517,7 +517,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 allowClear
                 optionFilterProp="label"
                 getPopupContainer={() => document.body}
-                dropdownStyle={{ zIndex: 4000 }}
+                styles={{ popup: { root: { zIndex: 4000 } } }}
             />
         );
 
@@ -531,10 +531,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     category={field.dynamicOptionsCategory}
                     placeholder={compactMode ? '' : "انتخاب کنید"}
                     mode="multiple"
-                    onOptionsUpdate={onOptionsUpdate}
-                    disabled={!forceEditMode}
-                    getPopupContainer={() => document.body}
-                    dropdownStyle={{ zIndex: 4000 }}
+                onOptionsUpdate={onOptionsUpdate}
+                disabled={!forceEditMode}
+                getPopupContainer={() => document.body}
+                popupRootStyle={{ zIndex: 4000 }}
                 />
             );
         }
@@ -547,7 +547,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 allowClear
                 optionFilterProp="label"
                 getPopupContainer={() => document.body}
-                dropdownStyle={{ zIndex: 4000 }}
+                styles={{ popup: { root: { zIndex: 4000 } } }}
             />
         );
 
@@ -576,7 +576,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     optionFilterProp="label"
                     getPopupContainer={() => document.body}
                     popupMatchSelectWidth={false}
-                    dropdownStyle={{ zIndex: 4000, minWidth: 320 }}
+                    styles={{ popup: { root: { zIndex: 4000, minWidth: 320 } } }}
                     filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                     popupRender={(menu) => (
                         <>
@@ -851,7 +851,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       allowClear: true,
       optionFilterProp: 'label' as const,
       getPopupContainer: () => document.body,
-      dropdownStyle: { zIndex: 5000 },
+      styles: { popup: { root: { zIndex: 5000 } } },
       className: 'w-full',
       disabled: isDisabled,
     };
@@ -862,8 +862,6 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
           <Input
             allowClear
             disabled={isDisabled}
-            value={formatTextForInput(form.getFieldValue(field.key))}
-            onChange={(e) => form.setFieldValue(field.key, normalizeDigitsToEnglish(e.target.value))}
           />
         );
       case FieldType.LONG_TEXT:
@@ -871,8 +869,6 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
           <Input.TextArea
             rows={2}
             disabled={isDisabled}
-            value={formatTextForInput(form.getFieldValue(field.key))}
-            onChange={(e) => form.setFieldValue(field.key, normalizeDigitsToEnglish(e.target.value))}
           />
         );
       case FieldType.NUMBER:
@@ -919,8 +915,6 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
           <Input
             allowClear
             disabled={isDisabled}
-            value={formatTextForInput(form.getFieldValue(field.key))}
-            onChange={(e) => form.setFieldValue(field.key, normalizeDigitsToEnglish(e.target.value))}
           />
         );
     }
@@ -935,7 +929,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       okText="افزودن"
       cancelText="انصراف"
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
       zIndex={2000} 
     >
       <Form

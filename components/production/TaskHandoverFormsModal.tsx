@@ -446,7 +446,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
       onCancel={onClose}
       width="min(1120px, calc(100vw - 24px))"
       footer={null}
-      destroyOnClose
+      destroyOnHidden
       styles={{ body: { maxHeight: '74vh', overflowY: 'auto' } }}
       centered
     >

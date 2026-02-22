@@ -1216,7 +1216,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
                   }}
                   className="w-full"
                   getPopupContainer={() => document.body}
-                  dropdownStyle={{ zIndex: 4000 }}
+                  styles={{ popup: { root: { zIndex: 4000 } } }}
                 />
                 <QrScanPopover
                   label=""
@@ -1260,7 +1260,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
                   className="w-full"
                   status={hasProduct && !record?.selected_shelf_id ? 'error' : undefined}
                   getPopupContainer={() => document.body}
-                  dropdownStyle={{ zIndex: 4000 }}
+                  styles={{ popup: { root: { zIndex: 4000 } } }}
                 />
                 <QrScanPopover
                   label=""

@@ -2369,7 +2369,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             onChange={(val) => handleStatusChange(task.id, val)}
             className="w-36"
             getPopupContainer={() => document.body}
-            dropdownStyle={{ zIndex: 10050 }}
+            styles={{ popup: { root: { zIndex: 10050 } } }}
             options={[
               { value: 'todo', label: 'انجام نشده' },
               { value: 'in_progress', label: 'در حال انجام' },
@@ -2886,7 +2886,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         onCancel={() => setIsLineModalOpen(false)}
         footer={null}
         centered
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={lineForm} onFinish={handleAddLine} layout="vertical" className="pt-2">
           <div className="grid grid-cols-12 gap-3">
@@ -2919,7 +2919,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         zIndex={10001}
         width={480}
         centered
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={taskForm} onFinish={handleAddTask} layout="vertical" className="pt-2">
           <div className="grid grid-cols-12 gap-3">
@@ -2978,8 +2978,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               <Form.Item name="due_date" label="موعد انجام">
                 <PersianDatePicker
                   type="DATETIME"
-                  value={taskForm.getFieldValue('due_date')}
-                  onChange={(val) => taskForm.setFieldValue('due_date', val)}
+                  onChange={() => {}}
                   placeholder="تاریخ و ساعت"
                   className="w-full"
                 />
@@ -3004,7 +3003,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         zIndex={10001}
         width={420}
         centered
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={draftForm} onFinish={handleAddDraftStage} layout="vertical" className="pt-2">
           <div className="grid grid-cols-12 gap-3">

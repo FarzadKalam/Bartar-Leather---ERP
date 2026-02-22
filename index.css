@@ -42,6 +42,30 @@
   font-feature-settings: "ss01";
 }
 
+/* Notifications mobile tabs: ensure tab panes can host internal scrolling lists */
+.notifications-mobile-tabs,
+.notifications-mobile-tabs.ant-tabs,
+.notifications-mobile-tabs .ant-tabs-content-holder,
+.notifications-mobile-tabs .ant-tabs-content,
+.notifications-mobile-tabs .ant-tabs-tabpane {
+  height: 100%;
+  min-height: 0;
+}
+
+.notifications-mobile-tabs.ant-tabs {
+  display: flex;
+  flex-direction: column;
+}
+
+.notifications-mobile-tabs .ant-tabs-content-holder {
+  flex: 1 1 auto;
+}
+
+.notif-mobile-scroll {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* =========================================
    2. اسکرول‌بار سفارشی (Custom Scrollbar)
    ========================================= */
@@ -288,11 +312,7 @@
   @page {
     margin: 0;
     padding: 0;
-    size: A6;
-  }
-
-  @page :has(.print-card[style*="width: 148mm"]) {
-    size: A5;
+    size: auto;
   }
 
   /* ✅ مخفی کردن تمام عناصر به جز print-root */
@@ -320,16 +340,11 @@
   #print-root,
   #print-root * {
     visibility: visible !important;
-    display: block !important;
-    background: white !important;
-    color: #111827 !important;
   }
 
   /* ✅ کارت چاپ برای پرینت */
   #print-root .print-card {
-    width: 105mm !important;
-    height: 148mm !important;
-    margin: 0 !important;
+    margin: 0 auto !important;
     padding: 8mm !important;
     page-break-after: avoid !important;
     page-break-inside: avoid !important;
@@ -337,12 +352,6 @@
     box-shadow: none !important;
     border-radius: 0 !important;
     background: white !important;
-  }
-
-  /* ✅ فاکتور A5 برای پرینت */
-  #print-root .print-card[style*="width: 148mm"] {
-    width: 148mm !important;
-    height: 210mm !important;
   }
 
   /* ✅ جداول برای پرینت */
@@ -504,21 +513,11 @@
   color: #999;
 }
 
-@media print {
-  .invoice-print-card {
-    width: 210mm !important;
-    height: 297mm !important;
-    page-break-after: avoid !important;
-    margin: 0 !important;
-    padding: 16px !important;
-  }
-}
-
 /* =========================================
    Responsive Print Modal & Invoices
    ========================================= */
 
-@media (max-width: 1024px) {
+@media screen and (max-width: 1024px) {
   .print-modal-responsive .ant-modal-wrap {
     padding: 8px;
   }
@@ -528,7 +527,7 @@
   }
 }
 
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
   /* Print Modal موبایل */
   .print-modal-responsive {
     width: 98vw !important;

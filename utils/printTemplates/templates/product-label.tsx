@@ -1,5 +1,6 @@
 import React from 'react';
 import { QRCode } from 'antd';
+import { PRINT_PAPER_DIMENSIONS, PrintPaperSize } from '../printSizing';
 
 interface ProductLabelProps {
   title: string;
@@ -7,6 +8,7 @@ interface ProductLabelProps {
   qrValue: string;
   fields: any[];
   formatPrintValue: (field: any, value: any) => string;
+  printSize?: PrintPaperSize;
 }
 
 export const ProductLabel: React.FC<ProductLabelProps> = ({
@@ -15,9 +17,14 @@ export const ProductLabel: React.FC<ProductLabelProps> = ({
   qrValue,
   fields,
   formatPrintValue,
+  printSize = 'A6',
 }) => {
+  const pageSize = PRINT_PAPER_DIMENSIONS[printSize];
   return (
-    <div className="print-card">
+    <div
+      className="print-card"
+      style={{ width: `${pageSize.widthMm}mm`, minHeight: `${pageSize.heightMm}mm` }}
+    >
       <div className="print-header">
         <div className="print-head-text">
           <div className="print-title">{title}</div>

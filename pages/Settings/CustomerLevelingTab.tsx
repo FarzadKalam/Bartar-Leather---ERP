@@ -135,7 +135,7 @@ const CustomerLevelingTab: React.FC = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {rankCards.map((rank) => (
-            <Card key={rank.key} title={<span style={{ color: rank.color, fontWeight: 700 }}>{rank.title}</span>} bordered>
+            <Card key={rank.key} title={<span style={{ color: rank.color, fontWeight: 700 }}>{rank.title}</span>} variant="outlined">
               <Form.Item
                 label="حداقل تعداد دفعات خرید"
                 name={[rank.key, 'min_purchase_count']}

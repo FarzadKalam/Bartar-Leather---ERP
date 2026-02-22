@@ -132,12 +132,12 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 <div className="flex items-center justify-between sm:justify-start bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-lg sm:rounded-full pl-2 sm:pl-1 pr-3 py-1 gap-1 sm:gap-2 mb-4">
                   <span className="text-xs text-gray-400 shrink-0">مسئول:</span>
                   <Select
-                    bordered={false}
+                    variant="borderless"
                     value={data.assignee_id ? `${data.assignee_type}_${data.assignee_id}` : null}
                     onChange={handleAssigneeChange}
                     placeholder="انتخاب کنید"
                     className="min-w-[140px] font-bold text-gray-700 dark:text-gray-300"
-                    dropdownStyle={{ minWidth: 200 }}
+                    styles={{ popup: { root: { minWidth: 200 } } }}
                     options={getAssigneeOptions()}
                     optionRender={(option) => (
                       <Space>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Table, Button, Select, message, Switch, Avatar, Drawer, Form, Input, Upload } from 'antd';
 import { UserOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -6,6 +6,15 @@ import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../supabaseClient';
 
 type ResponsiveBreakpoint = 'xxl' | 'xl' | 'lg' | 'md' | 'sm' | 'xs';
+
+const authSignUpClient = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+    storageKey: 'sb-signup-auth-token',
+  },
+});
 
 const UsersTab: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
@@ -18,18 +27,6 @@ const UsersTab: React.FC = () => {
     const [editingUser, setEditingUser] = useState<any | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
-    const authSignUpClient = useMemo(
-        () =>
-            createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY, {
-                auth: {
-                    persistSession: false,
-                    autoRefreshToken: false,
-                    detectSessionInUrl: false,
-                },
-            }),
-        []
-    );
-
     useEffect(() => {
         fetchData();
         loadCurrentUser();

@@ -141,7 +141,7 @@ const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
       open={open}
       onCancel={onClose}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
       zIndex={5000}
     >
       {!productId && (

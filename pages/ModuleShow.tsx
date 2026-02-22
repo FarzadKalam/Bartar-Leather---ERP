@@ -19,7 +19,6 @@ import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
 import TablesSection from '../components/moduleShow/TablesSection';
 import PrintSection from '../components/moduleShow/PrintSection';
 import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece, type StartMaterialDeliveryRow } from '../components/production/StartProductionModal';
-import { printStyles } from '../utils/printTemplates';
 import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { convertArea } from '../utils/unitConversions';
@@ -651,7 +650,6 @@ const ModuleShow: React.FC = () => {
     setLoading(true);
     
     try {
-        // 👇 تغییر مهم: اضافه کردن صریح فیلدهای سیستمی به select
         const { data: record, error } = await supabase
             .from(moduleId)
             .select(`
@@ -665,9 +663,6 @@ const ModuleShow: React.FC = () => {
             .single();
 
         if (error) throw error;
-        
-        // لاگ برای اطمینان از اینکه دیتا واقعا از دیتابیس میاد
-        console.log('Record Data:', record); 
 
         const { data: tagsData } = await supabase
             .from('record_tags')
@@ -2727,7 +2722,7 @@ const ModuleShow: React.FC = () => {
             okText="توقف تولید"
             cancelText="انصراف"
             confirmLoading={statusLoading}
-            destroyOnClose
+            destroyOnHidden
           >
             <div className="text-sm text-gray-600 whitespace-pre-line">
               {PRODUCTION_MESSAGES.stopNotice}
@@ -2742,7 +2737,7 @@ const ModuleShow: React.FC = () => {
             okText={outputMode === 'existing' ? 'ثبت تکمیل' : undefined}
             cancelText="انصراف"
             confirmLoading={statusLoading}
-            destroyOnClose
+            destroyOnHidden
             footer={outputMode === 'existing' ? undefined : null}
           >
             <div className="space-y-4">
@@ -2888,6 +2883,8 @@ const ModuleShow: React.FC = () => {
         printTemplates={printManager.printTemplates}
         selectedTemplateId={printManager.selectedTemplateId}
         onSelectTemplate={printManager.setSelectedTemplateId}
+        printSize={printManager.printSize}
+        onPrintSizeChange={printManager.setPrintSize}
         renderPrintCard={printManager.renderPrintCard}
         printMode={printManager.printMode}
         printableFields={printableFields}
@@ -2905,7 +2902,6 @@ const ModuleShow: React.FC = () => {
         .dark .ant-table-cell { background: #1a1a1a !important; color: #ddd !important; border-bottom: 1px solid #303030 !important; }
         .dark .ant-table-tbody > tr:hover > td { background: #222 !important; }
       `}</style>
-      <style>{printStyles}</style>
     </div>
   );
 };

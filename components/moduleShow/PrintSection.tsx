@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Tabs } from 'antd';
-import { printStyles } from '../../utils/printTemplates';
+import { createPortal } from 'react-dom';
+import { PrintPaperSize } from '../../utils/printTemplates/printSizing';
 
 interface PrintSectionProps {
   isPrintModalOpen: boolean;
@@ -9,6 +10,8 @@ interface PrintSectionProps {
   printTemplates: { id: string; title: string; description: string }[];
   selectedTemplateId: string;
   onSelectTemplate: (id: string) => void;
+  printSize: PrintPaperSize;
+  onPrintSizeChange: (size: PrintPaperSize) => void;
   renderPrintCard: () => React.ReactNode;
   printMode: boolean;
   printableFields?: any[];
@@ -23,6 +26,8 @@ const PrintSection: React.FC<PrintSectionProps> = ({
   printTemplates,
   selectedTemplateId,
   onSelectTemplate,
+  printSize,
+  onPrintSizeChange,
   renderPrintCard,
   printMode,
   printableFields = [],
@@ -48,6 +53,12 @@ const PrintSection: React.FC<PrintSectionProps> = ({
   }, [printMode]);
   
   const isFieldSelectionAvailable = selectedTemplateId && (selectedTemplateId === 'product_label' || selectedTemplateId === 'production_passport') && printableFields.length > 0;
+  const previewScaleMap: Record<PrintPaperSize, number> = {
+    A4: isMobile ? 0.35 : 0.46,
+    A5: isMobile ? 0.5 : 0.68,
+    A6: isMobile ? 0.7 : 0.88,
+  };
+  const previewScale = previewScaleMap[printSize];
 
   const selectedFieldCount = (selectedPrintFields[selectedTemplateId] || []).length;
 
@@ -61,13 +72,15 @@ const PrintSection: React.FC<PrintSectionProps> = ({
         okText="چاپ"
         cancelText="انصراف"
         width={isMobile ? '95vw' : '1000px'}
-        destroyOnClose
+        destroyOnHidden
         centered={true}
         zIndex={1000}
-        bodyStyle={{ 
-          padding: '0',
-          maxHeight: '85vh',
-          overflow: 'hidden'
+        styles={{
+          body: {
+            padding: '0',
+            maxHeight: '85vh',
+            overflow: 'hidden'
+          }
         }}
         style={{ maxWidth: isMobile ? '95vw' : '1000px' }}
       >
@@ -115,6 +128,46 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                 </div>
               </button>
             ))}
+
+            <div
+              style={{
+                marginTop: '8px',
+                paddingTop: '8px',
+                borderTop: '1px solid #e5e7eb',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
+              <div style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', textAlign: 'right' }}>
+                سایز چاپ
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {(['A4', 'A5', 'A6'] as PrintPaperSize[]).map((size) => {
+                  const selected = printSize === size;
+                  return (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => onPrintSizeChange(size)}
+                      style={{
+                        flex: 1,
+                        border: selected ? '2px solid #c58f60' : '1px solid #d1d5db',
+                        borderRadius: '8px',
+                        background: selected ? '#fff8f3' : '#fff',
+                        color: selected ? '#92400e' : '#374151',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                        padding: '8px 0',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {size}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           {/* ستون سمت راست: Tabs برای پیش‌نمایش و فیلدها */}
@@ -143,7 +196,7 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                     }}>
                       <div 
                         style={{ 
-                          transform: isMobile ? 'scale(0.5)' : 'scale(0.7)',
+                          transform: `scale(${previewScale})`,
                           transformOrigin: 'top center',
                           transformBox: 'border-box'
                         }}
@@ -221,11 +274,14 @@ const PrintSection: React.FC<PrintSectionProps> = ({
       </Modal>
 
       {/* print-root - کاملاً پنهان */}
-      <div id="print-root" aria-hidden={!printMode} style={{ display: printMode ? 'block' : 'none' }}>
-        {renderPrintCard()}
-      </div>
-
-      <style>{printStyles}</style>
+      {typeof document !== 'undefined'
+        ? createPortal(
+            <div id="print-root" aria-hidden={!printMode} data-print-size={printSize}>
+              {renderPrintCard()}
+            </div>,
+            document.body
+          )
+        : null}
     </>
   );
 };

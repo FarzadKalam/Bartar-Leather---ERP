@@ -452,146 +452,159 @@ const ConnectionsTab: React.FC = () => {
           defaultActiveKey={['sms', 'email', 'site']}
           className="rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden"
           expandIconPosition="end"
-        >
-          <Collapse.Panel header="اتصال سامانه پیامک" key="sms">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Form.Item label="ارائه‌دهنده پیامک" name={['sms', 'provider']}>
-                <Select options={smsProviderOptions} />
-              </Form.Item>
-              <Form.Item label="حالت وب‌سرویس" name={['sms', 'mode']}>
-                <Select
-                  options={[
-                    { label: 'REST', value: 'rest' },
-                    { label: 'SOAP', value: 'soap' },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item label="فعال" name={['sms', 'is_active']} valuePropName="checked">
-                <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
-              </Form.Item>
+          items={[
+            {
+              key: 'sms',
+              label: 'اتصال سامانه پیامک',
+              children: (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Form.Item label="ارائه‌دهنده پیامک" name={['sms', 'provider']}>
+                      <Select options={smsProviderOptions} />
+                    </Form.Item>
+                    <Form.Item label="حالت وب‌سرویس" name={['sms', 'mode']}>
+                      <Select
+                        options={[
+                          { label: 'REST', value: 'rest' },
+                          { label: 'SOAP', value: 'soap' },
+                        ]}
+                      />
+                    </Form.Item>
+                    <Form.Item label="فعال" name={['sms', 'is_active']} valuePropName="checked">
+                      <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
+                    </Form.Item>
 
-              <Form.Item label="نام کاربری" name={['sms', 'username']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="رمز عبور" name={['sms', 'password']}>
-                <Input.Password />
-              </Form.Item>
-              <Form.Item label="API Key (اختیاری)" name={['sms', 'api_key']}>
-                <Input />
-              </Form.Item>
+                    <Form.Item label="نام کاربری" name={['sms', 'username']}>
+                      <Input />
+                    </Form.Item>
+                    <Form.Item label="رمز عبور" name={['sms', 'password']}>
+                      <Input.Password />
+                    </Form.Item>
+                    <Form.Item label="API Key (اختیاری)" name={['sms', 'api_key']}>
+                      <Input />
+                    </Form.Item>
 
-              <Form.Item label="شماره ارسال کننده" name={['sms', 'sender_number']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="کد پترن (BodyId)" name={['sms', 'body_id']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="Flash SMS" name={['sms', 'is_flash']} valuePropName="checked">
-                <Switch />
-              </Form.Item>
+                    <Form.Item label="شماره ارسال کننده" name={['sms', 'sender_number']}>
+                      <Input />
+                    </Form.Item>
+                    <Form.Item label="کد پترن (BodyId)" name={['sms', 'body_id']}>
+                      <Input />
+                    </Form.Item>
+                    <Form.Item label="Flash SMS" name={['sms', 'is_flash']} valuePropName="checked">
+                      <Switch />
+                    </Form.Item>
 
-              <Form.Item label="Base URL" name={['sms', 'base_url']} className="md:col-span-3">
-                <Input />
-              </Form.Item>
-            </div>
+                    <Form.Item label="Base URL" name={['sms', 'base_url']} className="md:col-span-3">
+                      <Input />
+                    </Form.Item>
+                  </div>
 
-            <div className="text-xs text-gray-500 mb-3">
-              برای REST از مسیر
-              {' '}
-              <code>https://rest.payamak-panel.com/api/SendSMS/SendSMS</code>
-              {' '}
-              و برای SOAP از مسیر
-              {' '}
-              <code>https://api.payamak-panel.com/post/send.asmx/SendSimpleSMS2</code>
-              {' '}
-              استفاده کنید.
-            </div>
+                  <div className="text-xs text-gray-500 mb-3">
+                    برای REST از مسیر
+                    {' '}
+                    <code>https://rest.payamak-panel.com/api/SendSMS/SendSMS</code>
+                    {' '}
+                    و برای SOAP از مسیر
+                    {' '}
+                    <code>https://api.payamak-panel.com/post/send.asmx/SendSimpleSMS2</code>
+                    {' '}
+                    استفاده کنید.
+                  </div>
 
-            <div className="rounded-xl border border-dashed border-leather-300 dark:border-leather-700 p-3 bg-leather-50/30 dark:bg-white/5">
-              <div className="font-semibold mb-2">ارسال پیامک تست</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <Form.Item label="شماره موبایل تست" className="mb-0">
-                  <Input
-                    value={testMobile}
-                    onChange={(e) => setTestMobile(e.target.value)}
-                    placeholder="مثال: 0912..."
-                  />
-                </Form.Item>
-                <Form.Item label="متن پیامک تست" className="mb-0">
-                  <Input.TextArea
-                    rows={2}
-                    value={testText}
-                    onChange={(e) => setTestText(e.target.value)}
-                  />
-                </Form.Item>
-              </div>
-              <Space className="mt-3">
-                <Button
-                  type="default"
-                  icon={<SendOutlined />}
-                  loading={smsTesting}
-                  onClick={handleSendTestSms}
-                >
-                  ارسال پیامک تست
-                </Button>
-              </Space>
-            </div>
-          </Collapse.Panel>
+                  <div className="rounded-xl border border-dashed border-leather-300 dark:border-leather-700 p-3 bg-leather-50/30 dark:bg-white/5">
+                    <div className="font-semibold mb-2">ارسال پیامک تست</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <Form.Item label="شماره موبایل تست" className="mb-0">
+                        <Input
+                          value={testMobile}
+                          onChange={(e) => setTestMobile(e.target.value)}
+                          placeholder="مثال: 0912..."
+                        />
+                      </Form.Item>
+                      <Form.Item label="متن پیامک تست" className="mb-0">
+                        <Input.TextArea
+                          rows={2}
+                          value={testText}
+                          onChange={(e) => setTestText(e.target.value)}
+                        />
+                      </Form.Item>
+                    </div>
+                    <Space className="mt-3">
+                      <Button
+                        type="default"
+                        icon={<SendOutlined />}
+                        loading={smsTesting}
+                        onClick={handleSendTestSms}
+                      >
+                        ارسال پیامک تست
+                      </Button>
+                    </Space>
+                  </div>
+                </>
+              ),
+            },
+            {
+              key: 'email',
+              label: 'اتصال ایمیل',
+              children: (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Form.Item label="ارائه‌دهنده ایمیل" name={['email', 'provider']}>
+                    <Select options={emailProviderOptions} />
+                  </Form.Item>
+                  <Form.Item label="پورت" name={['email', 'port']}>
+                    <InputNumber className="w-full persian-number" min={1} />
+                  </Form.Item>
+                  <Form.Item label="فعال" name={['email', 'is_active']} valuePropName="checked">
+                    <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
+                  </Form.Item>
 
-          <Collapse.Panel header="اتصال ایمیل" key="email">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Form.Item label="ارائه‌دهنده ایمیل" name={['email', 'provider']}>
-                <Select options={emailProviderOptions} />
-              </Form.Item>
-              <Form.Item label="پورت" name={['email', 'port']}>
-                <InputNumber className="w-full persian-number" min={1} />
-              </Form.Item>
-              <Form.Item label="فعال" name={['email', 'is_active']} valuePropName="checked">
-                <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
-              </Form.Item>
+                  <Form.Item label="SMTP Host" name={['email', 'host']}>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item label="نام کاربری" name={['email', 'username']}>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item label="رمز عبور" name={['email', 'password']}>
+                    <Input.Password />
+                  </Form.Item>
 
-              <Form.Item label="SMTP Host" name={['email', 'host']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="نام کاربری" name={['email', 'username']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="رمز عبور" name={['email', 'password']}>
-                <Input.Password />
-              </Form.Item>
-
-              <Form.Item label="ایمیل فرستنده" name={['email', 'from_email']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="نام فرستنده" name={['email', 'from_name']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="امنیت TLS" name={['email', 'secure_tls']} valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </div>
-          </Collapse.Panel>
-
-          <Collapse.Panel header="اتصال سایت" key="site">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Form.Item label="نوع اتصال" name={['site', 'provider']}>
-                <Select options={siteProviderOptions} />
-              </Form.Item>
-              <Form.Item label="Base URL سایت" name={['site', 'base_url']} className="md:col-span-2">
-                <Input />
-              </Form.Item>
-              <Form.Item label="API Key" name={['site', 'api_key']}>
-                <Input />
-              </Form.Item>
-              <Form.Item label="Webhook Secret" name={['site', 'webhook_secret']}>
-                <Input.Password />
-              </Form.Item>
-              <Form.Item label="فعال" name={['site', 'is_active']} valuePropName="checked">
-                <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
-              </Form.Item>
-            </div>
-          </Collapse.Panel>
-        </Collapse>
+                  <Form.Item label="ایمیل فرستنده" name={['email', 'from_email']}>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item label="نام فرستنده" name={['email', 'from_name']}>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item label="امنیت TLS" name={['email', 'secure_tls']} valuePropName="checked">
+                    <Switch />
+                  </Form.Item>
+                </div>
+              ),
+            },
+            {
+              key: 'site',
+              label: 'اتصال سایت',
+              children: (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Form.Item label="نوع اتصال" name={['site', 'provider']}>
+                    <Select options={siteProviderOptions} />
+                  </Form.Item>
+                  <Form.Item label="Base URL سایت" name={['site', 'base_url']} className="md:col-span-2">
+                    <Input />
+                  </Form.Item>
+                  <Form.Item label="API Key" name={['site', 'api_key']}>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item label="Webhook Secret" name={['site', 'webhook_secret']}>
+                    <Input.Password />
+                  </Form.Item>
+                  <Form.Item label="فعال" name={['site', 'is_active']} valuePropName="checked">
+                    <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
+                  </Form.Item>
+                </div>
+              ),
+            },
+          ]}
+        />
 
         <div className="flex justify-end mt-4 sticky bottom-0 bg-white dark:bg-[#1a1a1a] py-3 border-t border-gray-100 dark:border-gray-800 z-10">
           <Button

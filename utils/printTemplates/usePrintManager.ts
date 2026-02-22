@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { PrintTemplate } from './index';
 import { InvoiceCard } from './templates/invoice-card';
 import { ProductLabel } from './templates/product-label';
 import { ProductionPassport } from './templates/production-passport';
+import { PRINT_PAPER_DIMENSIONS, PrintPaperSize } from './printSizing';
 import { toPersianNumber, formatPersianPrice, safeJalaliFormat } from '../../utils/persianNumberFormatter';
 import { supabase } from '../../supabaseClient';
 
@@ -25,6 +26,8 @@ export const usePrintManager = ({
 }: UsePrintManagerProps) => {
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [printSize, setPrintSize] = useState<PrintPaperSize>('A5');
+  const printSizeRef = useRef<PrintPaperSize>('A5');
   const [printMode, setPrintMode] = useState(false);
   const [selectedPrintFields, setSelectedPrintFields] = useState<Record<string, string[]>>({});
   const [sellerInfo, setSellerInfo] = useState<any>(null);
@@ -70,12 +73,36 @@ export const usePrintManager = ({
       ];
     }
 
-    if (templates.length > 0) {
-      setSelectedTemplateId(templates[0].id);
-    }
-
     return templates;
   }, [moduleId]);
+
+  useEffect(() => {
+    if (!printTemplates.length) {
+      if (selectedTemplateId) setSelectedTemplateId('');
+      return;
+    }
+    const exists = printTemplates.some((template) => template.id === selectedTemplateId);
+    if (!exists) {
+      setSelectedTemplateId(printTemplates[0].id);
+    }
+  }, [printTemplates, selectedTemplateId]);
+
+  const handlePrintSizeChange = useCallback((size: PrintPaperSize) => {
+    printSizeRef.current = size;
+    setPrintSize(size);
+  }, []);
+
+  useEffect(() => {
+    if (moduleId === 'products') {
+      handlePrintSizeChange('A6');
+      return;
+    }
+    if (moduleId === 'invoices') {
+      handlePrintSizeChange('A5');
+      return;
+    }
+    handlePrintSizeChange('A5');
+  }, [moduleId, handlePrintSizeChange]);
 
   // انتخاب قالب فعلی
   const activeTemplate = printTemplates.find(t => t.id === selectedTemplateId) || printTemplates[0];
@@ -96,40 +123,59 @@ export const usePrintManager = ({
 
   // تابع برای چاپ
   const handlePrint = useCallback(() => {
-    if (!selectedTemplateId) return;
-    
+    if (!selectedTemplateId || typeof window === 'undefined') return;
+
+    const activePrintSize = printSizeRef.current;
+    const { widthMm, heightMm } = PRINT_PAPER_DIMENSIONS[activePrintSize];
+    const sizeStyle = document.createElement('style');
+    sizeStyle.setAttribute('data-print-size', activePrintSize);
+    sizeStyle.textContent = `
+      @media print {
+        @page { size: ${activePrintSize} portrait; margin: 0; }
+        #print-root {
+          width: auto !important;
+          min-height: ${heightMm}mm !important;
+        }
+        #print-root .print-card {
+          width: ${widthMm}mm !important;
+          min-height: ${heightMm}mm !important;
+          margin: 0 auto !important;
+        }
+      }
+    `;
+    document.head.appendChild(sizeStyle);
+    const printRoot = document.getElementById('print-root');
+    if (printRoot) {
+      printRoot.setAttribute('data-print-size', activePrintSize);
+    }
+
     setIsPrintModalOpen(false);
     setPrintMode(true);
-    
-    setTimeout(() => {
-      window.scrollTo(0, 0);
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-      
-      setTimeout(() => {
-        window.print();
-        
-        setTimeout(() => {
-          setPrintMode(false);
-        }, 1000);
-      }, 300);
-    }, 100);
+
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      setPrintMode(false);
+      sizeStyle.remove();
+      window.removeEventListener('afterprint', cleanup);
+    };
+
+    window.addEventListener('afterprint', cleanup);
+
+    try {
+      window.print();
+    } catch (error) {
+      console.error('Print failed:', error);
+      cleanup();
+    }
   }, [selectedTemplateId]);
 
   // مدیریت خروج از حالت پرینت بعد از print
-  useEffect(() => {
-    if (!printMode) return;
-    
-    const handleAfterPrint = () => {
-      setPrintMode(false);
-    };
-    
-    window.addEventListener('afterprint', handleAfterPrint);
-    return () => {
-      window.removeEventListener('afterprint', handleAfterPrint);
-    };
-  }, [printMode]);
-
   // ✅ وقتی قالب یا فیلدهای چاپی تغییر کند، تمام فیلدها به صورت پیش‌فرض انتخاب شوند
   useEffect(() => {
     if (selectedTemplateId && printableFields.length > 0) {
@@ -178,6 +224,7 @@ export const usePrintManager = ({
           templateId: selectedTemplateId,
           customer: customerInfo,
           seller: sellerInfo,
+          printSize,
         });
       
       case 'product_label':
@@ -187,6 +234,7 @@ export const usePrintManager = ({
           qrValue: printQrValue,
           fields: fieldsToDisplay,
           formatPrintValue,
+          printSize,
         });
       
       case 'production_passport':
@@ -196,10 +244,11 @@ export const usePrintManager = ({
           qrValue: printQrValue,
           fields: fieldsToDisplay,
           formatPrintValue,
+          printSize,
         });
     }
     return null;
-  }, [selectedTemplateId, data, printableFields, selectedPrintFields, activeTemplate, moduleConfig, printQrValue, formatPrintValue, sellerInfo, customerInfo, relationOptions]);
+  }, [selectedTemplateId, data, printableFields, selectedPrintFields, activeTemplate, moduleConfig, printQrValue, formatPrintValue, sellerInfo, customerInfo, relationOptions, printSize]);
 
   // بارگذاری اطلاعات فروشنده/مشتری برای فاکتور
   useEffect(() => {
@@ -245,6 +294,7 @@ export const usePrintManager = ({
     // States
     isPrintModalOpen,
     selectedTemplateId,
+    printSize,
     printMode,
     selectedPrintFields,
     printTemplates,
@@ -254,6 +304,7 @@ export const usePrintManager = ({
     // Functions
     setIsPrintModalOpen,
     setSelectedTemplateId,
+    setPrintSize: handlePrintSizeChange,
     setPrintMode,
     openPrintModal,
     closePrintModal,
