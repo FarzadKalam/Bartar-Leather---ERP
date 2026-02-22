@@ -23,6 +23,7 @@ import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 import { MODULES } from '../moduleRegistry';
+import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -1927,7 +1928,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const handleStatusChange = async (taskId: string, newStatus: string) => {
     try {
-      const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId);
+      const currentTask = tasks.find((item: any) => String(item?.id) === String(taskId));
+      const patch = buildTaskStatusUpdatePayload(newStatus, currentTask?.completed_at || null);
+      const { error } = await supabase.from('tasks').update(patch).eq('id', taskId);
       if (error) throw error;
       message.success('وضعیت بروزرسانی شد');
       const nextTasks = await fetchTasks();

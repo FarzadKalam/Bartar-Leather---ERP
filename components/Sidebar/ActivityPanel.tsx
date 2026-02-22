@@ -6,6 +6,7 @@ import { supabase } from '../../supabaseClient';
 import { MODULES } from '../../moduleRegistry';
 import RelatedRecordCard from './RelatedRecordCard';
 import { formatPersianPrice, safeJalaliFormat, toPersianNumber } from '../../utils/persianNumberFormatter';
+import { buildTaskStatusUpdatePayload } from '../../utils/taskCompletion';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
@@ -409,9 +410,10 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
   const toggleTask = async (task: any) => {
     try {
       const nextStatus = task.status === 'completed' ? 'pending' : 'completed';
+      const patch = buildTaskStatusUpdatePayload(nextStatus, task?.completed_at || null);
       const { error } = await supabase
         .from('tasks')
-        .update({ status: nextStatus })
+        .update(patch)
         .eq('id', task.id);
       if (error) throw error;
       fetchData();

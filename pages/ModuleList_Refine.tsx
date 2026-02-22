@@ -19,6 +19,7 @@ import { canAccessAssignedRecord, WORKFLOWS_PERMISSION_KEY } from "../utils/perm
 import BulkProductsCreateModal from "../components/products/BulkProductsCreateModal";
 import WorkflowsManager from "../components/workflows/WorkflowsManager";
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from "../utils/recordCopy";
+import { attachTaskCompletionIfNeeded } from "../utils/taskCompletion";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -621,11 +622,14 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
           }
       });
       if (Object.keys(changes).length === 0) return;
+      const normalizedChanges = resolvedModuleId === 'tasks'
+        ? attachTaskCompletionIfNeeded(changes)
+        : changes;
 
       let completed = 0;
       selectedRowKeys.forEach(id => {
           updateRecord(
-            { resource: resolvedModuleId!, id: id as string, values: changes },
+            { resource: resolvedModuleId!, id: id as string, values: normalizedChanges },
             { onSuccess: () => {
                   completed++;
                   if (completed === selectedRowKeys.length) {

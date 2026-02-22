@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+﻿import { useEffect } from "react";
 import { Refine, Authenticated } from "@refinedev/core";
 import { notificationProvider, ErrorComponent } from "@refinedev/antd";
 import { dataProvider } from "@refinedev/supabase";
@@ -11,8 +11,8 @@ import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/Settings/SettingsPage";
 import { JalaliLocaleListener } from "antd-jalali";
 
-// ❌ تمام ایمپورت‌ها و تنظیمات dayjs را از اینجا حذف کردیم
-// چون الان در initDayjs.ts و index.tsx مدیریت می‌شوند.
+// â‌Œ طھظ…ط§ظ… ط§غŒظ…ظ¾ظˆط±طھâ€Œظ‡ط§ ظˆ طھظ†ط¸غŒظ…ط§طھ dayjs ط±ط§ ط§ط² ط§غŒظ†ط¬ط§ ط­ط°ظپ ع©ط±ط¯غŒظ…
+// ع†ظˆظ† ط§ظ„ط§ظ† ط¯ط± initDayjs.ts ظˆ index.tsx ظ…ط¯غŒط±غŒطھ ظ…غŒâ€Œط´ظˆظ†ط¯.
 
 import { supabase } from "./supabaseClient";
 import { MODULES } from "./moduleRegistry";
@@ -26,8 +26,9 @@ import Dashboard from "./pages/Dashboard";
 import InquiryForm from "./pages/InquiryForm";
 import ProductionGroupOrdersList from "./pages/ProductionGroupOrdersList";
 import ProductionGroupOrderWizard from "./pages/ProductionGroupOrderWizard";
+import HRPage from "./pages/HRPage";
 
-const APP_TITLE = "مهربانو اتوماسیون";
+const APP_TITLE = "\u0645\u0647\u0631\u0628\u0627\u0646\u0648 \u0627\u062a\u0648\u0645\u0627\u0633\u06cc\u0648\u0646";
 
 function App() {
   useEffect(() => {
@@ -65,19 +66,20 @@ function App() {
 
   const getStandalonePageTitle = (pathname?: string) => {
     if (!pathname) return null;
-    if (pathname === "/") return "داشبورد";
-    if (pathname.startsWith("/login")) return "ورود";
-    if (pathname.startsWith("/inquiry")) return "فرم استعلام";
-    if (pathname.startsWith("/settings")) return "تنظیمات";
-    if (pathname.startsWith("/profile")) return "پروفایل";
+    if (pathname === "/") return "\u062f\u0627\u0634\u0628\u0648\u0631\u062f";
+    if (pathname.startsWith("/login")) return "\u0648\u0631\u0648\u062f";
+    if (pathname.startsWith("/inquiry")) return "\u0641\u0631\u0645 \u0627\u0633\u062a\u0639\u0644\u0627\u0645";
+    if (pathname.startsWith("/settings")) return "\u062a\u0646\u0638\u06cc\u0645\u0627\u062a";
+    if (pathname.startsWith("/profile")) return "\u067e\u0631\u0648\u0641\u0627\u06cc\u0644";
+    if (pathname.startsWith("/hr")) return "\u0645\u0646\u0627\u0628\u0639 \u0627\u0646\u0633\u0627\u0646\u06cc";
     return null;
   };
 
   const getActionLabel = (action?: string) => {
-    if (action === "list") return "لیست";
-    if (action === "create") return "ایجاد";
-    if (action === "edit") return "ویرایش";
-    if (action === "show") return "جزئیات";
+    if (action === "list") return "\u0644\u06cc\u0633\u062a";
+    if (action === "create") return "\u0627\u06cc\u062c\u0627\u062f";
+    if (action === "edit") return "\u0648\u06cc\u0631\u0627\u06cc\u0634";
+    if (action === "show") return "\u062c\u0632\u0626\u06cc\u0627\u062a";
     return "";
   };
 
@@ -155,6 +157,8 @@ function App() {
                 <Route path="/production_group_orders" element={<ProductionGroupOrdersList />} />
                 <Route path="/production_group_orders/create" element={<ProductionGroupOrderWizard />} />
                 <Route path="/production_group_orders/:id" element={<ProductionGroupOrderWizard />} />
+                <Route path="/hr" element={<HRPage />} />
+                <Route path="/hr/:employeeId" element={<HRPage />} />
                 
                 <Route path="/:moduleId">
                   <Route index element={<ModuleListRefine />} />
@@ -178,3 +182,5 @@ function App() {
 }
 
 export default App;
+
+
