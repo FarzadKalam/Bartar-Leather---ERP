@@ -36,6 +36,7 @@ import {
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 import { canAccessAssignedRecord } from '../utils/permissions';
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from '../utils/recordCopy';
+import { attachTaskCompletionIfNeeded, buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import {
   calculateCustomerStatsFromInvoices,
   getDefaultLevelingConfig,
@@ -1620,7 +1621,11 @@ const ModuleShow: React.FC = () => {
     let newValue = tempValues[key];
     if (newValue === '' || newValue === undefined) newValue = null;
     try {
-      const { error } = await supabase.from(moduleId).update({ [key]: newValue }).eq('id', id);
+      const patch =
+        moduleId === 'tasks' && key === 'status'
+          ? buildTaskStatusUpdatePayload(newValue, data?.completed_at || null)
+          : { [key]: newValue };
+      const { error } = await supabase.from(moduleId).update(patch).eq('id', id);
       if (error) throw error;
       if ((moduleId === 'invoices' || moduleId === 'purchase_invoices') && key === 'status') {
         const { data: authData } = await supabase.auth.getUser();
@@ -1644,7 +1649,7 @@ const ModuleShow: React.FC = () => {
           customerIds: [data?.customer_id, key === 'customer_id' ? newValue : null],
         });
       }
-      setData((prev: any) => ({ ...prev, [key]: newValue }));
+      setData((prev: any) => ({ ...prev, ...patch }));
       await insertChangelog({
         action: 'update',
         fieldName: key,
@@ -1672,10 +1677,13 @@ const ModuleShow: React.FC = () => {
     try {
       if (!id) return;
       const previous = data || {};
+      const payload = moduleId === 'tasks'
+        ? attachTaskCompletionIfNeeded(values, previous?.completed_at || null)
+        : values;
 
-      const changedKeys = Object.keys(values).filter((k) => !areValuesEqual(values[k], previous[k]));
+      const changedKeys = Object.keys(payload).filter((k) => !areValuesEqual(payload[k], previous[k]));
 
-      await supabase.from(moduleId).update(values).eq('id', id);
+      await supabase.from(moduleId).update(payload).eq('id', id);
 
       if (moduleId === 'invoices' || moduleId === 'purchase_invoices') {
         const { data: authData } = await supabase.auth.getUser();
@@ -1685,20 +1693,20 @@ const ModuleShow: React.FC = () => {
           moduleId,
           recordId: id,
           previousStatus: previous?.status || null,
-          nextStatus: values?.status ?? previous?.status ?? null,
-          invoiceItems: values?.invoiceItems ?? previous?.invoiceItems ?? [],
+          nextStatus: payload?.status ?? previous?.status ?? null,
+          invoiceItems: payload?.invoiceItems ?? previous?.invoiceItems ?? [],
           userId,
         });
         if (moduleId === 'invoices') {
           await syncCustomerLevelsByInvoiceCustomers({
             supabase: supabase as any,
-            customerIds: [previous?.customer_id, values?.customer_id],
+            customerIds: [previous?.customer_id, payload?.customer_id],
           });
         }
       }
 
       for (const key of changedKeys) {
-        await logFieldChange(key, previous[key], values[key]);
+        await logFieldChange(key, previous[key], payload[key]);
       }
 
       msg.success('ذخیره شد');

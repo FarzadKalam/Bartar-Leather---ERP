@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import { safeJalaliFormat, toPersianNumber } from '../utils/persianNumberFormatter';
+import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import QrScanPopover from './QrScanPopover';
 import ProductionStagesField from './ProductionStagesField';
 
@@ -355,7 +356,7 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
 
     let query = supabase
       .from('tasks')
-      .select('id, name, status, priority, produced_qty, created_at, due_date, assignee_id, assignee_type, production_line_id, related_to_module, related_product, related_customer, related_supplier, related_production_order, related_invoice')
+      .select('id, name, status, priority, produced_qty, created_at, due_date, completed_at, assignee_id, assignee_type, production_line_id, related_to_module, related_product, related_customer, related_supplier, related_production_order, related_invoice')
       .in('status', queryStatuses.length ? queryStatuses : fallbackStatuses)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -857,8 +858,9 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
                       size="small"
                       value={task.status}
                       onChange={async (val) => {
-                        await supabase.from('tasks').update({ status: val }).eq('id', task.id);
-                        setTasks((prev) => prev.map((t: any) => (t.id === task.id ? { ...t, status: val } : t)));
+                        const patch = buildTaskStatusUpdatePayload(val, task?.completed_at || null);
+                        await supabase.from('tasks').update(patch).eq('id', task.id);
+                        setTasks((prev) => prev.map((t: any) => (t.id === task.id ? { ...t, ...patch } : t)));
                       }}
                       options={statusOptions.map((opt: any) => ({ label: opt.label, value: opt.value }))}
                       style={{ minWidth: 120 }}
