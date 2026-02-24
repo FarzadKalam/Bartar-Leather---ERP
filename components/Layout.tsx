@@ -19,6 +19,7 @@ import {
   CheckSquareOutlined,
   GoldOutlined,
   ExclamationCircleOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
@@ -148,6 +149,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
     { key: '/tasks', icon: <CheckSquareOutlined />, label: 'وظایف' },
     { key: '/customers', icon: <ShopOutlined />, label: 'مشتریان' },
     { key: '/hr', icon: <TeamOutlined />, label: 'منابع انسانی' },
+    { key: '/gallery', icon: <PictureOutlined />, label: 'گالری فایل‌ها' },
     { key: '/settings', icon: <SettingOutlined />, label: 'تنظیمات' },
     
   ];
@@ -474,4 +476,5 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
 };
 
 export default Layout;
+
 

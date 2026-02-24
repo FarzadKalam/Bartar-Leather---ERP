@@ -695,6 +695,12 @@ const ModuleShow: React.FC = () => {
           }
         }
         if (moduleId === 'customers') {
+          if (!nextRecord?.customer_status) {
+            nextRecord = {
+              ...nextRecord,
+              customer_status: 'new_lead',
+            };
+          }
           try {
             const { data: invoices } = await supabase
               .from('invoices')
@@ -1492,11 +1498,30 @@ const ModuleShow: React.FC = () => {
   const handleImageUpdate = useCallback(async (file: File) => {
     setUploadingImage(true);
     try {
-      const fileName = `${Math.random()}.${file.name.split('.').pop()}`;
-      const { error: upErr } = await supabase.storage.from('images').upload(fileName, file);
+      const fileExt = file.name.includes('.') ? file.name.split('.').pop() : '';
+      const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${fileExt || 'bin'}`;
+      const filePath = `record_files/${moduleId}/${id}/${fileName}`;
+      const { error: upErr } = await supabase.storage.from('images').upload(filePath, file);
       if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
+      const { data: urlData } = supabase.storage.from('images').getPublicUrl(filePath);
       await supabase.from(moduleId).update({ image_url: urlData.publicUrl }).eq('id', id);
+
+      const { error: fileInsertError } = await supabase
+        .from('record_files')
+        .insert([
+          {
+            module_id: moduleId,
+            record_id: id,
+            file_url: urlData.publicUrl,
+            file_type: 'image',
+            file_name: file.name || null,
+            mime_type: file.type || null,
+          },
+        ]);
+      if (fileInsertError) {
+        console.warn('Could not append file entry after image upload', fileInsertError);
+      }
+
       setData((prev: any) => ({ ...prev, image_url: urlData.publicUrl }));
       msg.success('تصویر بروزرسانی شد');
     } catch (e: any) { msg.error('خطا: ' + e.message); } finally { setUploadingImage(false); }
@@ -1552,7 +1577,7 @@ const ModuleShow: React.FC = () => {
   );
 
   const handleMainImageChange = useCallback(async (url: string | null) => {
-    if (!canEditModule || !url) return;
+    if (!canEditModule) return;
     try {
       const { error } = await supabase.from(moduleId).update({ image_url: url }).eq('id', id);
       if (error) throw error;
@@ -1615,6 +1640,9 @@ const ModuleShow: React.FC = () => {
     setSavingField(key);
     let newValue = tempValues[key];
     if (newValue === '' || newValue === undefined) newValue = null;
+    if (moduleId === 'customers' && key === 'customer_status' && !newValue) {
+      newValue = 'new_lead';
+    }
     try {
       const patch =
         moduleId === 'tasks' && key === 'status'
@@ -1654,7 +1682,20 @@ const ModuleShow: React.FC = () => {
       });
       msg.success('ذخیره شد');
       setTimeout(() => setEditingFields(prev => ({ ...prev, [key]: false })), 100);
-    } catch (error: any) { msg.error(error.message); } finally { setSavingField(null); }
+    } catch (error: any) {
+      const rawMessage = String(error?.message || '');
+      const isMissingCustomerStatusColumn =
+        moduleId === 'customers' &&
+        key === 'customer_status' &&
+        /customer_status/i.test(rawMessage) &&
+        (/does not exist/i.test(rawMessage) || /PGRST204/i.test(rawMessage) || /column/i.test(rawMessage));
+
+      if (isMissingCustomerStatusColumn) {
+        msg.error('ستون customer_status روی دیتابیس هنوز ساخته نشده است. migration مربوط به وضعیت مشتری را اجرا کنید.');
+      } else {
+        msg.error(rawMessage || 'خطا در ذخیره');
+      }
+    } finally { setSavingField(null); }
   };
 
   const areValuesEqual = (a: any, b: any) => {
@@ -2410,7 +2451,12 @@ const ModuleShow: React.FC = () => {
         </div>
       );
     }
-    let baseValue = value ?? undefined;
+    const defaultValue =
+      (field.type === FieldType.STATUS || field.type === FieldType.SELECT) &&
+      field.defaultValue !== undefined
+        ? field.defaultValue
+        : undefined;
+    let baseValue = value ?? defaultValue ?? undefined;
 
     if (field.type === FieldType.MULTI_SELECT && typeof baseValue === 'string') {
       try {
@@ -2472,7 +2518,7 @@ const ModuleShow: React.FC = () => {
 
     if (isHeader) {
       return (
-        <div className="group flex items-center gap-2 cursor-pointer" onClick={() => !field.readonly && canEditModule && startEdit(field.key, value)}>
+        <div className="group flex items-center gap-2 cursor-pointer" onClick={() => !field.readonly && canEditModule && startEdit(field.key, baseValue)}>
           {displayNode}
           {!field.readonly && canEditModule && <EditOutlined className="text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity text-xs" />}
         </div>
@@ -2482,7 +2528,7 @@ const ModuleShow: React.FC = () => {
     return (
       <div
         className="group flex items-center justify-between min-h-[32px] hover:bg-gray-50 dark:hover:bg-white/5 px-3 rounded-lg -mx-3 transition-colors cursor-pointer border border-transparent hover:border-gray-100 dark:hover:border-gray-700"
-        onClick={() => !field.readonly && canEditModule && startEdit(field.key, value)}
+        onClick={() => !field.readonly && canEditModule && startEdit(field.key, baseValue)}
       >
         <div className="text-gray-800 dark:text-gray-200">{displayNode}</div>
         {!field.readonly && canEditModule && <EditOutlined className="text-leather-400 opacity-0 group-hover:opacity-100 transition-opacity" />}

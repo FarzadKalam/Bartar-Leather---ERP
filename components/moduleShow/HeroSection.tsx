@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Tag, Image, Upload, Select, Space } from 'antd';
 import {
   UploadOutlined,
@@ -9,15 +9,15 @@ import {
   EditOutlined,
   HistoryOutlined,
 } from '@ant-design/icons';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { FieldLocation, FieldType } from '../../types';
-// 👇 فقط از فایل‌های کمکی پروژه استفاده می‌کنیم
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import TagInput from '../TagInput';
-import ProductImagesManager from '../ProductImagesManager';
+import RecordFilesManager from '../RecordFilesManager';
 
 interface HeroSectionProps {
   data: any;
@@ -58,9 +58,38 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   canEditModule = true,
   checkVisibility,
 }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const imageField = moduleConfig?.fields?.find((f: any) => f.type === FieldType.IMAGE);
   const canShowImage = !!imageField && (canViewField ? canViewField(imageField.key) !== false : true);
+  const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
+  const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const shouldOpenGalleryFromQuery = queryParams.get('gallery') === '1';
+  const highlightFileId = queryParams.get('fileId');
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+
+  useEffect(() => {
+    if (supportsFilesGallery && shouldOpenGalleryFromQuery) {
+      setIsGalleryOpen(true);
+    }
+  }, [supportsFilesGallery, shouldOpenGalleryFromQuery]);
+
+  const handleCloseGallery = () => {
+    setIsGalleryOpen(false);
+    if (!shouldOpenGalleryFromQuery && !highlightFileId) return;
+
+    const nextParams = new URLSearchParams(location.search);
+    nextParams.delete('gallery');
+    nextParams.delete('fileId');
+    const search = nextParams.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: search ? `?${search}` : '',
+      },
+      { replace: true },
+    );
+  };
   
   const renderDate = (dateVal: any) => {
     if (!dateVal) return '-';
@@ -105,9 +134,9 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                   تغییر تصویر
                 </Button>
               </Upload>
-              {moduleId === 'products' && (
+              {supportsFilesGallery && (
                 <Button type="default" size="small" onClick={() => setIsGalleryOpen(true)} disabled={!canEditModule}>
-                  مدیریت تصاویر
+                  گالری
                 </Button>
               )}
             </div>
@@ -251,14 +280,16 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           </div>
         </div>
       </div>
-      {moduleId === 'products' && (
-        <ProductImagesManager
+      {supportsFilesGallery && (
+        <RecordFilesManager
           open={isGalleryOpen}
-          onClose={() => setIsGalleryOpen(false)}
-          productId={data.id}
+          onClose={handleCloseGallery}
+          moduleId={moduleId}
+          recordId={data.id}
           mainImage={data.image_url}
           onMainImageChange={onMainImageChange}
           canEdit={!!canEditModule}
+          highlightFileId={highlightFileId}
         />
       )}
     </div>

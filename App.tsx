@@ -27,6 +27,7 @@ import InquiryForm from "./pages/InquiryForm";
 import ProductionGroupOrdersList from "./pages/ProductionGroupOrdersList";
 import ProductionGroupOrderWizard from "./pages/ProductionGroupOrderWizard";
 import HRPage from "./pages/HRPage";
+import FilesGalleryPage from "./pages/FilesGalleryPage";
 
 const APP_TITLE = "\u0645\u0647\u0631\u0628\u0627\u0646\u0648 \u0627\u062a\u0648\u0645\u0627\u0633\u06cc\u0648\u0646";
 
@@ -72,6 +73,7 @@ function App() {
     if (pathname.startsWith("/settings")) return "\u062a\u0646\u0638\u06cc\u0645\u0627\u062a";
     if (pathname.startsWith("/profile")) return "\u067e\u0631\u0648\u0641\u0627\u06cc\u0644";
     if (pathname.startsWith("/hr")) return "\u0645\u0646\u0627\u0628\u0639 \u0627\u0646\u0633\u0627\u0646\u06cc";
+    if (pathname.startsWith("/gallery")) return "\u06af\u0627\u0644\u0631\u06cc \u0641\u0627\u06cc\u0644\u200c\u0647\u0627";
     return null;
   };
 
@@ -159,6 +161,7 @@ function App() {
                 <Route path="/production_group_orders/:id" element={<ProductionGroupOrderWizard />} />
                 <Route path="/hr" element={<HRPage />} />
                 <Route path="/hr/:employeeId" element={<HRPage />} />
+                <Route path="/gallery" element={<FilesGalleryPage />} />
                 
                 <Route path="/:moduleId">
                   <Route index element={<ModuleListRefine />} />
@@ -182,5 +185,6 @@ function App() {
 }
 
 export default App;
+
 
 

@@ -11,7 +11,7 @@ import ProductionStagesField from './ProductionStagesField';
 import PersianDatePicker from './PersianDatePicker';
 import RelatedRecordPopover from './RelatedRecordPopover';
 import QrScanPopover from './QrScanPopover';
-import ProductImagesManager from './ProductImagesManager';
+import RecordFilesManager from './RecordFilesManager';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
@@ -91,6 +91,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState('');
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
 
   const fieldLabel = field?.labels?.fa || label || 'بدون نام';
   const fieldType = field?.type || type || FieldType.TEXT;
@@ -222,12 +223,32 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       setUploading(true);
       const fileExt = file.name.split('.').pop();
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `products/${fileName}`;
+      const modulePath = moduleId || 'misc';
+      const recordPath = recordId || 'draft';
+      const filePath = `record_files/${modulePath}/${recordPath}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage.from('images').upload(filePath, file);
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(filePath);
+
+      if (recordId && moduleId) {
+        const { error: fileInsertError } = await supabase
+          .from('record_files')
+          .insert([
+            {
+              module_id: moduleId,
+              record_id: recordId,
+              file_url: publicUrl,
+              file_type: 'image',
+              file_name: file.name || null,
+              mime_type: file.type || null,
+            },
+          ]);
+        if (fileInsertError) {
+          console.warn('Could not append file entry after image upload', fileInsertError);
+        }
+      }
 
       msg.success('تصویر با موفقیت آپلود شد');
       onChange(publicUrl);
@@ -700,15 +721,16 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     <div><UploadOutlined /><div style={{ marginTop: 8 }}>آپلود</div></div>
                   )}
               </Upload>
-              {moduleId === 'products' && (
+              {supportsFilesGallery && (
                 <>
                   <Button size="small" onClick={() => setIsGalleryOpen(true)} disabled={!forceEditMode}>
-                    مدیریت تصاویر
+                    گالری
                   </Button>
-                  <ProductImagesManager
+                  <RecordFilesManager
                     open={isGalleryOpen}
                     onClose={() => setIsGalleryOpen(false)}
-                    productId={recordId}
+                    moduleId={String(moduleId || '')}
+                    recordId={recordId}
                     mainImage={value}
                     onMainImageChange={(url) => onChange(url)}
                     canEdit={forceEditMode && !isReadonly}

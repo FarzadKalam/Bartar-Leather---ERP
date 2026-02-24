@@ -1,6 +1,7 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   App,
+  Badge,
   Button,
   Card,
   Col,
@@ -864,52 +865,62 @@ const HRPage: React.FC = () => {
   ];
 
   const detailHeader = selectedEmployeeSummary ? (
-    <div className="mb-4 flex items-start justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-2 min-w-0">
-        <Button
-          icon={<ArrowRightOutlined />}
-          onClick={() => navigate(`/hr?${selectedRangeQuery}`)}
-        >
-          بازگشت
-        </Button>
-        <div>
-          <Typography.Title level={4} className="!mb-1">
-            جزئیات عملکرد - {selectedEmployeeSummary.name}
-          </Typography.Title>
-          <Typography.Text type="secondary">
-            بازه گزارش: {toPersianNumber(safeJalaliFormat(monthStart.toISOString(), 'YYYY/MM/DD'))} تا {toPersianNumber(safeJalaliFormat(monthEnd.toISOString(), 'YYYY/MM/DD'))}
-          </Typography.Text>
+    <div className="mb-4 flex flex-col gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-2xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2 min-w-0">
+            <span className="w-2 h-8 bg-leather-500 rounded-full inline-block shrink-0"></span>
+            <span className="truncate">جزئیات عملکرد - {selectedEmployeeSummary.name}</span>
+          </h1>
+          <Badge
+            count={selectedEmployeeSummary.detailRows.length}
+            overflowCount={999}
+            style={{ backgroundColor: '#f0f0f0', color: '#666', boxShadow: 'none' }}
+          />
         </div>
+        <Typography.Text type="secondary" className="text-sm">
+          بازه گزارش: {toPersianNumber(safeJalaliFormat(monthStart.toISOString(), 'YYYY/MM/DD'))} تا {toPersianNumber(safeJalaliFormat(monthEnd.toISOString(), 'YYYY/MM/DD'))}
+        </Typography.Text>
       </div>
-      <div className={`grid gap-2 w-full ${isMobile ? 'grid-cols-1' : 'grid-cols-[280px_auto_auto]'}`}>
-        <DatePicker.RangePicker
-          value={selectedRange}
-          onChange={onDateRangeChange}
-          allowClear={false}
-          className="w-full"
-          popupClassName="hr-range-popup"
-        />
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => fetchData(true)}
-          loading={refreshing}
-          className="w-full"
-        >
-          بروزرسانی
-        </Button>
-        <Button
-          icon={<SettingOutlined />}
-          onClick={() => openConfigModal(selectedEmployeeSummary.profile)}
-          className="w-full"
-        >
-          تنظیم ضرایب
-        </Button>
+
+      <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl border border-gray-200 dark:border-gray-800 p-2">
+        <div className={`grid gap-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[auto_280px_auto_auto]'}`}>
+          <Button
+            icon={<ArrowRightOutlined />}
+            onClick={() => navigate(`/hr?${selectedRangeQuery}`)}
+            className="w-full md:w-auto rounded-xl"
+          >
+            بازگشت
+          </Button>
+          <DatePicker.RangePicker
+            value={selectedRange}
+            onChange={onDateRangeChange}
+            allowClear={false}
+            className="w-full"
+            classNames={{ popup: { root: 'hr-range-popup' } }}
+          />
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => fetchData(true)}
+            loading={refreshing}
+            className="w-full rounded-xl"
+          >
+            بروزرسانی
+          </Button>
+          <Button
+            icon={<SettingOutlined />}
+            onClick={() => openConfigModal(selectedEmployeeSummary.profile)}
+            className="w-full rounded-xl"
+          >
+            تنظیم ضرایب
+          </Button>
+        </div>
       </div>
     </div>
   ) : null;
 
   return (
-    <div className="p-3 md:p-6 max-w-[1700px] mx-auto pb-20">
+    <div className="p-3 md:p-6 max-w-[1700px] mx-auto pb-20 animate-fadeIn">
       {employeeId ? (
         <>
           {detailHeader}
@@ -971,38 +982,51 @@ const HRPage: React.FC = () => {
         </>
       ) : (
         <>
-          <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <Typography.Title level={3} className="!mb-1">منابع انسانی و محاسبه حقوق</Typography.Title>
-              <Typography.Text type="secondary">
+          <div className="mb-4 flex flex-col gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <h1 className="text-2xl font-black text-gray-800 dark:text-white m-0 flex items-center gap-2 min-w-0">
+                  <span className="w-2 h-8 bg-leather-500 rounded-full inline-block shrink-0"></span>
+                  <span className="truncate">منابع انسانی و محاسبه حقوق</span>
+                </h1>
+                <Badge
+                  count={visibleSummaries.length}
+                  overflowCount={999}
+                  style={{ backgroundColor: '#f0f0f0', color: '#666', boxShadow: 'none' }}
+                />
+              </div>
+              <Typography.Text type="secondary" className="text-sm">
                 بازه گزارش: {toPersianNumber(safeJalaliFormat(monthStart.toISOString(), 'YYYY/MM/DD'))} تا {toPersianNumber(safeJalaliFormat(monthEnd.toISOString(), 'YYYY/MM/DD'))}
               </Typography.Text>
             </div>
-            <div className={`grid gap-2 w-full ${isMobile ? 'grid-cols-1' : 'grid-cols-[280px_minmax(220px,1fr)_auto]'}`}>
-              <DatePicker.RangePicker
-                value={selectedRange}
-                onChange={onDateRangeChange}
-                allowClear={false}
-                className="w-full"
-                popupClassName="hr-range-popup"
-              />
-              <Select
-                mode="multiple"
-                allowClear
-                placeholder="فیلتر نیرو"
-                value={selectedEmployeeIds}
-                onChange={(values) => setSelectedEmployeeIds(values as string[])}
-                options={employeeOptions}
-                className="w-full min-w-0"
-              />
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={() => fetchData(true)}
-                loading={refreshing}
-                className="w-full"
-              >
-                بروزرسانی
-              </Button>
+
+            <div className="bg-white dark:bg-[#1a1a1a] rounded-2xl border border-gray-200 dark:border-gray-800 p-2">
+              <div className={`grid gap-2 ${isMobile ? 'grid-cols-1' : 'grid-cols-[280px_minmax(260px,1fr)_auto]'}`}>
+                <DatePicker.RangePicker
+                  value={selectedRange}
+                  onChange={onDateRangeChange}
+                  allowClear={false}
+                  className="w-full"
+                  classNames={{ popup: { root: 'hr-range-popup' } }}
+                />
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="فیلتر نیرو"
+                  value={selectedEmployeeIds}
+                  onChange={(values) => setSelectedEmployeeIds(values as string[])}
+                  options={employeeOptions}
+                  className="w-full min-w-0"
+                />
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={() => fetchData(true)}
+                  loading={refreshing}
+                  className="w-full rounded-xl"
+                >
+                  بروزرسانی
+                </Button>
+              </div>
             </div>
           </div>
 

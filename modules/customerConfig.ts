@@ -10,7 +10,18 @@ export const customerModule: ModuleDefinition = {
     { key: 'image_url', labels: { fa: 'تصویر', en: 'Image' }, type: FieldType.IMAGE, location: FieldLocation.HEADER, order: 1 },
     { key: 'first_name', labels: { fa: 'نام', en: 'First Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, validation: { required: true }, isTableColumn: true },
     { key: 'last_name', labels: { fa: 'نام خانوادگی', en: 'Last Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 3, validation: { required: true }, isTableColumn: true, isKey: true },
-    { key: 'system_code', labels: { fa: 'کد اشتراک', en: 'Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 4, isTableColumn: true },
+    { key: 'system_code', labels: { fa: 'کد اشتراک', en: 'Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 7, isTableColumn: true },
+    {
+      key: 'location_url', labels: { fa: 'وضعیت مشتری', en: 'Customer Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4,
+      options: [
+        { label: 'سرنخ جدید', value: 'new_lead', color: 'cyan' },
+        { label: 'درحال پیگیری', value: 'in_follow_up', color: 'orange' },
+        { label: 'پیگیری در آینده', value: 'future_follow_up', color: 'geekblue' },
+        { label: 'استعلام و پیش فاکتور', value: 'inquiry_preinvoice', color: 'blue' },
+        { label: 'فعال', value: 'active', color: 'green' },
+        { label: 'غیرفعال', value: 'inactive', color: 'red' }
+      ], defaultValue: 'new_lead', isTableColumn: true
+    },
     {
       key: 'rank', labels: { fa: 'سطح مشتری', en: 'Rank' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 5,
       options: [

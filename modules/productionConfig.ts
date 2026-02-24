@@ -22,6 +22,7 @@ export const productionBomModule: ModuleDefinition = {
   supportedViewModes: [ViewMode.LIST],
   defaultViewMode: ViewMode.LIST,
   fields: [
+    { key: 'image_url', labels: { fa: 'تصویر', en: 'Image' }, type: FieldType.IMAGE, location: FieldLocation.HEADER, order: 0, nature: FieldNature.PREDEFINED, isTableColumn: true },
     { key: 'name', labels: { fa: 'عنوان مدل', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 1, isKey: true, validation: { required: true }, isTableColumn: true },
     { key: 'system_code', labels: { fa: 'کد سیستمی', en: 'Sys Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, readonly: true, isTableColumn: true },
     { key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4, options: [{ label: 'فعال', value: 'active', color: 'green' }, { label: 'بایگانی', value: 'archived', color: 'gray' }], defaultValue: 'active' },
@@ -79,7 +80,8 @@ export const productionOrderModule: ModuleDefinition = {
   supportedViewModes: [ViewMode.LIST],
   defaultViewMode: ViewMode.LIST,
   fields: [
-    { key: 'name', labels: { fa: 'عنوان سفارش', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 0, isKey: true, validation: { required: true }, isTableColumn: true },
+    { key: 'image_url', labels: { fa: 'تصویر', en: 'Image' }, type: FieldType.IMAGE, location: FieldLocation.HEADER, order: 0, nature: FieldNature.PREDEFINED, isTableColumn: true },
+    { key: 'name', labels: { fa: 'عنوان سفارش', en: 'Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 1, isKey: true, validation: { required: true }, isTableColumn: true },
     { key: 'system_code', labels: { fa: 'کد سیستمی', en: 'Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },
     { key: 'bom_id', labels: { fa: 'انتخاب شناسنامه (BOM)', en: 'Select BOM' }, type: FieldType.RELATION, location: FieldLocation.HEADER, order: 2, relationConfig: { targetModule: 'production_boms', targetField: 'name' } },
     {
