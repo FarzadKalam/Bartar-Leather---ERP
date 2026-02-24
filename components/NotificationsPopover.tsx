@@ -910,7 +910,11 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
                       size="small"
                       value={task.status}
                       onChange={async (val) => {
-                        const patch = buildTaskStatusUpdatePayload(val, task?.completed_at || null);
+                        const patch = buildTaskStatusUpdatePayload(val, {
+                          previousCompletedAt: task?.completed_at || null,
+                          previousStatus: task?.status ?? null,
+                          previousStartDate: task?.start_date || null,
+                        });
                         await supabase.from('tasks').update(patch).eq('id', task.id);
                         setTasks((prev) => prev.map((t: any) => (t.id === task.id ? { ...t, ...patch } : t)));
                       }}

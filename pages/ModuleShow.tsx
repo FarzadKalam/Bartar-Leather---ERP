@@ -34,6 +34,7 @@ import {
 } from '../utils/productionWorkflow';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 import { canAccessAssignedRecord, resolveFilesAccessPermissions } from '../utils/permissions';
+import { isMissingRecordFilesError } from '../utils/recordFilesAvailability';
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from '../utils/recordCopy';
 import { attachTaskCompletionIfNeeded, buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import {
@@ -66,8 +67,10 @@ const ModuleShow: React.FC = () => {
   const [filesAccessPermissions, setFilesAccessPermissions] = useState({
     canViewGallery: true,
     canEditGallery: true,
+    canDeleteGallery: true,
     canViewRecordFilesManager: true,
     canEditRecordFilesManager: true,
+    canDeleteRecordFilesManager: true,
   });
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   const [autoSyncedBomId, setAutoSyncedBomId] = useState<string | null>(null);
@@ -1235,6 +1238,53 @@ const ModuleShow: React.FC = () => {
     }
   }, [data, moduleId, fetchOptions, fetchLinkedBom]);
 
+  const syncBomFilesToOrder = useCallback(async (bomId: string, orderId: string) => {
+    if (!bomId || !orderId) return;
+
+    try {
+      const { data: bomFiles, error: fetchError } = await supabase
+        .from('record_files')
+        .select('file_url, file_type, file_name, mime_type, sort_order, created_at')
+        .eq('module_id', 'production_boms')
+        .eq('record_id', bomId)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (fetchError) throw fetchError;
+
+      const { error: deleteError } = await supabase
+        .from('record_files')
+        .delete()
+        .eq('module_id', 'production_orders')
+        .eq('record_id', orderId);
+      if (deleteError) throw deleteError;
+
+      const insertPayload = (bomFiles || [])
+        .map((file: any, index: number) => {
+          const sortOrder = Number(file?.sort_order);
+          return {
+            module_id: 'production_orders',
+            record_id: orderId,
+            file_url: String(file?.file_url || '').trim(),
+            file_type: String(file?.file_type || 'file').trim() || 'file',
+            file_name: file?.file_name ? String(file.file_name) : null,
+            mime_type: file?.mime_type ? String(file.mime_type) : null,
+            sort_order: Number.isFinite(sortOrder) ? sortOrder : index,
+          };
+        })
+        .filter((file: any) => file.file_url);
+
+      if (insertPayload.length > 0) {
+        const { error: insertError } = await supabase
+          .from('record_files')
+          .insert(insertPayload);
+        if (insertError) throw insertError;
+      }
+    } catch (error: any) {
+      if (isMissingRecordFilesError(error)) return;
+      throw error;
+    }
+  }, []);
+
   useEffect(() => {
     if (moduleId !== 'production_orders' || !data?.bom_id) return;
     if (autoSyncedBomId === data.bom_id) return;
@@ -1247,7 +1297,7 @@ const ModuleShow: React.FC = () => {
       try {
         const { data: bom, error } = await supabase
           .from('production_boms')
-          .select('name, grid_materials, production_stages_draft, product_category')
+          .select('name, grid_materials, production_stages_draft, product_category, image_url')
           .eq('id', data.bom_id)
           .single();
         if (error) throw error;
@@ -1257,9 +1307,11 @@ const ModuleShow: React.FC = () => {
           production_stages_draft: bom?.production_stages_draft || [],
           product_category: bom?.product_category ?? data?.product_category ?? null,
           name: bom?.name || data?.name || '',
+          image_url: bom?.image_url ?? null,
         };
 
         await supabase.from('production_orders').update(patch).eq('id', data.id);
+        await syncBomFilesToOrder(String(data.bom_id), String(data.id));
         setData((prev: any) => ({ ...prev, ...patch }));
         setAutoSyncedBomId(data.bom_id);
       } catch (err) {
@@ -1268,7 +1320,7 @@ const ModuleShow: React.FC = () => {
     };
 
     syncFromBom();
-  }, [moduleId, data, autoSyncedBomId]);
+  }, [moduleId, data, autoSyncedBomId, syncBomFilesToOrder]);
 
   useEffect(() => {
     if (!moduleConfig) return;
@@ -1376,6 +1428,7 @@ const ModuleShow: React.FC = () => {
               updateData['related_bom'] = bomId;
             }
             updateData['product_category'] = bom?.product_category ?? null;
+            updateData['image_url'] = bom?.image_url ?? null;
             if (bom.production_stages_draft) {
               updateData['production_stages_draft'] = bom.production_stages_draft;
             }
@@ -1386,6 +1439,9 @@ const ModuleShow: React.FC = () => {
               .eq('id', id);
 
             if (updateError) throw updateError;
+            if (moduleId === 'production_orders' && id) {
+              await syncBomFilesToOrder(bomId, String(id));
+            }
 
             setData((prev: any) => ({ 
               ...prev, 
@@ -1401,7 +1457,7 @@ const ModuleShow: React.FC = () => {
           }
         }
       });
-    }, [id, moduleId, msg, modal]);
+    }, [id, moduleId, msg, modal, syncBomFilesToOrder]);
 
   const handleDelete = () => {
     modal.confirm({ title: 'حذف رکورد', okType: 'danger', onOk: async () => { await supabase.from(moduleId).delete().eq('id', id); navigate(`/${moduleId}`); } });
@@ -1626,6 +1682,9 @@ const ModuleShow: React.FC = () => {
             quantity: 0,
           });
         }
+        if (values?.bom_id) {
+          await syncBomFilesToOrder(String(values.bom_id), String(inserted.id));
+        }
       }
       setIsCreateOrderOpen(false);
       msg.success('سفارش تولید ایجاد شد');
@@ -1635,7 +1694,7 @@ const ModuleShow: React.FC = () => {
     } catch (e: any) {
       msg.error(e.message || 'خطا در ایجاد سفارش تولید');
     }
-  }, [msg, navigate]);
+  }, [msg, navigate, syncBomFilesToOrder]);
 
   const saveEdit = async (key: string) => {
     if (!canEditModule) return;
@@ -1654,7 +1713,11 @@ const ModuleShow: React.FC = () => {
     try {
       const patch =
         moduleId === 'tasks' && key === 'status'
-          ? buildTaskStatusUpdatePayload(newValue, data?.completed_at || null)
+          ? buildTaskStatusUpdatePayload(newValue, {
+            previousCompletedAt: data?.completed_at || null,
+            previousStatus: data?.status ?? null,
+            previousStartDate: data?.start_date || null,
+          })
           : { [key]: newValue };
       const { error } = await supabase.from(moduleId).update(patch).eq('id', id);
       if (error) throw error;
@@ -1722,7 +1785,11 @@ const ModuleShow: React.FC = () => {
       if (!id) return;
       const previous = data || {};
       const payload = moduleId === 'tasks'
-        ? attachTaskCompletionIfNeeded(values, previous?.completed_at || null)
+        ? attachTaskCompletionIfNeeded(values, {
+          previousCompletedAt: previous?.completed_at || null,
+          previousStatus: previous?.status ?? null,
+          previousStartDate: previous?.start_date || null,
+        })
         : values;
 
       const changedKeys = Object.keys(payload).filter((k) => !areValuesEqual(payload[k], previous[k]));
@@ -2457,6 +2524,7 @@ const ModuleShow: React.FC = () => {
             allValues={data}
             canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
             canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
+            canDeleteFilesManager={filesAccessPermissions.canDeleteRecordFilesManager}
           />
         </div>
       );
@@ -2506,6 +2574,7 @@ const ModuleShow: React.FC = () => {
               allValues={data}
               canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
               canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
+              canDeleteFilesManager={filesAccessPermissions.canDeleteRecordFilesManager}
             />
           </div>
           <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => saveEdit(field.key)} className="bg-green-500 hover:!bg-green-600 border-none" />
@@ -2527,6 +2596,7 @@ const ModuleShow: React.FC = () => {
         allValues={data}
         canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
         canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
+        canDeleteFilesManager={filesAccessPermissions.canDeleteRecordFilesManager}
       />
     );
 
@@ -2685,6 +2755,7 @@ const ModuleShow: React.FC = () => {
         checkVisibility={checkVisibility}
         canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
         canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
+        canDeleteFilesManager={filesAccessPermissions.canDeleteRecordFilesManager}
       />
 
       {moduleId === 'customers' && (
@@ -2745,6 +2816,7 @@ const ModuleShow: React.FC = () => {
             bom_id: id,
             name: data?.name || '',
             product_category: data?.product_category || null,
+            image_url: data?.image_url || null,
             grid_materials: data?.grid_materials || [],
             production_stages_draft: data?.production_stages_draft || [],
             __skipBomConfirm: true,

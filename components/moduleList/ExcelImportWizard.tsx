@@ -797,8 +797,8 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
   const stepContent = useMemo(() => {
     if (step === 0) {
       return (
-        <div className="space-y-4">
-          <div className="rounded-3xl border border-dashed border-gray-300 bg-gray-50/60 p-6">
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50/60 p-3">
             <Upload.Dragger
               multiple={false}
               showUploadList={false}
@@ -810,16 +810,16 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
               }}
               className="!bg-transparent"
             >
-              <div className="py-6 text-center">
-                <InboxOutlined className="text-4xl text-gray-400" />
-                <div className="mt-4 text-xl font-bold text-gray-600">
+              <div className="py-4 text-center">
+                <InboxOutlined className="text-3xl text-gray-400" />
+                <div className="mt-3 text-lg font-bold text-gray-600">
                   فایل خود را به این قسمت کشیده و رها کنید
                 </div>
-                <div className="text-gray-400 mt-2">یا</div>
+                <div className="text-gray-400 mt-1">یا</div>
                 <Button
                   type="default"
                   icon={<UploadOutlined />}
-                  className="mt-3 rounded-xl bg-leather-600 !text-white hover:!bg-leather-500 border-leather-600"
+                  className="mt-2 rounded-xl bg-leather-600 !text-white hover:!bg-leather-500 border-leather-600 !h-9 px-5"
                 >
                   یک فایل انتخاب کنید
                 </Button>
@@ -828,10 +828,10 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           </div>
 
           {fileList.length > 0 && (
-            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-3 flex items-center justify-between gap-3">
+            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-3 py-2 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <FileOutlined className="text-gray-500" />
-                <span className="font-semibold text-gray-600 truncate">{fileList[0].name}</span>
+                <span className="font-medium text-gray-600 truncate text-sm">{fileList[0].name}</span>
               </div>
               <Button
                 type="text"
@@ -842,14 +842,14 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-xl border border-gray-200 px-4 py-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-gray-200 px-3 py-2">
               <Checkbox checked={hasHeader} onChange={(event) => setHasHeader(event.target.checked)}>
                 هدر دارد
               </Checkbox>
             </div>
-            <div className="rounded-xl border border-gray-200 px-4 py-3">
-              <div className="text-xs text-gray-500 mb-1">
+            <div className="rounded-xl border border-gray-200 px-3 py-2">
+              <div className="text-xs text-gray-500 mb-0.5">
                 نحوه کدگذاری کاراکترها <span className="text-red-500">*</span>
               </div>
               <Select
@@ -876,8 +876,8 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
 
     if (step === 1) {
       return (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-gray-200 px-4 py-3">
+        <div className="space-y-3">
+          <div className="rounded-xl border border-gray-200 px-3 py-2">
             <div className="text-sm text-gray-500 mb-1">
               نحوه رسیدگی به اطلاعات تکراری <span className="text-red-500">*</span>
             </div>
@@ -889,7 +889,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
             />
           </div>
 
-          <div className="rounded-xl border border-gray-200 px-4 py-3">
+          <div className="rounded-xl border border-gray-200 px-3 py-2">
             <div className="text-sm text-gray-500 mb-2">
               فیلدهای مطابق برای پیدا کردن رکوردهای تکراری <span className="text-red-500">*</span>
             </div>
@@ -915,8 +915,8 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
     }
 
     return (
-      <div className="space-y-4">
-        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 flex items-center justify-between gap-3">
+      <div className="space-y-3">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 flex items-center justify-between gap-3">
           <div className="text-gray-600">
             فیلدهای زیر اجباری هستند و ضروری است ستون های مرتبط به آن ها مشخص شود.
           </div>
@@ -933,7 +933,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
+        <div className="rounded-xl border border-gray-200 px-3 py-2 flex items-center justify-between gap-3">
           <div className="text-gray-700">ذخیره به عنوان معادل یابی سفارشی</div>
           <Checkbox checked={saveCustomMapping} onChange={(event) => setSaveCustomMapping(event.target.checked)} />
         </div>
@@ -1026,22 +1026,26 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
     const threshold = Math.max(leftStepIndex, rightStepIndex);
     return step >= threshold ? "bg-leather-600" : "bg-gray-200";
   };
+  const contentWrapperClass =
+    step === 2
+      ? "pt-3 flex-1 min-h-0 overflow-y-auto custom-scrollbar"
+      : "pt-3";
 
   return (
     <Modal
       open={open}
       onCancel={onClose}
       footer={null}
-      width="min(1180px, calc(100vw - 24px))"
-      style={{ top: 12 }}
+      width="min(1040px, calc(100vw - 16px))"
+      style={{ top: 8 }}
       destroyOnHidden
-      closeIcon={<CloseOutlined />}
-      title={<span className="text-2xl font-black">ورود اطلاعات از فایل</span>}
+      closeIcon={<CloseOutlined className="text-base" />}
+      title={<span className="text-xl font-black">ورود اطلاعات از فایل</span>}
       className="excel-import-wizard"
       styles={{
         body: {
-          maxHeight: "calc(100vh - 120px)",
-          padding: "14px 18px 18px",
+          maxHeight: "calc(100vh - 34px)",
+          padding: "10px 14px 14px",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -1049,8 +1053,8 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
       }}
     >
       <div className="flex-1 min-h-0 flex flex-col">
-        <div className="border-b border-gray-200 pb-5">
-          <div className="flex items-center gap-3 px-2 md:px-10" dir="ltr">
+        <div className="border-b border-gray-200 pb-3">
+          <div className="flex items-center gap-2 px-1 md:px-6" dir="ltr">
             {RENDER_STEPS.map((current, index) => {
               const status = step === current.index ? "active" : step > current.index ? "done" : "idle";
               const circleClass =
@@ -1064,17 +1068,17 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
 
               return (
                 <React.Fragment key={current.index}>
-                  <div className="flex flex-col items-center min-w-[90px]">
+                  <div className="flex flex-col items-center min-w-[74px]">
                     <div
-                      className={`h-12 w-12 rounded-2xl text-lg font-black flex items-center justify-center ${circleClass}`}
+                      className={`h-10 w-10 rounded-xl text-sm font-black flex items-center justify-center ${circleClass}`}
                     >
                       {(current.index + 1).toLocaleString("fa-IR")}
                     </div>
-                    <div className={`mt-2 text-base font-bold ${labelClass}`}>{current.title}</div>
+                    <div className={`mt-1.5 text-sm font-bold ${labelClass}`}>{current.title}</div>
                   </div>
                   {index < RENDER_STEPS.length - 1 && (
                     <div
-                      className={`h-1 flex-1 rounded-full ${connectorClass(
+                      className={`h-[3px] flex-1 rounded-full ${connectorClass(
                         current.index,
                         RENDER_STEPS[index + 1].index
                       )}`}
@@ -1086,15 +1090,15 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           </div>
         </div>
 
-        <div className="pt-4 flex-1 min-h-0 overflow-y-auto custom-scrollbar">{stepContent}</div>
+        <div className={contentWrapperClass}>{stepContent}</div>
       </div>
 
-      <div className="border-t border-gray-200 pt-4 mt-4 flex items-center justify-center gap-3">
+      <div className="border-t border-gray-200 pt-3 mt-3 flex items-center justify-center gap-2.5">
         {step > 0 && (
           <Button
             onClick={() => setStep((prev) => Math.max(0, prev - 1))}
             disabled={isImporting}
-            className="!h-11 px-8 text-base rounded-xl border-2 border-gray-400 text-gray-700 bg-white"
+            className="!h-10 px-6 text-sm rounded-xl border-2 border-gray-400 text-gray-700 bg-white"
           >
             قبلی
           </Button>
@@ -1106,7 +1110,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           onClick={() => {
             void handleNext();
           }}
-          className="!h-11 px-8 text-base rounded-xl bg-leather-600 hover:!bg-leather-500"
+          className="!h-10 px-6 text-sm rounded-xl bg-leather-600 hover:!bg-leather-500"
         >
           {step === 2 ? "وارد کردن اطلاعات" : "بعدی"}
         </Button>

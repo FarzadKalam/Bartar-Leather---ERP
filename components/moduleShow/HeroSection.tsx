@@ -39,6 +39,7 @@ interface HeroSectionProps {
   checkVisibility?: (logic: any) => boolean;
   canViewFilesManager?: boolean;
   canEditFilesManager?: boolean;
+  canDeleteFilesManager?: boolean;
 }
 
 const HeroSection: React.FC<HeroSectionProps> = ({
@@ -61,6 +62,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   checkVisibility,
   canViewFilesManager = true,
   canEditFilesManager = true,
+  canDeleteFilesManager = true,
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -285,6 +287,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           mainImage={data.image_url}
           onMainImageChange={onMainImageChange}
           canEdit={!!canEditModule && !!canEditFilesManager}
+          canDelete={!!canDeleteFilesManager}
           highlightFileId={highlightFileId}
         />
       )}

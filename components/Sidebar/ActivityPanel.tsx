@@ -16,8 +16,8 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 interface ActivityPanelProps {
   moduleId: string;
   recordId: string;
-  view: 'notes' | 'tasks' | 'changelogs'; // <--- ورودی جدید برای تعیین نوع نمایش
-  recordName?: string; // <--- نام رکورد برای نمایش
+  view: 'notes' | 'tasks' | 'changelogs'; // <--- ?�?�?�?�?� ?�?�?�?� ?�?�?�?� ???�?�?�?� ?�?�?� ?�?�?�?�?�
+  recordName?: string; // <--- ?�?�?� ?�?�?�?�?� ?�?�?�?� ?�?�?�?�?�
   mentionUsers?: any[];
   mentionRoles?: any[];
   moduleConfig?: any;
@@ -66,10 +66,10 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
   };
 
   const getActionLabel = (action: string) => {
-    if (action === 'create') return 'ایجاد رکورد';
-    if (action === 'update') return 'ویرایش';
-    if (action === 'delete') return 'حذف';
-    return 'تغییر';
+    if (action === 'create') return '?�?�?�?�?� ?�?�?�?�?�';
+    if (action === 'update') return '?�?�?�?�?�?�';
+    if (action === 'delete') return '?�?�??';
+    return '?????�?�?�';
   };
 
   const getActionColor = (action: string) => {
@@ -80,7 +80,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
   };
 
   const formatValue = (value: unknown) => {
-    if (value === null || value === undefined || value === '') return 'خالی';
+    if (value === null || value === undefined || value === '') return '?�?�?�?�';
     if (typeof value === 'object') {
       try {
         return JSON.stringify(value);
@@ -118,7 +118,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
 
   const formatChangeValue = (rawValue: unknown, fieldDef: any): string => {
     const value = parseMaybeJson(rawValue);
-    if (value === null || value === undefined || value === '') return 'خالی';
+    if (value === null || value === undefined || value === '') return '?�?�?�?�';
 
     if (Array.isArray(value)) {
       return value
@@ -188,15 +188,15 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
     loadCurrentUser();
   }, []);
 
-  // لیست اعضا برای منشن (پروفایل‌ها)
+  // ?�?�?�?? ?�?�?�?� ?�?�?�?� ?�?�?�?� (?�?�?�???�?�?�‌?�?�)
   useEffect(() => {
     const buildMentions = (profiles: any[], roles: any[]) => {
       const profileOptions = (profiles || []).map((p: any) => ({
-        label: `عضو: ${p.full_name || p.id}`,
+        label: `?�?�?�: ${p.full_name || p.id}`,
         value: `user:${p.id}`,
       }));
       const roleOptions = (roles || []).map((r: any) => ({
-        label: `تیم: ${r.title || r.id}`,
+        label: `???�?�: ${r.title || r.id}`,
         value: `role:${r.id}`,
       }));
 
@@ -223,7 +223,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
         buildMentions(profiles || [], roles || []);
       } catch (err) {
         console.error(err);
-        message.error('دریافت اعضا/تیم‌ها ناموفق بود');
+        message.error('?�?�?�?�???? ?�?�?�?�/???�?�‌?�?� ?�?�?�?�???� ?�?�?�');
       } finally {
         setMentionsLoading(false);
       }
@@ -315,7 +315,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
       setItems(data || []);
     } catch (err: any) {
       console.error(err);
-      message.error('دریافت اطلاعات با خطا مواجه شد');
+      message.error('?�?�?�?�???? ?�?�?�?�?�?�?? ?�?� ?�?�?� ?�?�?�?�?� ?�?�');
     } finally {
       setLoading(false);
     }
@@ -354,7 +354,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
         const { error } = await supabase.from('notes').insert([payload]);
         if (error) throw error;
 
-        message.success('یادداشت ثبت شد');
+        message.success('?�?�?�?�?�?�?? ?�?�?? ?�?�');
         setNewItem('');
         setMentionValues([]);
         setReplyToId(null);
@@ -374,12 +374,12 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
       const { error } = await supabase.from('tasks').insert([payload]);
       if (error) throw error;
 
-      message.success('وظیفه ایجاد شد');
+      message.success('?�?�?�???� ?�?�?�?�?� ?�?�');
       setNewItem('');
       fetchData();
     } catch (err: any) {
       console.error(err);
-      message.error('ثبت با خطا مواجه شد');
+      message.error('?�?�?? ?�?� ?�?�?� ?�?�?�?�?� ?�?�');
     } finally {
       setLoading(false);
     }
@@ -403,14 +403,18 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
       fetchData();
     } catch (err: any) {
       console.error(err);
-      message.error('ویرایش ناموفق بود');
+      message.error('?�?�?�?�?�?� ?�?�?�?�???� ?�?�?�');
     }
   };
 
   const toggleTask = async (task: any) => {
     try {
       const nextStatus = task.status === 'completed' ? 'pending' : 'completed';
-      const patch = buildTaskStatusUpdatePayload(nextStatus, task?.completed_at || null);
+      const patch = buildTaskStatusUpdatePayload(nextStatus, {
+        previousCompletedAt: task?.completed_at || null,
+        previousStatus: task?.status ?? null,
+        previousStartDate: task?.start_date || null,
+      });
       const { error } = await supabase
         .from('tasks')
         .update(patch)
@@ -419,7 +423,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
       fetchData();
     } catch (err: any) {
       console.error(err);
-      message.error('به‌روزرسانی وظیفه ناموفق بود');
+      message.error('?�?�‌?�?�?�?�?�?�?�?� ?�?�?�???� ?�?�?�?�???� ?�?�?�');
     }
   };
 
@@ -428,11 +432,11 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
       const table = view === 'notes' ? 'notes' : 'tasks';
       const { error } = await supabase.from(table).delete().eq('id', rowId);
       if (error) throw error;
-      message.success('حذف شد');
+      message.success('?�?�?? ?�?�');
       fetchData();
     } catch (err: any) {
       console.error(err);
-      message.error('حذف با خطا مواجه شد');
+      message.error('?�?�?? ?�?� ?�?�?� ?�?�?�?�?� ?�?�');
     }
   };
 
@@ -440,12 +444,12 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
 
   return (
     <div className="h-full flex flex-col">
-      {/* عنوان بخش */}
+      {/* ?�?�?�?�?� ?�?�?� */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 mb-4">
         <div className="text-sm text-gray-600 dark:text-gray-400">
-          {view === 'notes' && 'یادداشت‌های'}
-          {view === 'tasks' && 'وظایف'}
-          {view === 'changelogs' && 'تاریخچه تغییرات'}
+          {view === 'notes' && '?�?�?�?�?�?�??‌?�?�?�'}
+          {view === 'tasks' && '?�?�?�?�??'}
+          {view === 'changelogs' && '???�?�?�?�?�?� ?????�?�?�?�??'}
         </div>
         {recordName && (
           <div className="text-xs text-gray-500 dark:text-gray-500 mt-1 truncate">
@@ -454,13 +458,13 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
         )}
       </div>
 
-      {/* فقط برای یادداشت و وظایف ورودی داریم */}
+      {/* ???�?� ?�?�?�?� ?�?�?�?�?�?�?? ?� ?�?�?�?�?? ?�?�?�?�?� ?�?�?�?�?� */}
         {view !== 'changelogs' && (
           <div className="flex gap-2 mb-6">
               {view === 'notes' ? (
                   <div className="flex-1 flex flex-col gap-2">
                     <Input.TextArea 
-                      placeholder="یادداشت جدید..." 
+                      placeholder="?�?�?�?�?�?�?? ?�?�?�?�..." 
                       value={newItem} 
                       onChange={e => setNewItem(e.target.value)} 
                       autoSize={{ minRows: 2, maxRows: 4 }} 
@@ -470,14 +474,14 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                       mode="multiple"
                       allowClear
                       showSearch
-                      placeholder="منشن عضو یا تیم (اختیاری)"
+                      placeholder="?�?�?�?� ?�?�?� ?�?� ???�?� (?�?�???�?�?�?�)"
                       value={mentionValues}
                       onChange={(v) => setMentionValues(v || [])}
                       options={mentionOptions}
                       loading={mentionsLoading}
                       optionFilterProp="label"
                       filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
-                      notFoundContent={mentionsLoading ? 'در حال بارگذاری...' : 'موردی یافت نشد'}
+                      notFoundContent={mentionsLoading ? '?�?� ?�?�?� ?�?�?�?�?�?�?�?�...' : '?�?�?�?�?� ?�?�???? ?�?�?�'}
                       getPopupContainer={(node) => node.parentElement || document.body}
                       styles={{ popup: { root: { zIndex: 3000, minWidth: 240 } } }}
                       className="w-full"
@@ -485,14 +489,14 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                     {replyToId && (
                       <div className="flex items-center gap-2 text-xs text-gray-500">
                         <MessageOutlined />
-                        <span>پاسخ به یادداشت انتخاب شده</span>
+                        <span>?�?�?�?� ?�?� ?�?�?�?�?�?�?? ?�?�???�?�?� ?�?�?�</span>
                         <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setReplyToId(null)} />
                       </div>
                     )}
                   </div>
               ) : (
                   <Input 
-                    placeholder="عنوان وظیفه..." 
+                    placeholder="?�?�?�?�?� ?�?�?�???�..." 
                     value={newItem} 
                     onChange={e => setNewItem(e.target.value)} 
                     onPressEnter={handleSubmit} 
@@ -506,7 +510,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                   className="h-auto rounded-lg"
                   onClick={() => navigate('/tasks/create', { state: { initialValues: { [taskRelationMap[moduleId]]: recordId, related_to_module: moduleId } } })}
                 >
-                  افزودن وظیفه
+                  ?�???�?�?�?� ?�?�?�???�
                 </Button>
               )}
           </div>
@@ -514,12 +518,12 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
 
       <div className="flex-1 overflow-y-auto pr-1">
           {items.length === 0 ? (
-            <Empty description="موردی یافت نشد" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Empty description="?�?�?�?�?� ?�?�???? ?�?�?�" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           ) : (
             <>
               {view === 'notes' && (
                 <List dataSource={items} renderItem={(item: any) => {
-                  const authorName = item.author_name || authorNameMap[item.author_id] || 'کاربر سیستم';
+                  const authorName = item.author_name || authorNameMap[item.author_id] || '?�?�?�?�?� ?�?�?�???�';
                   const isEditing = editingId === item.id;
                   const replyTarget = items.find((note) => note.id === item.reply_to);
                   const mentionUsers = (item.mention_user_ids || []).map((id: string) => mentionMap[id]?.label || id);
@@ -534,7 +538,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
 
                       {replyTarget && (
                         <div className="text-[11px] text-gray-500 bg-gray-50 rounded-lg p-2 mb-2">
-                          پاسخ به: {replyTarget.content || ''}
+                          ?�?�?�?� ?�?�: {replyTarget.content || ''}
                         </div>
                       )}
 
@@ -546,8 +550,8 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                             autoSize={{ minRows: 2, maxRows: 4 }}
                           />
                           <div className="flex gap-2">
-                            <Button type="primary" size="small" icon={<CheckOutlined />} onClick={handleSaveEdit}>ذخیره</Button>
-                            <Button size="small" icon={<CloseOutlined />} onClick={() => setEditingId(null)}>انصراف</Button>
+                            <Button type="primary" size="small" icon={<CheckOutlined />} onClick={handleSaveEdit}>?�?�?�?�?�</Button>
+                            <Button size="small" icon={<CloseOutlined />} onClick={() => setEditingId(null)}>?�?�?�?�?�??</Button>
                           </div>
                         </div>
                       ) : (
@@ -566,12 +570,12 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                       )}
 
                       {item.is_edited && (
-                        <div className="text-[10px] text-gray-400 mt-1">ویرایش شده</div>
+                        <div className="text-[10px] text-gray-400 mt-1">?�?�?�?�?�?� ?�?�?�</div>
                       )}
 
                       <div className="flex items-center gap-2 mt-3">
-                        <Button type="text" size="small" icon={<MessageOutlined />} onClick={() => setReplyToId(item.id)}>پاسخ</Button>
-                        <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(item)}>ویرایش</Button>
+                        <Button type="text" size="small" icon={<MessageOutlined />} onClick={() => setReplyToId(item.id)}>?�?�?�?�</Button>
+                        <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(item)}>?�?�?�?�?�?�</Button>
                         <Button type="text" size="small" icon={<DeleteOutlined />} danger onClick={() => handleDelete(item.id)} />
                       </div>
                     </div>
@@ -608,7 +612,7 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
                     const fieldTitle = log.field_label || log.field_name;
                     const fieldDef = getFieldDef(log.field_name);
                     const tableDef = moduleConfig?.blocks?.find((b: any) => b.id === log.field_name);
-                    const actor = log.user_name || authorNameMap[log.user_id] || 'سیستم';
+                    const actor = log.user_name || authorNameMap[log.user_id] || '?�?�?�???�';
                     const hasDiff = fieldTitle && (log.old_value !== null || log.new_value !== null);
                     return {
                       color: getActionColor(action),
@@ -628,10 +632,10 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
 
                           {hasDiff && (
                             <div className="bg-gray-50 p-2 rounded text-gray-600">
-                              تغییر <b>{fieldTitle}</b>:
+                              ?????�?�?� <b>{fieldTitle}</b>:
                               <div className="mt-1">
                               <span className="text-red-400 line-through mr-1 whitespace-pre-wrap">{tableDef ? formatTableRows(parseMaybeJson(log.old_value) || [], tableDef) : formatChangeValue(log.old_value, fieldDef)}</span>
-                                <span className="text-gray-400 mx-1">←</span>
+                                <span className="text-gray-400 mx-1">�?</span>
                               <span className="text-green-600 font-bold whitespace-pre-wrap">{tableDef ? formatTableRows(parseMaybeJson(log.new_value) || [], tableDef) : formatChangeValue(log.new_value, fieldDef)}</span>
                               </div>
                             </div>
