@@ -6,7 +6,7 @@ import { MODULES } from "../moduleRegistry";
 import SmartTableRenderer from "../components/SmartTableRenderer";
 import { BlockType, FieldType, SavedView, ViewMode } from "../types";
 import { App, Badge, Button, Empty, Skeleton } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { FileExcelOutlined, PlusOutlined } from "@ant-design/icons";
 import ViewManager from "../components/ViewManager";
 import SmartForm from "../components/SmartForm";
 import { supabase } from "../supabaseClient";
@@ -20,6 +20,7 @@ import BulkProductsCreateModal from "../components/products/BulkProductsCreateMo
 import WorkflowsManager from "../components/workflows/WorkflowsManager";
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from "../utils/recordCopy";
 import { attachTaskCompletionIfNeeded } from "../utils/taskCompletion";
+import ExcelImportWizard from "../components/moduleList/ExcelImportWizard";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -104,6 +105,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [currentUserRoleId, setCurrentUserRoleId] = useState<string | null>(null);
   const [isBulkProductsModalOpen, setIsBulkProductsModalOpen] = useState(false);
   const [isWorkflowsModalOpen, setIsWorkflowsModalOpen] = useState(false);
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
   const [canOpenWorkflows, setCanOpenWorkflows] = useState(true);
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
@@ -165,6 +167,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     setIsBulkEditMode(false);
     setIsBulkProductsModalOpen(false);
     setIsWorkflowsModalOpen(false);
+    setIsExcelImportModalOpen(false);
     setCanOpenWorkflows(true);
   }, [resolvedModuleId, moduleConfig?.defaultViewMode]);
 
@@ -700,6 +703,15 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                     گردش کارها
                   </Button>
                 )}
+                {canEditModule && (
+                  <Button
+                    icon={<FileExcelOutlined />}
+                    onClick={() => setIsExcelImportModalOpen(true)}
+                    className="rounded-xl"
+                  >
+                    وارد کردن از اکسل
+                  </Button>
+                )}
                 {canEditModule && resolvedModuleId === 'products' && (
                   <Button
                     icon={<PlusOutlined />}
@@ -940,6 +952,16 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
         onClose={() => setIsWorkflowsModalOpen(false)}
         defaultModuleId={resolvedModuleId}
         context="module_list"
+      />
+      <ExcelImportWizard
+        open={isExcelImportModalOpen}
+        moduleId={resolvedModuleId}
+        moduleConfig={moduleConfig}
+        onClose={() => setIsExcelImportModalOpen(false)}
+        onImported={() => {
+          setIsExcelImportModalOpen(false);
+          tableQueryResult.refetch();
+        }}
       />
     </div>
   );

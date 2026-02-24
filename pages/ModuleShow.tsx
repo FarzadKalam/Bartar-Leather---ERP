@@ -33,7 +33,7 @@ import {
   syncProductStock,
 } from '../utils/productionWorkflow';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
-import { canAccessAssignedRecord } from '../utils/permissions';
+import { canAccessAssignedRecord, resolveFilesAccessPermissions } from '../utils/permissions';
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from '../utils/recordCopy';
 import { attachTaskCompletionIfNeeded, buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import {
@@ -63,6 +63,12 @@ const ModuleShow: React.FC = () => {
   const [relationOptions, setRelationOptions] = useState<Record<string, any[]>>({});
   const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
+  const [filesAccessPermissions, setFilesAccessPermissions] = useState({
+    canViewGallery: true,
+    canEditGallery: true,
+    canViewRecordFilesManager: true,
+    canEditRecordFilesManager: true,
+  });
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
   const [autoSyncedBomId, setAutoSyncedBomId] = useState<string | null>(null);
   const bomCopyPromptRef = useRef<string | null>(null);
@@ -1070,9 +1076,11 @@ const ModuleShow: React.FC = () => {
         .eq('id', profile.role_id)
         .single();
 
+      const rolePermissions = (role?.permissions || {}) as Record<string, any>;
       const modulePerms = role?.permissions?.[moduleId] || {};
       const perms = modulePerms.fields || {};
       setFieldPermissions(perms);
+      setFilesAccessPermissions(resolveFilesAccessPermissions(rolePermissions as any));
       setModulePermissions({
         view: modulePerms.view,
         edit: modulePerms.edit,
@@ -2447,6 +2455,8 @@ const ModuleShow: React.FC = () => {
             recordId={id}
             moduleId={moduleId}
             allValues={data}
+            canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
+            canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
           />
         </div>
       );
@@ -2494,6 +2504,8 @@ const ModuleShow: React.FC = () => {
               recordId={id}
               moduleId={moduleId}
               allValues={data}
+              canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
+              canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
             />
           </div>
           <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => saveEdit(field.key)} className="bg-green-500 hover:!bg-green-600 border-none" />
@@ -2513,6 +2525,8 @@ const ModuleShow: React.FC = () => {
         recordId={id}
         moduleId={moduleId}
         allValues={data}
+        canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
+        canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
       />
     );
 
@@ -2669,6 +2683,8 @@ const ModuleShow: React.FC = () => {
         canViewField={canViewField}
         canEditModule={canEditModule}
         checkVisibility={checkVisibility}
+        canViewFilesManager={filesAccessPermissions.canViewRecordFilesManager}
+        canEditFilesManager={canEditModule && filesAccessPermissions.canEditRecordFilesManager}
       />
 
       {moduleId === 'customers' && (

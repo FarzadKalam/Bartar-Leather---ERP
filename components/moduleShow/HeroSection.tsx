@@ -1,23 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Tag, Image, Upload, Select, Space } from 'antd';
+import { Button, Image, Select, Space, Tag, Upload } from 'antd';
 import {
-  UploadOutlined,
-  LoadingOutlined,
   AppstoreOutlined,
-  SafetyCertificateOutlined,
   ClockCircleOutlined,
   EditOutlined,
   HistoryOutlined,
+  LoadingOutlined,
+  SafetyCertificateOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FieldLocation, FieldType } from '../../types';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
-import TagInput from '../TagInput';
+import { FieldLocation, FieldType } from '../../types';
 import RecordFilesManager from '../RecordFilesManager';
+import TagInput from '../TagInput';
 
 interface HeroSectionProps {
   data: any;
@@ -37,6 +37,8 @@ interface HeroSectionProps {
   canViewField?: (fieldKey: string) => boolean;
   canEditModule?: boolean;
   checkVisibility?: (logic: any) => boolean;
+  canViewFilesManager?: boolean;
+  canEditFilesManager?: boolean;
 }
 
 const HeroSection: React.FC<HeroSectionProps> = ({
@@ -57,22 +59,26 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   canViewField,
   canEditModule = true,
   checkVisibility,
+  canViewFilesManager = true,
+  canEditFilesManager = true,
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const imageField = moduleConfig?.fields?.find((f: any) => f.type === FieldType.IMAGE);
   const canShowImage = !!imageField && (canViewField ? canViewField(imageField.key) !== false : true);
   const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
+  const canOpenFilesGallery = supportsFilesGallery && canViewFilesManager;
+
   const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const shouldOpenGalleryFromQuery = queryParams.get('gallery') === '1';
   const highlightFileId = queryParams.get('fileId');
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
 
   useEffect(() => {
-    if (supportsFilesGallery && shouldOpenGalleryFromQuery) {
+    if (canOpenFilesGallery && shouldOpenGalleryFromQuery) {
       setIsGalleryOpen(true);
     }
-  }, [supportsFilesGallery, shouldOpenGalleryFromQuery]);
+  }, [canOpenFilesGallery, shouldOpenGalleryFromQuery]);
 
   const handleCloseGallery = () => {
     setIsGalleryOpen(false);
@@ -90,7 +96,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
       { replace: true },
     );
   };
-  
+
   const renderDate = (dateVal: any) => {
     if (!dateVal) return '-';
     try {
@@ -112,7 +118,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
       <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-leather-500 to-leather-800 opacity-80"></div>
 
       <div className="flex flex-col lg:flex-row gap-8 items-stretch">
-        {/* تصویر */}
         {canShowImage && (
           <div className="w-full lg:w-56 h-48 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
             {data.image_url ? (
@@ -128,14 +133,15 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 <span className="text-xs">بدون تصویر</span>
               </div>
             )}
+
             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center backdrop-blur-sm gap-2">
               <Upload showUploadList={false} beforeUpload={onImageUpdate}>
                 <Button type="primary" icon={<UploadOutlined />} className="bg-leather-500 border-none" disabled={!canEditModule}>
                   تغییر تصویر
                 </Button>
               </Upload>
-              {supportsFilesGallery && (
-                <Button type="default" size="small" onClick={() => setIsGalleryOpen(true)} disabled={!canEditModule}>
+              {canOpenFilesGallery && (
+                <Button type="default" size="small" onClick={() => setIsGalleryOpen(true)}>
                   گالری
                 </Button>
               )}
@@ -143,12 +149,11 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           </div>
         )}
 
-        {/* محتوا */}
         <div className="flex-1 w-full flex flex-col justify-between">
           <div>
             <div className="flex flex-wrap items-start justify-between gap-4 mb-4 mt-2">
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-2xl md:text-3xl font-black m-0 text-gray-800 dark:text-white">{recordTitle || data.name || data.system_code || "-"}</h1>
+                <h1 className="text-2xl md:text-3xl font-black m-0 text-gray-800 dark:text-white">{recordTitle || data.name || data.system_code || '-'}</h1>
                 {(data.system_code || data.custom_code) && (
                   <Tag className="font-mono dir-ltr bg-gray-100 dark:bg-white/10 border-none text-gray-500 px-2 py-1">
                     {data.system_code || data.custom_code}
@@ -156,7 +161,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 )}
               </div>
 
-              {/* بخش انتخاب مسئول */}
               {(canViewField ? canViewField('assignee_id') !== false : true) && (
                 <div className="flex items-center justify-between sm:justify-start bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-lg sm:rounded-full pl-2 sm:pl-1 pr-3 py-1 gap-1 sm:gap-2 mb-4">
                   <span className="text-xs text-gray-400 shrink-0">مسئول:</span>
@@ -181,7 +185,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
               )}
             </div>
 
-            {/* --- کامپوننت مدیریت تگ --- */}
             {(canViewField ? canViewField('tags') !== false : true) && (
               <div className="mb-6">
                 <TagInput
@@ -193,7 +196,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
               </div>
             )}
 
-            {/* فیلدهای هدر */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6 mt-6">
               {moduleConfig.fields
                 .filter((f: any) => f.location === FieldLocation.HEADER && !['name', 'image_url', 'system_code', 'tags'].includes(f.key))
@@ -209,7 +211,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           </div>
 
           <div className="mt-6 flex flex-col gap-4">
-            {/* تگ‌های پایین */}
             <div className="flex gap-2 overflow-x-auto pb-2 border-t border-gray-100 dark:border-gray-800 pt-4">
               {data.category && (
                 <Tag
@@ -226,10 +227,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
               )}
             </div>
 
-            {/* --- فیلدهای سیستمی (System Info) --- */}
             <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-500 dark:text-gray-400 border border-gray-100 dark:border-white/5">
-              
-              {/* ایجاد کننده */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <SafetyCertificateOutlined className="text-green-600" />
@@ -240,7 +238,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 </div>
               </div>
 
-              {/* زمان ایجاد */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <ClockCircleOutlined className="text-blue-500" />
@@ -253,7 +250,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 </div>
               </div>
 
-              {/* آخرین ویرایشگر */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <EditOutlined className="text-orange-500" />
@@ -264,7 +260,6 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                 </div>
               </div>
 
-              {/* زمان ویرایش */}
               <div className="flex items-center gap-2">
                 <div className="bg-white dark:bg-white/10 p-1.5 rounded-full">
                   <HistoryOutlined className="text-purple-500" />
@@ -280,7 +275,8 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           </div>
         </div>
       </div>
-      {supportsFilesGallery && (
+
+      {canOpenFilesGallery && (
         <RecordFilesManager
           open={isGalleryOpen}
           onClose={handleCloseGallery}
@@ -288,7 +284,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           recordId={data.id}
           mainImage={data.image_url}
           onMainImageChange={onMainImageChange}
-          canEdit={!!canEditModule}
+          canEdit={!!canEditModule && !!canEditFilesManager}
           highlightFileId={highlightFileId}
         />
       )}

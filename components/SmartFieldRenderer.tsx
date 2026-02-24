@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button } from 'antd';
 import { UploadOutlined, LoadingOutlined, QrcodeOutlined, PlusOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
@@ -76,10 +76,12 @@ interface SmartFieldRendererProps {
   allValues?: Record<string, any>;
   recordId?: string;
   moduleId?: string;
+  canViewFilesManager?: boolean;
+  canEditFilesManager?: boolean;
 }
 
 const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({ 
-  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false
+  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false, canViewFilesManager = true, canEditFilesManager = true
 }) => {
   const { message: msg } = App.useApp();
   const [uploading, setUploading] = useState(false);
@@ -92,8 +94,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const [scannedCode, setScannedCode] = useState('');
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
+  const canShowFilesGallery = supportsFilesGallery && canViewFilesManager;
 
-  const fieldLabel = field?.labels?.fa || label || 'بدون نام';
+  const fieldLabel = field?.labels?.fa || label || 'ط¨ط¯ظˆظ† ظ†ط§ظ…';
   const fieldType = field?.type || type || FieldType.TEXT;
   const fieldKey = field?.key || 'unknown';
   const isRequired = field?.validation?.required || false;
@@ -250,12 +253,12 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         }
       }
 
-      msg.success('تصویر با موفقیت آپلود شد');
+      msg.success('طھطµظˆغŒط± ط¨ط§ ظ…ظˆظپظ‚غŒطھ ط¢ظ¾ظ„ظˆط¯ ط´ط¯');
       onChange(publicUrl);
       return publicUrl;
     } catch (error: any) {
-      console.error('خطا در آپلود تصویر:', error);
-      msg.error(`خطا در آپلود: ${error.message}`);
+      console.error('ط®ط·ط§ ط¯ط± ط¢ظ¾ظ„ظˆط¯ طھطµظˆغŒط±:', error);
+      msg.error(`ط®ط·ط§ ط¯ط± ط¢ظ¾ظ„ظˆط¯: ${error.message}`);
       return null;
     } finally {
       setUploading(false);
@@ -358,7 +361,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       });
 
       if (!payload[quickCreateTargetField]) {
-        throw new Error(`فیلد "${quickCreateTargetField}" الزامی است.`);
+        throw new Error(`ظپغŒظ„ط¯ "${quickCreateTargetField}" ط§ظ„ط²ط§ظ…غŒ ط§ط³طھ.`);
       }
 
       const selectFields = Array.from(new Set(['id', quickCreateTargetField])).join(', ');
@@ -369,14 +372,14 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         .single();
       if (error) throw error;
 
-      msg.success('رکورد جدید ایجاد شد');
+      msg.success('ط±ع©ظˆط±ط¯ ط¬ط¯غŒط¯ ط§غŒط¬ط§ط¯ ط´ط¯');
       closeQuickCreate();
       if (onOptionsUpdate) onOptionsUpdate();
       const insertedRow: any = inserted as any;
       if (insertedRow?.id) onChange(insertedRow.id);
     } catch (err: any) {
       if (Array.isArray(err?.errorFields)) return;
-      msg.error('خطا در ایجاد رکورد: ' + (err?.message || 'نامشخص'));
+      msg.error('ط®ط·ط§ ط¯ط± ط§غŒط¬ط§ط¯ ط±ع©ظˆط±ط¯: ' + (err?.message || 'ظ†ط§ظ…ط´ط®طµ'));
     } finally {
       setQuickCreateLoading(false);
     }
@@ -397,7 +400,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
              onChange(scannedCode);
              setIsScanModalOpen(false);
          } else {
-             msg.error('موردی یافت نشد');
+             msg.error('ظ…ظˆط±ط¯غŒ غŒط§ظپطھ ظ†ط´ط¯');
          }
       }
     }
@@ -424,13 +427,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
     if (!forceEditMode) {
         if (fieldType === FieldType.CHECKBOX) {
-            return value ? <Tag color="green">بله</Tag> : <Tag color="red">خیر</Tag>;
+            return value ? <Tag color="green">ط¨ظ„ظ‡</Tag> : <Tag color="red">ط®غŒط±</Tag>;
         }
         if (fieldType === FieldType.IMAGE && value) {
             return <Image src={value} width={40} className="rounded border" />;
         }
         if (fieldType === FieldType.PRICE) {
-          const formatted = value ? formatPersianPrice(value, true) : '۰';
+          const formatted = value ? formatPersianPrice(value, true) : 'غ°';
           return <span className="font-bold text-gray-700 dark:text-gray-300 text-xs persian-number">{formatted}</span>;
         }
         if (fieldType === FieldType.DATE) {
@@ -522,7 +525,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     onChange={onChange}
                     options={fieldOptions}
                     category={field.dynamicOptionsCategory}
-                    placeholder={compactMode ? '' : "انتخاب کنید"}
+                    placeholder={compactMode ? '' : "ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯"}
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
                     getPopupContainer={() => document.body}
@@ -550,7 +553,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     onChange={onChange}
                     options={fieldOptions}
                     category={field.dynamicOptionsCategory}
-                    placeholder={compactMode ? '' : "انتخاب کنید"}
+                    placeholder={compactMode ? '' : "ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯"}
                     mode="multiple"
                 onOptionsUpdate={onOptionsUpdate}
                 disabled={!forceEditMode}
@@ -580,7 +583,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         if (relConfigAny?.dependsOn && allValues) {
              const depVal = allValues[relConfigAny.dependsOn];
              if (!depVal) {
-                 return <Select disabled placeholder="ابتدا فیلد مرتبط را انتخاب کنید" style={{width:'100%'}} value={value} options={[]} />;
+                 return <Select disabled placeholder="ط§ط¨طھط¯ط§ ظپغŒظ„ط¯ ظ…ط±طھط¨ط· ط±ط§ ط§ظ†طھط®ط§ط¨ ع©ظ†غŒط¯" style={{width:'100%'}} value={value} options={[]} />;
              }
              filteredOptions = fieldOptions.filter((opt: any) => opt.module === depVal);
         }
@@ -609,7 +612,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                                       className="p-2 text-blue-500 cursor-pointer text-xs hover:bg-blue-50 flex items-center gap-1"
                                       onClick={() => setQuickCreateOpen(true)}
                                   >
-                                      <PlusOutlined /> افزودن مورد جدید...
+                                      <PlusOutlined /> ط§ظپط²ظˆط¯ظ† ظ…ظˆط±ط¯ ط¬ط¯غŒط¯...
                                   </div>
                               </>
                           )}
@@ -646,7 +649,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                   label={filteredOptions.find((opt: any) => opt.value === value)?.label || String(value)}
                 >
                   <span className="text-xs text-leather-600 cursor-pointer hover:underline">
-                    مشاهده سریع رکورد مرتبط
+                    ظ…ط´ط§ظ‡ط¯ظ‡ ط³ط±غŒط¹ ط±ع©ظˆط±ط¯ ظ…ط±طھط¨ط·
                   </span>
                 </RelatedRecordPopover>
               )}
@@ -661,7 +664,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             onChange={onChange}
             className="w-full"
             disabled={!forceEditMode}
-            placeholder={compactMode ? undefined : "انتخاب تاریخ"}
+            placeholder={compactMode ? undefined : "ط§ظ†طھط®ط§ط¨ طھط§ط±غŒط®"}
           />
         );
 
@@ -673,7 +676,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             onChange={onChange}
             className="w-full"
             disabled={!forceEditMode}
-            placeholder={compactMode ? undefined : "انتخاب زمان"}
+            placeholder={compactMode ? undefined : "ط§ظ†طھط®ط§ط¨ ط²ظ…ط§ظ†"}
           />
         );
 
@@ -685,7 +688,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             onChange={onChange}
             className="w-full"
             disabled={!forceEditMode}
-            placeholder={compactMode ? undefined : "انتخاب تاریخ و زمان"}
+            placeholder={compactMode ? undefined : "ط§ظ†طھط®ط§ط¨ طھط§ط±غŒط® ظˆ ط²ظ…ط§ظ†"}
           />
         );
 
@@ -701,7 +704,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             />
           );
         }
-        return <Input disabled placeholder="بعد از ذخیره، تگ‌ها قابل ویرایش است" />;
+        return <Input disabled placeholder="ط¨ط¹ط¯ ط§ط² ط°ط®غŒط±ظ‡طŒ طھع¯â€Œظ‡ط§ ظ‚ط§ط¨ظ„ ظˆغŒط±ط§غŒط´ ط§ط³طھ" />;
 
       case FieldType.IMAGE:
         return (
@@ -718,13 +721,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                   ) : value ? (
                     <img src={value} alt="avatar" style={{ width: '100%', borderRadius: 8 }} />
                   ) : (
-                    <div><UploadOutlined /><div style={{ marginTop: 8 }}>آپلود</div></div>
+                    <div><UploadOutlined /><div style={{ marginTop: 8 }}>ط¢ظ¾ظ„ظˆط¯</div></div>
                   )}
               </Upload>
-              {supportsFilesGallery && (
+              {canShowFilesGallery && (
                 <>
-                  <Button size="small" onClick={() => setIsGalleryOpen(true)} disabled={!forceEditMode}>
-                    گالری
+                  <Button size="small" onClick={() => setIsGalleryOpen(true)}>
+                    ع¯ط§ظ„ط±غŒ
                   </Button>
                   <RecordFilesManager
                     open={isGalleryOpen}
@@ -733,7 +736,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     recordId={recordId}
                     mainImage={value}
                     onMainImageChange={(url) => onChange(url)}
-                    canEdit={forceEditMode && !isReadonly}
+                    canEdit={!!canEditFilesManager && !!forceEditMode && !isReadonly}
                   />
                 </>
               )}
@@ -776,7 +779,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 />
             )}
              <Modal 
-                title="اسکن بارکد" 
+                title="ط§ط³ع©ظ† ط¨ط§ط±ع©ط¯" 
                 open={isScanModalOpen} 
                 onCancel={() => setIsScanModalOpen(false)} 
                 footer={null}
@@ -784,7 +787,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             >
                 <Input 
                     autoFocus 
-                    placeholder="کد را اسکن کنید..." 
+                    placeholder="ع©ط¯ ط±ط§ ط§ط³ع©ظ† ع©ظ†غŒط¯..." 
                     value={scannedCode} 
                     onChange={e => setScannedCode(e.target.value)}
                     onPressEnter={handleScan} 
@@ -798,7 +801,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const formItemProps: any = {
       label: fieldLabel,
       name: fieldKey,
-      rules: [{ required: isRequired, message: 'الزامی است' }],
+      rules: [{ required: isRequired, message: 'ط§ظ„ط²ط§ظ…غŒ ط§ط³طھ' }],
       valuePropName: fieldType === FieldType.CHECKBOX ? 'checked' : 'value',
   };
 
@@ -822,7 +825,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             />
         )}
         <Modal 
-            title="اسکن بارکد" 
+            title="ط§ط³ع©ظ† ط¨ط§ط±ع©ط¯" 
             open={isScanModalOpen} 
             onCancel={() => setIsScanModalOpen(false)} 
             footer={null}
@@ -830,7 +833,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         >
             <Input 
                 autoFocus 
-                placeholder="کد را اسکن کنید..." 
+                placeholder="ع©ط¯ ط±ط§ ط§ط³ع©ظ† ع©ظ†غŒط¯..." 
                 value={scannedCode} 
                 onChange={e => setScannedCode(e.target.value)}
                 onPressEnter={handleScan} 
@@ -944,12 +947,12 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
 
   return (
     <Modal
-      title={`افزودن سریع: ${label}`}
+      title={`ط§ظپط²ظˆط¯ظ† ط³ط±غŒط¹: ${label}`}
       open={open}
       onCancel={onCancel}
       onOk={onOk}
-      okText="افزودن"
-      cancelText="انصراف"
+      okText="ط§ظپط²ظˆط¯ظ†"
+      cancelText="ط§ظ†طµط±ط§ظپ"
       confirmLoading={loading}
       destroyOnHidden
       zIndex={2000} 
@@ -966,15 +969,16 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
             name={field.key}
             label={field.labels?.fa || field.key}
             valuePropName={field.type === FieldType.CHECKBOX ? 'checked' : 'value'}
-            rules={field.validation?.required ? [{ required: true, message: 'الزامی است' }] : undefined}
+            rules={field.validation?.required ? [{ required: true, message: 'ط§ظ„ط²ط§ظ…غŒ ط§ط³طھ' }] : undefined}
           >
             {renderQuickField(field)}
           </Form.Item>
         ))}
       </Form>
       <div className="text-xs text-gray-400 mt-1">
-        فیلدهای کلیدی، هدر، الزامی و ستون‌های لیست برای ثبت سریع نمایش داده شده‌اند.
+        ظپغŒظ„ط¯ظ‡ط§غŒ ع©ظ„غŒط¯غŒطŒ ظ‡ط¯ط±طŒ ط§ظ„ط²ط§ظ…غŒ ظˆ ط³طھظˆظ†â€Œظ‡ط§غŒ ظ„غŒط³طھ ط¨ط±ط§غŒ ط«ط¨طھ ط³ط±غŒط¹ ظ†ظ…ط§غŒط´ ط¯ط§ط¯ظ‡ ط´ط¯ظ‡â€Œط§ظ†ط¯.
       </div>
     </Modal>
   );
 };
+

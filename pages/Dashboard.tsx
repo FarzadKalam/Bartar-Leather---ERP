@@ -554,9 +554,9 @@ const Dashboard: React.FC = () => {
       {(canShowWidget('kpi_total_sales') || canShowWidget('kpi_in_production') || canShowWidget('kpi_total_products') || canShowWidget('kpi_monthly_growth')) && (
       <Row gutter={[16, 16]} className="mb-6">
         {canShowWidget('kpi_total_sales') && (
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={24} sm={12} lg={6} className="flex">
           <Card
-            className="shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+            className="shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full min-h-[170px] w-full"
             onClick={() => navigate('/invoices')}
           >
             <div className="flex items-center justify-between">
@@ -584,9 +584,9 @@ const Dashboard: React.FC = () => {
         </Col>
         )}
         {canShowWidget('kpi_in_production') && (
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={24} sm={12} lg={6} className="flex">
           <Card
-            className="shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+            className="shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full min-h-[170px] w-full"
             onClick={() => navigate('/production_orders')}
           >
             <div className="flex items-center justify-between">
@@ -613,8 +613,8 @@ const Dashboard: React.FC = () => {
         </Col>
         )}
         {canShowWidget('kpi_total_products') && (
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+        <Col xs={24} sm={12} lg={6} className="flex">
+          <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full min-h-[170px] w-full">
             <div className="flex items-center justify-between">
               <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                 <Button 
@@ -635,8 +635,8 @@ const Dashboard: React.FC = () => {
         </Col>
         )}
         {canShowWidget('kpi_monthly_growth') && (
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+        <Col xs={24} sm={12} lg={6} className="flex">
+          <Card className="shadow-sm hover:shadow-md transition-shadow cursor-pointer h-full min-h-[170px] w-full">
             <div className="flex items-center justify-between">
               <Dropdown menu={getWidgetMenu()} trigger={['click']}>
                 <Button 

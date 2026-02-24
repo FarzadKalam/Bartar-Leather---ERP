@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Tree, Checkbox, Button, Input, message, Empty, Divider, Switch, Collapse } from 'antd';
+import { App, Tree, Checkbox, Button, Input, Empty, Divider, Switch, Collapse } from 'antd';
+import type { CollapseProps } from 'antd';
 import { PlusOutlined, DeleteOutlined, SaveOutlined, LockOutlined, TeamOutlined } from '@ant-design/icons';
 import { supabase } from '../../supabaseClient';
 import { MODULES } from '../../moduleRegistry';
@@ -13,12 +14,13 @@ import {
   DASHBOARD_WIDGET_PERMISSIONS,
   WORKFLOWS_PERMISSION_KEY,
   WORKFLOWS_PERMISSION_FIELDS,
+  FILES_PERMISSION_KEY,
+  FILES_PERMISSION_FIELDS,
   type PermissionMap,
 } from '../../utils/permissions';
 
-const { Panel } = Collapse;
-
 const RolesTab: React.FC = () => {
+  const { message } = App.useApp();
   const [roles, setRoles] = useState<any[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<PermissionMap>({});
@@ -28,7 +30,7 @@ const RolesTab: React.FC = () => {
   const defaultPermissions = useMemo(() => buildDefaultPermissions(MODULES), []);
 
   useEffect(() => {
-    fetchRoles();
+    void fetchRoles();
   }, []);
 
   useEffect(() => {
@@ -50,7 +52,7 @@ const RolesTab: React.FC = () => {
     if (!error) {
       message.success('جایگاه اضافه شد');
       setNewRoleName('');
-      fetchRoles();
+      void fetchRoles();
     }
   };
 
@@ -59,7 +61,7 @@ const RolesTab: React.FC = () => {
     if (!error) {
       message.success('حذف شد');
       if (selectedRoleId === id) setSelectedRoleId(null);
-      fetchRoles();
+      void fetchRoles();
     } else {
       message.error('خطا: ممکن است کاربرانی به این نقش متصل باشند.');
     }
@@ -127,7 +129,7 @@ const RolesTab: React.FC = () => {
           icon={<DeleteOutlined />}
           onClick={(e) => {
             e.stopPropagation();
-            handleDeleteRole(role.id);
+            void handleDeleteRole(role.id);
           }}
         />
       </div>
@@ -167,6 +169,134 @@ const RolesTab: React.FC = () => {
     );
   };
 
+  const renderCrudHeader = (moduleId: string, title: string) => {
+    const modPerms = getModulePerms(moduleId);
+    return (
+      <div className="flex items-center justify-between w-full dark:text-gray-200">
+        <span className="font-bold">{title}</span>
+        <div className="flex gap-4 text-xs" onClick={(e) => e.stopPropagation()}>
+          <Checkbox
+            className="dark:text-gray-400"
+            checked={modPerms.view !== false}
+            onChange={(e) => handlePermissionChange(moduleId, 'view', undefined, e.target.checked)}
+          >
+            مشاهده
+          </Checkbox>
+          <Checkbox
+            className="dark:text-gray-400"
+            checked={modPerms.edit !== false}
+            disabled={modPerms.view === false}
+            onChange={(e) => handlePermissionChange(moduleId, 'edit', undefined, e.target.checked)}
+          >
+            ویرایش/ایجاد
+          </Checkbox>
+          <Checkbox
+            className="dark:text-gray-400"
+            checked={modPerms.delete !== false}
+            disabled={modPerms.view === false}
+            onChange={(e) => handlePermissionChange(moduleId, 'delete', undefined, e.target.checked)}
+          >
+            حذف
+          </Checkbox>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSimpleHeader = (title: string) => (
+    <div className="flex items-center justify-between w-full dark:text-gray-200">
+      <span className="font-bold">{title}</span>
+    </div>
+  );
+
+  const collapseItems: CollapseProps['items'] = [
+    ...Object.values(MODULES).map((module) => {
+      const disabled = getModulePerms(module.id).view === false;
+      const fields = collectModulePermissionFields(module);
+      return {
+        key: module.id,
+        className: 'dark:border-gray-800',
+        label: renderCrudHeader(module.id, module.titles.fa),
+        children: (
+          <div className="pl-6 pt-2">
+            <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
+              دسترسی به فیلدها و جداول
+            </Divider>
+            {renderFieldSwitches(module.id, fields, disabled)}
+          </div>
+        ),
+      };
+    }),
+    {
+      key: SETTINGS_PERMISSION_KEY,
+      className: 'dark:border-gray-800',
+      label: renderSimpleHeader('تنظیمات'),
+      children: (
+        <div className="pl-6 pt-2">
+          <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
+            دسترسی تب های تنظیمات
+          </Divider>
+          {renderFieldSwitches(
+            SETTINGS_PERMISSION_KEY,
+            SETTINGS_TAB_PERMISSIONS,
+            getModulePerms(SETTINGS_PERMISSION_KEY).view === false
+          )}
+        </div>
+      ),
+    },
+    {
+      key: DASHBOARD_PERMISSION_KEY,
+      className: 'dark:border-gray-800',
+      label: renderSimpleHeader('داشبورد'),
+      children: (
+        <div className="pl-6 pt-2">
+          <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
+            دسترسی ویجت های داشبورد
+          </Divider>
+          {renderFieldSwitches(
+            DASHBOARD_PERMISSION_KEY,
+            DASHBOARD_WIDGET_PERMISSIONS,
+            getModulePerms(DASHBOARD_PERMISSION_KEY).view === false
+          )}
+        </div>
+      ),
+    },
+    {
+      key: FILES_PERMISSION_KEY,
+      className: 'dark:border-gray-800',
+      label: renderCrudHeader(FILES_PERMISSION_KEY, 'گالری و مدیریت فایل‌ها'),
+      children: (
+        <div className="pl-6 pt-2">
+          <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
+            دسترسی بخش‌ها
+          </Divider>
+          {renderFieldSwitches(
+            FILES_PERMISSION_KEY,
+            FILES_PERMISSION_FIELDS,
+            getModulePerms(FILES_PERMISSION_KEY).view === false
+          )}
+        </div>
+      ),
+    },
+    {
+      key: WORKFLOWS_PERMISSION_KEY,
+      className: 'dark:border-gray-800',
+      label: renderCrudHeader(WORKFLOWS_PERMISSION_KEY, 'گردش کارها'),
+      children: (
+        <div className="pl-6 pt-2">
+          <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
+            دسترسی بخش‌های گردش کار
+          </Divider>
+          {renderFieldSwitches(
+            WORKFLOWS_PERMISSION_KEY,
+            WORKFLOWS_PERMISSION_FIELDS,
+            getModulePerms(WORKFLOWS_PERMISSION_KEY).view === false
+          )}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="flex flex-col md:flex-row gap-6 h-[70vh]">
       <div className="w-full md:w-1/3 bg-gray-50 dark:bg-[#202020] border border-gray-200 dark:border-gray-800 rounded-xl p-4 flex flex-col">
@@ -190,7 +320,7 @@ const RolesTab: React.FC = () => {
               className="bg-transparent dark:text-gray-300"
               treeData={treeData}
               selectedKeys={selectedRoleId ? [selectedRoleId] : []}
-              onSelect={(keys) => setSelectedRoleId(keys[0] as string)}
+              onSelect={(keys) => setSelectedRoleId((keys[0] as string) || null)}
               blockNode
             />
           ) : (
@@ -220,165 +350,11 @@ const RolesTab: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-y-auto pr-2">
-              <Collapse defaultActiveKey={[Object.values(MODULES)[0]?.id || 'products']} className="dark:bg-transparent dark:border-gray-800">
-                {Object.values(MODULES).map((module) => {
-                  const modPerms = getModulePerms(module.id);
-                  const fields = collectModulePermissionFields(module);
-                  const disabled = modPerms.view === false;
-                  return (
-                    <Panel
-                      key={module.id}
-                      className="dark:border-gray-800"
-                      header={
-                        <div className="flex items-center justify-between w-full dark:text-gray-200">
-                          <span className="font-bold">{module.titles.fa}</span>
-                          <div className="flex gap-4 text-xs" onClick={(e) => e.stopPropagation()}>
-                            <Checkbox
-                              className="dark:text-gray-400"
-                              checked={modPerms.view !== false}
-                              onChange={(e) => handlePermissionChange(module.id, 'view', undefined, e.target.checked)}
-                            >
-                              مشاهده
-                            </Checkbox>
-                            <Checkbox
-                              className="dark:text-gray-400"
-                              checked={modPerms.edit !== false}
-                              disabled={modPerms.view === false}
-                              onChange={(e) => handlePermissionChange(module.id, 'edit', undefined, e.target.checked)}
-                            >
-                              ویرایش/ایجاد
-                            </Checkbox>
-                            <Checkbox
-                              className="dark:text-gray-400"
-                              checked={modPerms.delete !== false}
-                              disabled={modPerms.view === false}
-                              onChange={(e) => handlePermissionChange(module.id, 'delete', undefined, e.target.checked)}
-                            >
-                              حذف
-                            </Checkbox>
-                          </div>
-                        </div>
-                      }
-                    >
-                      <div className="pl-6 pt-2">
-                        <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
-                          دسترسی به فیلدها و جداول
-                        </Divider>
-                        {renderFieldSwitches(module.id, fields, disabled)}
-                      </div>
-                    </Panel>
-                  );
-                })}
-
-                <Panel
-                  key={SETTINGS_PERMISSION_KEY}
-                  className="dark:border-gray-800"
-                  header={
-                    <div className="flex items-center justify-between w-full dark:text-gray-200">
-                      <span className="font-bold">تنظیمات</span>
-                    </div>
-                  }
-                >
-                  <div className="pl-6 pt-2">
-                    <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
-                      دسترسی تب های تنظیمات
-                    </Divider>
-                    {renderFieldSwitches(
-                      SETTINGS_PERMISSION_KEY,
-                      SETTINGS_TAB_PERMISSIONS,
-                      getModulePerms(SETTINGS_PERMISSION_KEY).view === false
-                    )}
-                  </div>
-                </Panel>
-
-                <Panel
-                  key={DASHBOARD_PERMISSION_KEY}
-                  className="dark:border-gray-800"
-                  header={
-                    <div className="flex items-center justify-between w-full dark:text-gray-200">
-                      <span className="font-bold">داشبورد</span>
-                    </div>
-                  }
-                >
-                  <div className="pl-6 pt-2">
-                    <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
-                      دسترسی ویجت های داشبورد
-                    </Divider>
-                    {renderFieldSwitches(
-                      DASHBOARD_PERMISSION_KEY,
-                      DASHBOARD_WIDGET_PERMISSIONS,
-                      getModulePerms(DASHBOARD_PERMISSION_KEY).view === false
-                    )}
-                  </div>
-                </Panel>
-
-                <Panel
-                  key={WORKFLOWS_PERMISSION_KEY}
-                  className="dark:border-gray-800"
-                  header={
-                    <div className="flex items-center justify-between w-full dark:text-gray-200">
-                      <span className="font-bold">گردش کارها</span>
-                      <div className="flex gap-4 text-xs" onClick={(e) => e.stopPropagation()}>
-                        <Checkbox
-                          className="dark:text-gray-400"
-                          checked={getModulePerms(WORKFLOWS_PERMISSION_KEY).view !== false}
-                          onChange={(e) =>
-                            handlePermissionChange(
-                              WORKFLOWS_PERMISSION_KEY,
-                              'view',
-                              undefined,
-                              e.target.checked
-                            )
-                          }
-                        >
-                          مشاهده
-                        </Checkbox>
-                        <Checkbox
-                          className="dark:text-gray-400"
-                          checked={getModulePerms(WORKFLOWS_PERMISSION_KEY).edit !== false}
-                          disabled={getModulePerms(WORKFLOWS_PERMISSION_KEY).view === false}
-                          onChange={(e) =>
-                            handlePermissionChange(
-                              WORKFLOWS_PERMISSION_KEY,
-                              'edit',
-                              undefined,
-                              e.target.checked
-                            )
-                          }
-                        >
-                          ویرایش/ایجاد
-                        </Checkbox>
-                        <Checkbox
-                          className="dark:text-gray-400"
-                          checked={getModulePerms(WORKFLOWS_PERMISSION_KEY).delete !== false}
-                          disabled={getModulePerms(WORKFLOWS_PERMISSION_KEY).view === false}
-                          onChange={(e) =>
-                            handlePermissionChange(
-                              WORKFLOWS_PERMISSION_KEY,
-                              'delete',
-                              undefined,
-                              e.target.checked
-                            )
-                          }
-                        >
-                          حذف
-                        </Checkbox>
-                      </div>
-                    </div>
-                  }
-                >
-                  <div className="pl-6 pt-2">
-                    <Divider orientation="left" className="text-xs text-gray-400 m-0 mb-3 border-gray-200 dark:border-gray-700">
-                      دسترسی بخش‌های گردش کار
-                    </Divider>
-                    {renderFieldSwitches(
-                      WORKFLOWS_PERMISSION_KEY,
-                      WORKFLOWS_PERMISSION_FIELDS,
-                      getModulePerms(WORKFLOWS_PERMISSION_KEY).view === false
-                    )}
-                  </div>
-                </Panel>
-              </Collapse>
+              <Collapse
+                defaultActiveKey={[Object.values(MODULES)[0]?.id || 'products']}
+                className="dark:bg-transparent dark:border-gray-800"
+                items={collapseItems}
+              />
             </div>
           </>
         ) : (
@@ -399,3 +375,4 @@ const RolesTab: React.FC = () => {
 };
 
 export default RolesTab;
+

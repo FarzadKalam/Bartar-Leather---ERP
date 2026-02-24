@@ -27,6 +27,7 @@ import { MODULES } from '../moduleRegistry';
 import QrScanPopover from './QrScanPopover';
 import NotificationsPopover from './NotificationsPopover';
 import { getRecordTitle } from '../utils/recordTitle';
+import { resolveFilesAccessPermissions } from '../utils/permissions';
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -46,6 +47,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
   const [globalSearch, setGlobalSearch] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<Array<{ moduleId: string; moduleTitle: string; items: any[] }>>([]);
+  const [canViewGalleryMenu, setCanViewGalleryMenu] = useState(true);
   const searchRef = useRef<InputRef>(null);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   
@@ -59,10 +61,22 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
       if (user?.id) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('id, full_name, avatar_url')
+          .select('id, full_name, avatar_url, role_id')
           .eq('id', user.id)
           .maybeSingle();
         setCurrentUserProfile(profile || null);
+
+        if (profile?.role_id) {
+          const { data: role } = await supabase
+            .from('org_roles')
+            .select('permissions')
+            .eq('id', profile.role_id)
+            .maybeSingle();
+          const filesPerms = resolveFilesAccessPermissions(role?.permissions || {});
+          setCanViewGalleryMenu(filesPerms.canViewGallery);
+        } else {
+          setCanViewGalleryMenu(true);
+        }
       }
     };
     getUser();
@@ -114,45 +128,52 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
     });
   };
 
-  const menuItems = [
-    { key: '/', icon: <DashboardOutlined />, label: 'داشبورد' },
-    { key: '/products', icon: <SkinOutlined />, label: 'محصولات' },
-    { 
-      key: 'warehouses', 
-      icon: <GoldOutlined />, 
-      label: 'انبار',
-      children: [
-        { key: '/warehouses', label: 'انبارها' },
-        { key: '/shelves', label: 'قفسه‌ها' },
-        { key: '/stock_transfers', label: 'تردد کالاها' }
-      ]
-    },
-    { 
-        key: 'production', 
-        icon: <ExperimentOutlined />, 
+  const menuItems = useMemo(() => {
+    const items = [
+      { key: '/', icon: <DashboardOutlined />, label: 'داشبورد' },
+      { key: '/products', icon: <SkinOutlined />, label: 'محصولات' },
+      {
+        key: 'warehouses',
+        icon: <GoldOutlined />,
+        label: 'انبار',
+        children: [
+          { key: '/warehouses', label: 'انبارها' },
+          { key: '/shelves', label: 'قفسه‌ها' },
+          { key: '/stock_transfers', label: 'تردد کالاها' }
+        ]
+      },
+      {
+        key: 'production',
+        icon: <ExperimentOutlined />,
         label: 'تولید',
         children: [
-            { key: '/production_boms', label: 'شناسنامه‌های تولید (BOM)' },
-            { key: '/production_orders', label: 'سفارشات تولید' },
-        ] 
-    },
-    { key: '/suppliers', icon: <BankOutlined />, label: 'تامین کنندگان' },
-    {
-      key: 'invoices',
-      icon: <FileTextOutlined />,
-      label: 'فاکتورها',
-      children: [
-        { key: '/invoices', label: 'فاکتورهای فروش' },
-        { key: '/purchase_invoices', label: 'فاکتورهای خرید' },
-      ]
-    },
-    { key: '/tasks', icon: <CheckSquareOutlined />, label: 'وظایف' },
-    { key: '/customers', icon: <ShopOutlined />, label: 'مشتریان' },
-    { key: '/hr', icon: <TeamOutlined />, label: 'منابع انسانی' },
-    { key: '/gallery', icon: <PictureOutlined />, label: 'گالری فایل‌ها' },
-    { key: '/settings', icon: <SettingOutlined />, label: 'تنظیمات' },
-    
-  ];
+          { key: '/production_boms', label: 'شناسنامه‌های تولید (BOM)' },
+          { key: '/production_orders', label: 'سفارشات تولید' },
+        ]
+      },
+      { key: '/suppliers', icon: <BankOutlined />, label: 'تامین کنندگان' },
+      {
+        key: 'invoices',
+        icon: <FileTextOutlined />,
+        label: 'فاکتورها',
+        children: [
+          { key: '/invoices', label: 'فاکتورهای فروش' },
+          { key: '/purchase_invoices', label: 'فاکتورهای خرید' },
+        ]
+      },
+      { key: '/tasks', icon: <CheckSquareOutlined />, label: 'وظایف' },
+      { key: '/customers', icon: <ShopOutlined />, label: 'مشتریان' },
+      { key: '/hr', icon: <TeamOutlined />, label: 'منابع انسانی' },
+      { key: '/gallery', icon: <PictureOutlined />, label: 'گالری فایل‌ها' },
+      { key: '/settings', icon: <SettingOutlined />, label: 'تنظیمات' },
+    ];
+
+    if (!canViewGalleryMenu) {
+      return items.filter((item: any) => item.key !== '/gallery');
+    }
+
+    return items;
+  }, [canViewGalleryMenu]);
 
   const searchableModules = useMemo(() => {
     return Object.entries(MODULES).map(([id, config]) => {

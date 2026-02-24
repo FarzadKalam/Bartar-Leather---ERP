@@ -11,6 +11,7 @@ import {
   setRecordFilesTableAvailability,
 } from '../utils/recordFilesAvailability';
 import { getRecordTitle } from '../utils/recordTitle';
+import { fetchCurrentUserRolePermissions, resolveFilesAccessPermissions } from '../utils/permissions';
 
 type GalleryFileType = 'image' | 'video' | 'file';
 type GalleryViewMode = 'list' | 'grid';
@@ -67,6 +68,9 @@ const FilesGalleryPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<GalleryViewMode>('list');
   const [recordTitleMap, setRecordTitleMap] = useState<Record<string, string>>({});
   const [recordFilesEnabled, setRecordFilesEnabled] = useState<boolean>(recordFilesTableExistsCache !== false);
+  const [permissionsLoading, setPermissionsLoading] = useState(true);
+  const [canViewGallery, setCanViewGallery] = useState(true);
+  const [canViewRecordFilesManager, setCanViewRecordFilesManager] = useState(true);
 
   const loadLegacyProductImages = async (): Promise<GalleryFileItem[]> => {
     const { data, error } = await supabase
@@ -142,8 +146,26 @@ const FilesGalleryPage: React.FC = () => {
   };
 
   useEffect(() => {
-    void loadFiles(false);
+    let cancelled = false;
+    const loadPermissions = async () => {
+      setPermissionsLoading(true);
+      const rolePermissions = await fetchCurrentUserRolePermissions(supabase);
+      const filePerms = resolveFilesAccessPermissions(rolePermissions || {});
+      if (cancelled) return;
+      setCanViewGallery(filePerms.canViewGallery);
+      setCanViewRecordFilesManager(filePerms.canViewRecordFilesManager);
+      setPermissionsLoading(false);
+    };
+    void loadPermissions();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    if (permissionsLoading || !canViewGallery) return;
+    void loadFiles(false);
+  }, [permissionsLoading, canViewGallery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,7 +223,11 @@ const FilesGalleryPage: React.FC = () => {
 
   const openRecordGallery = (item: GalleryFileItem) => {
     if (!item.module_id || !item.record_id) return;
-    navigate(`/${item.module_id}/${item.record_id}?gallery=1&fileId=${item.id}`);
+    if (canViewRecordFilesManager) {
+      navigate(`/${item.module_id}/${item.record_id}?gallery=1&fileId=${item.id}`);
+      return;
+    }
+    navigate(`/${item.module_id}/${item.record_id}`);
   };
 
   const renderPreview = (item: GalleryFileItem, compact = false) => {
@@ -227,6 +253,16 @@ const FilesGalleryPage: React.FC = () => {
 
   return (
     <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
+      {permissionsLoading ? (
+        <div className="bg-white rounded-[2rem] border border-gray-200 p-10 text-center">
+          <Spin />
+        </div>
+      ) : !canViewGallery ? (
+        <div className="bg-white rounded-[2rem] border border-gray-200 p-10">
+          <Empty description="دسترسی مشاهده گالری فایل‌ها برای این جایگاه فعال نیست." />
+        </div>
+      ) : (
+        <>
       {!recordFilesEnabled && (
         <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex items-center justify-between gap-2">
           <span>جدول `record_files` هنوز ایجاد نشده. فعلا فقط تصاویر محصول (legacy) نمایش داده می‌شود.</span>
@@ -330,6 +366,8 @@ const FilesGalleryPage: React.FC = () => {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );
