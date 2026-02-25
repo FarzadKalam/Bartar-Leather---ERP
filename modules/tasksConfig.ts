@@ -37,7 +37,7 @@ export const tasksModule: ModuleDefinition = {
 
     { key: 'description', labels: { fa: 'توضیحات', en: 'Description' }, type: FieldType.LONG_TEXT, location: FieldLocation.BLOCK, blockId: 'general', order: 1, nature: FieldNature.STANDARD },
 
-    { key: 'start_date', labels: { fa: 'تاریخ شروع', en: 'Start Date' }, type: FieldType.DATE, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 1, nature: FieldNature.STANDARD, isTableColumn: true },
+    { key: 'start_date', labels: { fa: 'تاریخ شروع', en: 'Start Date' }, type: FieldType.DATETIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 1, nature: FieldNature.STANDARD, isTableColumn: true },
     { key: 'due_date', labels: { fa: 'مهلت انجام', en: 'Due Date' }, type: FieldType.DATETIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 2, nature: FieldNature.STANDARD, isTableColumn: true },
     { key: 'completed_at', labels: { fa: 'زمان تکمیل', en: 'Completed At' }, type: FieldType.DATETIME, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 2.5, readonly: true, nature: FieldNature.SYSTEM, isTableColumn: true },
     { key: 'estimated_hours', labels: { fa: 'ساعات تخمینی', en: 'Estimated Hours' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'scheduling', order: 3, nature: FieldNature.STANDARD },

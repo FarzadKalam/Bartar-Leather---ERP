@@ -1993,7 +1993,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const handleStatusChange = async (taskId: string, newStatus: string) => {
     try {
       const currentTask = tasks.find((item: any) => String(item?.id) === String(taskId));
-      const patch = buildTaskStatusUpdatePayload(newStatus, currentTask?.completed_at || null);
+      const patch = buildTaskStatusUpdatePayload(newStatus, {
+        previousCompletedAt: currentTask?.completed_at || null,
+        previousStatus: currentTask?.status ?? null,
+        previousStartDate: currentTask?.start_date || null,
+      });
       const { error } = await supabase.from('tasks').update(patch).eq('id', taskId);
       if (error) throw error;
       message.success('وضعیت بروزرسانی شد');

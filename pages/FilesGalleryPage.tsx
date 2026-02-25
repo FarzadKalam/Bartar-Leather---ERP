@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { App, Badge, Button, Card, Empty, Select, Segmented, Spin, Tag } from 'antd';
-import { AppstoreOutlined, FileOutlined, PictureOutlined, ReloadOutlined, UnorderedListOutlined, VideoCameraOutlined } from '@ant-design/icons';
+import { App, Badge, Button, Card, Empty, Input, Select, Segmented, Spin, Tag } from 'antd';
+import { AppstoreOutlined, FileOutlined, PictureOutlined, ReloadOutlined, SearchOutlined, UnorderedListOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { MODULES } from '../moduleRegistry';
 import { supabase } from '../supabaseClient';
@@ -28,6 +28,18 @@ type GalleryFileItem = {
 };
 
 let recordFilesTableExistsCache: boolean | null = getRecordFilesTableAvailabilityCache();
+
+const getDisplayFileName = (item: Pick<GalleryFileItem, 'file_name' | 'file_url'>): string => {
+  const direct = String(item.file_name || '').trim();
+  if (direct) return direct;
+  const raw = String(item.file_url || '').split('?')[0].split('/').pop() || '';
+  if (!raw) return '-';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
 
 const guessTypeFromUrl = (url?: string | null): GalleryFileType => {
   const value = String(url || '').toLowerCase();
@@ -65,6 +77,7 @@ const FilesGalleryPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [moduleFilter, setModuleFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'image' | 'video' | 'file'>('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<GalleryViewMode>('list');
   const [recordTitleMap, setRecordTitleMap] = useState<Record<string, string>>({});
   const [recordFilesEnabled, setRecordFilesEnabled] = useState<boolean>(recordFilesTableExistsCache !== false);
@@ -214,12 +227,20 @@ const FilesGalleryPage: React.FC = () => {
   }, [items]);
 
   const filtered = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
     return items.filter((item) => {
       if (moduleFilter !== 'all' && item.module_id !== moduleFilter) return false;
       if (typeFilter !== 'all' && item.file_type !== typeFilter) return false;
+      if (query) {
+        const moduleTitle = MODULES[item.module_id]?.titles?.fa || item.module_id;
+        const recordTitle = recordTitleMap[`${item.module_id}:${item.record_id}`] || item.record_id;
+        const displayFileName = getDisplayFileName(item);
+        const haystack = `${displayFileName} ${item.file_name || ''} ${item.mime_type || ''} ${moduleTitle} ${recordTitle}`.toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
       return true;
     });
-  }, [items, moduleFilter, typeFilter]);
+  }, [items, moduleFilter, typeFilter, searchTerm, recordTitleMap]);
 
   const openRecordGallery = (item: GalleryFileItem) => {
     if (!item.module_id || !item.record_id) return;
@@ -289,6 +310,14 @@ const FilesGalleryPage: React.FC = () => {
         <div className="bg-white dark:bg-[#1a1a1a] rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 p-3 md:p-4">
           <div className="flex flex-wrap gap-3 items-center">
             <Select className="min-w-[220px]" options={moduleOptions} value={moduleFilter} onChange={(value) => setModuleFilter(String(value))} />
+            <Input
+              className="min-w-[240px] max-w-[360px]"
+              allowClear
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="جستجو در نام فایل، محصول یا بخش..."
+              prefix={<SearchOutlined className="text-gray-400" />}
+            />
             <Segmented
               value={typeFilter}
               onChange={(value) => setTypeFilter(value as 'all' | 'image' | 'video' | 'file')}
@@ -323,6 +352,7 @@ const FilesGalleryPage: React.FC = () => {
           {filtered.map((item) => {
             const moduleTitle = MODULES[item.module_id]?.titles?.fa || item.module_id;
             const recordTitle = recordTitleMap[`${item.module_id}:${item.record_id}`] || item.record_id;
+            const displayFileName = getDisplayFileName(item);
             const isListView = viewMode === 'list';
 
             const fileTypeTag = item.file_type === 'image'
@@ -350,6 +380,9 @@ const FilesGalleryPage: React.FC = () => {
                         <span className="text-xs text-gray-500">{moduleTitle}</span>
                       </div>
                       <div className="text-base font-bold text-gray-700 mt-1 truncate">{recordTitle}</div>
+                      <div className="text-xs text-gray-500 mt-1 truncate" title={displayFileName}>
+                        نام فایل: {displayFileName}
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -360,6 +393,9 @@ const FilesGalleryPage: React.FC = () => {
                       <span className="text-xs text-gray-500">{moduleTitle}</span>
                     </div>
                     <div className="text-sm font-bold text-gray-700 mt-1 truncate">{recordTitle}</div>
+                    <div className="text-xs text-gray-500 mt-1 truncate" title={displayFileName}>
+                      نام فایل: {displayFileName}
+                    </div>
                   </>
                 )}
               </Card>

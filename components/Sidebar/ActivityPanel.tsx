@@ -410,7 +410,11 @@ const ActivityPanel: React.FC<ActivityPanelProps> = ({ moduleId, recordId, view,
   const toggleTask = async (task: any) => {
     try {
       const nextStatus = task.status === 'completed' ? 'pending' : 'completed';
-      const patch = buildTaskStatusUpdatePayload(nextStatus, task?.completed_at || null);
+      const patch = buildTaskStatusUpdatePayload(nextStatus, {
+        previousCompletedAt: task?.completed_at || null,
+        previousStatus: task?.status ?? null,
+        previousStartDate: task?.start_date || null,
+      });
       const { error } = await supabase
         .from('tasks')
         .update(patch)

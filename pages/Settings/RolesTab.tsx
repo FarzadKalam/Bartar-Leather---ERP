@@ -142,6 +142,30 @@ const RolesTab: React.FC = () => {
     return merged[moduleId] || { view: true, edit: true, delete: true, fields: {} };
   };
 
+  const getFilesAccessTextField = (key: 'allowed_login' | 'allowed_ip_cidrs') => {
+    const modPerms = getModulePerms(FILES_PERMISSION_KEY);
+    return String((modPerms.fields || {})[key] || '');
+  };
+
+  const handleFilesAccessTextChange = (key: 'allowed_login' | 'allowed_ip_cidrs', value: string) => {
+    setPermissions((prev) => {
+      const merged = mergePermissionsWithDefaults(prev, defaultPermissions);
+      if (!merged[FILES_PERMISSION_KEY]) {
+        merged[FILES_PERMISSION_KEY] = { view: true, edit: true, delete: true, fields: {} };
+      }
+
+      const next = { ...merged };
+      const target = {
+        ...(next[FILES_PERMISSION_KEY] || {}),
+        fields: { ...(next[FILES_PERMISSION_KEY]?.fields || {}) },
+      } as any;
+
+      target.fields[key] = value;
+      next[FILES_PERMISSION_KEY] = target;
+      return next;
+    });
+  };
+
   const renderFieldSwitches = (
     moduleId: string,
     fields: Array<{ key: string; label: string }>,
@@ -275,6 +299,31 @@ const RolesTab: React.FC = () => {
             FILES_PERMISSION_FIELDS,
             getModulePerms(FILES_PERMISSION_KEY).view === false
           )}
+
+          <Divider orientation="left" className="text-xs text-gray-400 m-0 my-3 border-gray-200 dark:border-gray-700">
+            محدودیت امنیتی بر اساس لاگین/IP
+          </Divider>
+          <div className="grid grid-cols-1 gap-3">
+            <div className="bg-gray-50 dark:bg-white/5 p-3 rounded border border-transparent dark:border-gray-800">
+              <div className="text-xs text-gray-500 mb-1">لاگین مجاز (ایمیل)</div>
+              <Input
+                value={getFilesAccessTextField('allowed_login')}
+                onChange={(e) => handleFilesAccessTextChange('allowed_login', e.target.value)}
+                placeholder="مثال: gallery.user@company.com یا چند مورد با کاما"
+                disabled={getModulePerms(FILES_PERMISSION_KEY).view === false}
+              />
+            </div>
+            <div className="bg-gray-50 dark:bg-white/5 p-3 rounded border border-transparent dark:border-gray-800">
+              <div className="text-xs text-gray-500 mb-1">IP/CIDR مجاز</div>
+              <Input.TextArea
+                autoSize={{ minRows: 2, maxRows: 5 }}
+                value={getFilesAccessTextField('allowed_ip_cidrs')}
+                onChange={(e) => handleFilesAccessTextChange('allowed_ip_cidrs', e.target.value)}
+                placeholder={'مثال:\n212.23.201.161/32\n10.0.0.0/24'}
+                disabled={getModulePerms(FILES_PERMISSION_KEY).view === false}
+              />
+            </div>
+          </div>
         </div>
       ),
     },
@@ -375,4 +424,3 @@ const RolesTab: React.FC = () => {
 };
 
 export default RolesTab;
-

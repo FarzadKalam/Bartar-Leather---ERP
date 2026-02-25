@@ -1625,6 +1625,7 @@ GRANT SELECT ON public.product_lines TO anon;
 -- HR / Payroll support columns
 -- ==========================================================
 ALTER TABLE IF EXISTS public.tasks
+  ADD COLUMN IF NOT EXISTS start_date timestamptz,
   ADD COLUMN IF NOT EXISTS completed_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS idx_tasks_completed_at

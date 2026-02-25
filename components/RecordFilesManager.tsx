@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { App, Button, Image, List, Modal, Tag, Upload } from 'antd';
+import { App, Button, Image, Input, List, Modal, Tag, Upload } from 'antd';
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -43,6 +43,7 @@ interface RecordFilesManagerProps {
   mainImage?: string | null;
   onMainImageChange?: (url: string | null) => void;
   canEdit?: boolean;
+  canDelete?: boolean;
   highlightFileId?: string | null;
 }
 
@@ -76,6 +77,18 @@ const safeFileName = (name: string): string => {
   return clean.slice(-120);
 };
 
+const getDisplayFileName = (item: Pick<RecordFileItem, 'file_name' | 'file_url'>): string => {
+  const direct = String(item.file_name || '').trim();
+  if (direct) return direct;
+  const raw = String(item.file_url || '').split('?')[0].split('/').pop() || '';
+  if (!raw) return 'file';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
 const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   open,
   onClose,
@@ -84,6 +97,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   mainImage,
   onMainImageChange,
   canEdit = true,
+  canDelete,
   highlightFileId,
 }) => {
   const { message: msg } = App.useApp();
@@ -91,6 +105,10 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [recordFilesEnabled, setRecordFilesEnabled] = useState<boolean>(recordFilesTableExistsCache !== false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFileName, setPendingFileName] = useState('');
+  const [nameModalOpen, setNameModalOpen] = useState(false);
+  const canDeleteFiles = canDelete ?? canEdit;
 
   const imageItems = useMemo(
     () => items.filter((it) => it.file_type === 'image').sort((a, b) => a.sort_order - b.sort_order),
@@ -137,8 +155,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
 
       if (!tableExists) {
         setRecordFilesEnabled(false);
-        const legacy = await loadLegacyProductImages();
-        setItems(legacy);
+        setItems(await loadLegacyProductImages());
         return;
       }
 
@@ -172,8 +189,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
         recordFilesTableExistsCache = false;
         setRecordFilesTableAvailability(false);
         setRecordFilesEnabled(false);
-        const legacy = await loadLegacyProductImages().catch(() => []);
-        setItems(legacy);
+        setItems(await loadLegacyProductImages().catch(() => []));
         msg.warning('جدول record_files هنوز روی دیتابیس ایجاد نشده است. لطفا migration را اجرا کنید.');
       } else {
         console.warn('Could not load record files', error);
@@ -189,26 +205,33 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
     void loadFiles(false);
   }, [open, moduleId, recordId]);
 
-  const uploadToStorage = async (file: File): Promise<string> => {
+  const buildStoredFileName = (file: File, desiredName: string) => {
+    const ext = file.name.includes('.') ? String(file.name.split('.').pop() || '').trim() : '';
+    const cleanDesired = safeFileName(desiredName.trim() || file.name || 'file');
+    const lowerExt = ext.toLowerCase();
+    const hasExt = lowerExt ? cleanDesired.toLowerCase().endsWith(`.${lowerExt}`) : true;
+    const finalBase = hasExt || !ext ? cleanDesired : `${cleanDesired}.${ext}`;
+    return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${finalBase}`;
+  };
+
+  const uploadToStorage = async (file: File, desiredName: string): Promise<string> => {
     if (!recordId) throw new Error('Record id is required');
-    const ext = file.name.includes('.') ? file.name.split('.').pop() : '';
-    const suffix = ext ? `.${ext}` : '';
-    const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeFileName(file.name || `file${suffix}`)}`;
-    const filePath = `record_files/${moduleId}/${recordId}/${fileName}`;
+    const storedFileName = buildStoredFileName(file, desiredName);
+    const filePath = `record_files/${moduleId}/${recordId}/${storedFileName}`;
     const { error } = await supabase.storage.from('images').upload(filePath, file);
     if (error) throw error;
     return supabase.storage.from('images').getPublicUrl(filePath).data.publicUrl;
   };
 
-  const handleAddFile = async (file: File) => {
+  const uploadFile = async (file: File, desiredName: string) => {
     if (!recordId) {
       msg.warning('ابتدا رکورد را ذخیره کنید');
       return false;
     }
+
     const type = getFileType(file);
     try {
       setUploading(true);
-
       let useLegacy = !recordFilesEnabled || recordFilesTableExistsCache === false;
       if (useLegacy) {
         const tableExists = await detectRecordFilesTable(supabase, true);
@@ -222,7 +245,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
         return false;
       }
 
-      const url = await uploadToStorage(file);
+      const url = await uploadToStorage(file, desiredName);
 
       if (useLegacy) {
         const nextOrder = imageItems.length;
@@ -241,7 +264,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
             record_id: recordId,
             file_url: String(data.image_url || ''),
             file_type: 'image',
-            file_name: file.name || null,
+            file_name: desiredName,
             mime_type: file.type || null,
             sort_order: Number.isFinite(data.sort_order) ? data.sort_order : nextOrder,
             created_at: data.created_at ? String(data.created_at) : undefined,
@@ -261,7 +284,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
             record_id: recordId,
             file_url: url,
             file_type: type,
-            file_name: file.name || null,
+            file_name: desiredName,
             mime_type: file.type || null,
             sort_order: nextOrder,
           },
@@ -302,7 +325,43 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
     return false;
   };
 
+  const handleBeforeUpload = (file: File) => {
+    if (!recordId) {
+      msg.warning('ابتدا رکورد را ذخیره کنید');
+      return false;
+    }
+    setPendingFile(file);
+    setPendingFileName(file.name || '');
+    setNameModalOpen(true);
+    return false;
+  };
+
+  const handleConfirmUpload = async () => {
+    if (!pendingFile) return;
+    const finalName = pendingFileName.trim();
+    if (!finalName) {
+      msg.warning('نام فایل الزامی است');
+      return;
+    }
+
+    await uploadFile(pendingFile, finalName);
+    setNameModalOpen(false);
+    setPendingFile(null);
+    setPendingFileName('');
+  };
+
+  const handleCancelUploadPrompt = () => {
+    if (uploading) return;
+    setNameModalOpen(false);
+    setPendingFile(null);
+    setPendingFileName('');
+  };
+
   const handleDelete = async (fileId: string) => {
+    if (!canDeleteFiles) {
+      msg.warning('دسترسی حذف فایل ندارید');
+      return;
+    }
     try {
       const target = items.find((it) => it.id === fileId);
       if (!recordFilesEnabled || recordFilesTableExistsCache === false) {
@@ -358,7 +417,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   };
 
   const downloadFile = (item: RecordFileItem) => {
-    const fileLabel = item.file_name || item.file_url.split('/').pop() || 'file';
+    const fileLabel = getDisplayFileName(item);
     const link = document.createElement('a');
     link.href = item.file_url;
     link.download = fileLabel;
@@ -372,6 +431,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   const renderMediaCard = (item: RecordFileItem, index: number, fileType: 'image' | 'video', total: number) => {
     const isMain = item.file_type === 'image' && mainImage === item.file_url;
     const isHighlighted = highlightFileId && highlightFileId === item.id;
+    const fileLabel = getDisplayFileName(item);
     return (
       <div key={item.id} className={`relative group border rounded-lg p-1 ${isHighlighted ? 'border-leather-500 ring-2 ring-leather-200' : 'border-gray-100'}`}>
         <div className="h-40 overflow-hidden rounded">
@@ -396,12 +456,17 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
           {item.file_type === 'image' && (
             <Button size="small" icon={<StarOutlined />} onClick={() => onMainImageChange?.(item.file_url)} disabled={!canEdit}>تصویر اصلی</Button>
           )}
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(item.id)} disabled={!canEdit}>حذف</Button>
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(item.id)} disabled={!canDeleteFiles}>حذف</Button>
         </div>
 
         <div className="absolute top-1 left-1 flex items-center gap-1">
           {isMain && <Tag color="gold">اصلی</Tag>}
           {item.file_type === 'video' ? <Tag icon={<VideoCameraOutlined />}>فیلم</Tag> : <Tag icon={<PictureOutlined />}>عکس</Tag>}
+        </div>
+        <div className="px-1 pt-2">
+          <div className="text-xs text-gray-600 truncate" title={fileLabel}>
+            {fileLabel}
+          </div>
         </div>
       </div>
     );
@@ -438,14 +503,14 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
           locale={{ emptyText: 'فایلی ثبت نشده است.' }}
           dataSource={documentItems}
           renderItem={(item) => {
-            const fileLabel = item.file_name || item.file_url.split('/').pop() || 'file';
+            const fileLabel = getDisplayFileName(item);
             const isHighlighted = highlightFileId && highlightFileId === item.id;
             return (
               <List.Item
                 className={`rounded-lg px-3 ${isHighlighted ? 'bg-leather-50 border border-leather-200' : ''}`}
                 actions={[
                   <Button key={`download-${item.id}`} size="small" icon={<DownloadOutlined />} onClick={() => downloadFile(item)}>دانلود</Button>,
-                  <Button key={`delete-${item.id}`} size="small" danger icon={<DeleteOutlined />} disabled={!canEdit} onClick={() => handleDelete(item.id)}>حذف</Button>,
+                  <Button key={`delete-${item.id}`} size="small" danger icon={<DeleteOutlined />} disabled={!canDeleteFiles} onClick={() => handleDelete(item.id)}>حذف</Button>,
                 ]}
               >
                 <List.Item.Meta
@@ -460,7 +525,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
       </div>
 
       <div className="mt-4 flex items-center justify-between">
-        <Upload showUploadList={false} beforeUpload={handleAddFile} disabled={uploading || !recordId || !canEdit} fileList={[]}>
+        <Upload showUploadList={false} beforeUpload={handleBeforeUpload} disabled={uploading || !recordId || !canEdit} fileList={[]}>
           <Button icon={<UploadOutlined />} loading={uploading}>افزودن فایل (عکس، فیلم، فایل)</Button>
         </Upload>
         <div className="text-xs text-gray-400 flex items-center gap-2">
@@ -470,6 +535,25 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
       </div>
 
       {loading && <div className="text-xs text-gray-500 mt-2">در حال بارگذاری...</div>}
+
+      <Modal
+        title="نام فایل آپلودی"
+        open={nameModalOpen}
+        onOk={() => void handleConfirmUpload()}
+        onCancel={handleCancelUploadPrompt}
+        confirmLoading={uploading}
+        okText="آپلود"
+        cancelText="انصراف"
+        destroyOnHidden
+      >
+        <Input
+          autoFocus
+          value={pendingFileName}
+          onChange={(e) => setPendingFileName(e.target.value)}
+          placeholder="نام فایل را وارد کنید"
+          onPressEnter={() => void handleConfirmUpload()}
+        />
+      </Modal>
     </Modal>
   );
 };

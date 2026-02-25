@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button } from 'antd';
 import { UploadOutlined, LoadingOutlined, QrcodeOutlined, PlusOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
@@ -78,10 +78,11 @@ interface SmartFieldRendererProps {
   moduleId?: string;
   canViewFilesManager?: boolean;
   canEditFilesManager?: boolean;
+  canDeleteFilesManager?: boolean;
 }
 
 const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({ 
-  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false, canViewFilesManager = true, canEditFilesManager = true
+  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false, canViewFilesManager = true, canEditFilesManager = true, canDeleteFilesManager = true
 }) => {
   const { message: msg } = App.useApp();
   const [uploading, setUploading] = useState(false);
@@ -850,6 +851,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     mainImage={value}
                     onMainImageChange={(url) => onChange(url)}
                     canEdit={!!canEditFilesManager && !!forceEditMode && !isReadonly}
+                    canDelete={!!canDeleteFilesManager && !!forceEditMode && !isReadonly}
                   />
                 </>
               )}

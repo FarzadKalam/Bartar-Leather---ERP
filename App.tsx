@@ -1,4 +1,4 @@
-﻿import { useEffect } from "react";
+import { useEffect } from "react";
 import { Refine, Authenticated } from "@refinedev/core";
 import { notificationProvider, ErrorComponent } from "@refinedev/antd";
 import { dataProvider } from "@refinedev/supabase";
@@ -11,8 +11,8 @@ import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/Settings/SettingsPage";
 import { JalaliLocaleListener } from "antd-jalali";
 
-// â‌Œ طھظ…ط§ظ… ط§غŒظ…ظ¾ظˆط±طھâ€Œظ‡ط§ ظˆ طھظ†ط¸غŒظ…ط§طھ dayjs ط±ط§ ط§ط² ط§غŒظ†ط¬ط§ ط­ط°ظپ ع©ط±ط¯غŒظ…
-// ع†ظˆظ† ط§ظ„ط§ظ† ط¯ط± initDayjs.ts ظˆ index.tsx ظ…ط¯غŒط±غŒطھ ظ…غŒâ€Œط´ظˆظ†ط¯.
+// ❌ تمام ایمپورت‌ها و تنظیمات dayjs را از اینجا حذف کردیم
+// چون الان در initDayjs.ts و index.tsx مدیریت می‌شوند.
 
 import { supabase } from "./supabaseClient";
 import { MODULES } from "./moduleRegistry";
@@ -30,6 +30,8 @@ import HRPage from "./pages/HRPage";
 import FilesGalleryPage from "./pages/FilesGalleryPage";
 
 const APP_TITLE = "\u0645\u0647\u0631\u0628\u0627\u0646\u0648 \u0627\u062a\u0648\u0645\u0627\u0633\u06cc\u0648\u0646";
+const SESSION_REFRESH_BUFFER_MS = 10 * 60 * 1000;
+const SESSION_REFRESH_INTERVAL_MS = 60 * 1000;
 
 function App() {
   useEffect(() => {
@@ -44,13 +46,49 @@ function App() {
       const pathname = window.location.pathname;
       const isPublic = publicPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
-      if ((eventName === "SIGNED_OUT" || eventName === "TOKEN_REFRESH_FAILED") && !isPublic) {
+      if (eventName === "SIGNED_OUT" && !isPublic) {
         window.location.replace("/login");
       }
     });
 
     return () => {
       subscription?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const keepSessionFresh = async () => {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+
+      if (error || !session?.expires_at) return;
+
+      const expiresAtMs = session.expires_at * 1000;
+      const remainingMs = expiresAtMs - Date.now();
+      if (remainingMs > SESSION_REFRESH_BUFFER_MS) return;
+
+      await supabase.auth.refreshSession();
+    };
+
+    void keepSessionFresh();
+
+    const intervalId = window.setInterval(() => {
+      void keepSessionFresh();
+    }, SESSION_REFRESH_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void keepSessionFresh();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 

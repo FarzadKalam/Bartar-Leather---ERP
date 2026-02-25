@@ -8,6 +8,7 @@ interface ProductImagesManagerProps {
   mainImage?: string | null;
   onMainImageChange?: (url: string | null) => void;
   canEdit?: boolean;
+  canDelete?: boolean;
   highlightFileId?: string | null;
 }
 
@@ -18,6 +19,7 @@ const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
   mainImage,
   onMainImageChange,
   canEdit = true,
+  canDelete,
   highlightFileId,
 }) => {
   return (
@@ -29,6 +31,7 @@ const ProductImagesManager: React.FC<ProductImagesManagerProps> = ({
       mainImage={mainImage}
       onMainImageChange={onMainImageChange}
       canEdit={canEdit}
+      canDelete={canDelete}
       highlightFileId={highlightFileId}
     />
   );

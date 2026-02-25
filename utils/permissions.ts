@@ -4,7 +4,7 @@ export type ModulePermissionConfig = {
   view?: boolean;
   edit?: boolean;
   delete?: boolean;
-  fields?: Record<string, boolean>;
+  fields?: Record<string, any>;
 };
 
 export type PermissionMap = Record<string, ModulePermissionConfig>;
@@ -201,6 +201,7 @@ export const resolveFilesAccessPermissions = (permissions: PermissionMap | null 
   const fields = perm.fields || {};
   const canViewRoot = perm.view !== false;
   const canEditRoot = perm.edit !== false;
+  const canDeleteRoot = perm.delete !== false;
 
   const canViewGallery = canViewRoot && fields.gallery_page !== false;
   const canViewRecordFilesManager = canViewRoot && fields.record_files_manager !== false;
@@ -208,8 +209,10 @@ export const resolveFilesAccessPermissions = (permissions: PermissionMap | null 
   return {
     canViewGallery,
     canEditGallery: canViewGallery && canEditRoot,
+    canDeleteGallery: canViewGallery && canDeleteRoot,
     canViewRecordFilesManager,
     canEditRecordFilesManager: canViewRecordFilesManager && canEditRoot,
+    canDeleteRecordFilesManager: canViewRecordFilesManager && canDeleteRoot,
   };
 };
 
