@@ -255,7 +255,16 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
     setSaving(true);
     try {
       const { data: authData } = await supabase.auth.getUser();
-      const userId = authData?.user?.id || null;
+      const authUserId = authData?.user?.id || null;
+      let actorProfileId: string | null = null;
+      if (authUserId) {
+        const { data: actorProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', authUserId)
+          .maybeSingle();
+        actorProfileId = actorProfile?.id ? String(actorProfile.id) : null;
+      }
       const productIds: string[] = [];
       const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
       const transfers: Record<string, unknown>[] = [];
@@ -278,13 +287,19 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         if (insertError || !inserted?.id) throw new Error(`ردیف ${i + 1}: ${insertError?.message || 'ثبت محصول ناموفق بود.'}`);
         const pid = String(inserted.id);
         productIds.push(pid);
-        changelogs.push({ module_id: 'products', record_id: pid, action: 'create', user_id: userId, record_title: inserted.name || inserted.system_code || null });
+        changelogs.push({ module_id: 'products', record_id: pid, action: 'create', user_id: authUserId, record_title: inserted.name || inserted.system_code || null });
 
         const q = toNum(row.opening_stock);
         const shelf = row.opening_shelf_id ? String(row.opening_shelf_id) : null;
         if (q > 0 && shelf) {
-          deltas.push({ productId: pid, shelfId: shelf, delta: q, unit: inserted.main_unit ? String(inserted.main_unit) : null });
-          const subQty = isUnitValue(inserted.main_unit) && isUnitValue(inserted.sub_unit) ? convertArea(q, inserted.main_unit, inserted.sub_unit) : 0;
+          const mainUnit = inserted.main_unit ? String(inserted.main_unit).trim() : '';
+          const subUnit = inserted.sub_unit ? String(inserted.sub_unit).trim() : '';
+          deltas.push({ productId: pid, shelfId: shelf, delta: q, unit: mainUnit || null });
+          const subQty = !mainUnit || !subUnit
+            ? 0
+            : (mainUnit === subUnit
+              ? q
+              : (isUnitValue(mainUnit) && isUnitValue(subUnit) ? convertArea(q, mainUnit, subUnit) : 0));
           transfers.push({
             transfer_type: 'opening_balance',
             product_id: pid,
@@ -294,15 +309,15 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
             production_order_id: null,
             from_shelf_id: null,
             to_shelf_id: shelf,
-            sender_id: userId,
-            receiver_id: userId,
+            sender_id: actorProfileId,
+            receiver_id: actorProfileId,
           });
         }
       }
 
       if (deltas.length) await applyInventoryDeltas(supabase as never, deltas);
-      if (transfers.length) { const { error: tErr } = await supabase.from('stock_transfers').insert(transfers); if (tErr) throw tErr; }
       if (productIds.length) await syncMultipleProductsStock(supabase as never, productIds);
+      if (transfers.length) { const { error: tErr } = await supabase.from('stock_transfers').insert(transfers); if (tErr) throw tErr; }
       if (changelogs.length) await supabase.from('changelogs').insert(changelogs);
       msg.success(`${productIds.length} محصول با موفقیت ایجاد شد.`);
       onCreated?.(productIds.length);
@@ -315,7 +330,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
   }, [buildName, msg, onClose, onCreated, productCategory, productType, rawCategory, rowFields, rows, sharedFields, sharedValues, validate]);
 
   const tableColumns = useMemo(() => [
-    { key: 'image_url', title: <PaperClipOutlined />, type: imageField?.type || FieldType.IMAGE, width: 76 },
+    { key: 'image_url', title: <PaperClipOutlined />, type: imageField?.type || FieldType.IMAGE, width: 76, imageSourceMode: 'gallery' },
     { key: 'manual_code', title: manualCodeField?.labels?.fa || 'کد دستی', type: manualCodeField?.type || FieldType.TEXT, width: 150 },
     ...rowFields.map((f) => ({ key: f.key, title: f.labels?.fa || f.key, type: f.type, options: f.options, relationConfig: f.relationConfig, dynamicOptionsCategory: f.dynamicOptionsCategory, defaultValue: f.defaultValue })),
     { key: 'opening_stock', title: 'موجودی اول دوره', type: FieldType.NUMBER, width: 140, defaultValue: 0 },

@@ -1314,6 +1314,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
             || readonlyByCondition
             || (isInvoiceItems && col.key === 'source_shelf_id' && !record?.product_id),
         };
+        if (col.imageSourceMode) {
+          (fieldConfig as any).imageSourceMode = col.imageSourceMode;
+        }
 
         let options = col.options;
         if (col.dynamicOptionsCategory) {
