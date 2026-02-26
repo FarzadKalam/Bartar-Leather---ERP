@@ -10,6 +10,7 @@ import { applyInvoiceFinalizationInventory } from "../utils/invoiceInventoryWork
 import { runWorkflowsForEvent } from "../utils/workflowRuntime";
 import { syncCustomerLevelsByInvoiceCustomers } from "../utils/customerLeveling";
 import { attachTaskCompletionIfNeeded } from "../utils/taskCompletion";
+import { persistProductOpeningInventory } from "../utils/productOpeningInventory";
 
 export const ModuleCreate = () => {
   const { moduleId } = useParams();
@@ -38,7 +39,8 @@ export const ModuleCreate = () => {
         const user = authData?.user;
         if (!user) {
           if (active) {
-            setCanCreate(false);
+            // Do not hard-block create page on transient auth lookup issues.
+            setCanCreate(true);
             setPermissionLoading(false);
           }
           return;
@@ -140,7 +142,7 @@ export const ModuleCreate = () => {
           module={moduleConfig}
           visible={true}
           onCancel={() => navigate(-1)}
-          onSave={async (values) => {
+          onSave={async (values, meta) => {
             try {
               if (moduleId === "invoices" || moduleId === "purchase_invoices") {
                 const { data: inserted, error } = await supabase
@@ -168,6 +170,38 @@ export const ModuleCreate = () => {
                     customerIds: [inserted?.customer_id || values?.customer_id],
                   });
                 }
+                if (moduleId) {
+                  await runWorkflowsForEvent({
+                    moduleId,
+                    event: "create",
+                    currentRecord: inserted as Record<string, any>,
+                  });
+                }
+
+                navigate(`/${moduleId}/${inserted.id}`);
+                return;
+              }
+
+              if (moduleId === "products") {
+                const { data: inserted, error } = await supabase
+                  .from(moduleConfig.table)
+                  .insert(values)
+                  .select("*")
+                  .single();
+                if (error) throw error;
+                if (!inserted?.id) throw new Error("ثبت محصول ناموفق بود");
+
+                const { data: authData } = await supabase.auth.getUser();
+                const userId = authData?.user?.id || null;
+                await persistProductOpeningInventory({
+                  supabase: supabase as any,
+                  productId: String(inserted.id),
+                  productMainUnit: inserted?.main_unit ?? values?.main_unit ?? null,
+                  productSubUnit: inserted?.sub_unit ?? values?.sub_unit ?? null,
+                  rows: meta?.productInventory || [],
+                  userId,
+                });
+
                 if (moduleId) {
                   await runWorkflowsForEvent({
                     moduleId,

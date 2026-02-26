@@ -55,10 +55,20 @@ export type StageHandoverFormListRow = {
   piecesByProduct?: Record<string, StageHandoverPieceDetail[]>;
 };
 
+export type StageHandoverInventoryRow = {
+  productId: string;
+  productName: string;
+  productCode?: string;
+  unit?: string;
+  subUnit?: string;
+  mainQty: number;
+  subQty: number;
+};
+
 type SummaryTab = {
   key: string;
   label: React.ReactNode;
-  tone: 'incoming' | 'outgoing' | 'neutral';
+  tone: 'incoming' | 'outgoing' | 'neutral' | 'inventory';
   qtyByProduct: Record<string, number>;
   subQtyByProduct: Record<string, number>;
   piecesByProduct: Record<string, StageHandoverPieceDetail[]>;
@@ -73,6 +83,8 @@ interface TaskHandoverFormsModalProps {
   nextStageName?: string | null;
   summaries: StageHandoverSummaryRow[];
   forms: StageHandoverFormListRow[];
+  currentStageName?: string | null;
+  currentStageInventory?: StageHandoverInventoryRow[];
   selectedFormId: string | null;
   onSelectForm: (formId: string) => void;
   onCreateForm: () => void;
@@ -122,6 +134,8 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
   orderTitle,
   summaries,
   forms,
+  currentStageName = null,
+  currentStageInventory = [],
   selectedFormId,
   onSelectForm,
   onCreateForm,
@@ -189,7 +203,16 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
     });
 
     const dynamicTabs = Array.from(grouped.values()).sort((a, b) => String(a.key).localeCompare(String(b.key)));
-    return [
+    const inventoryMainByProduct: Record<string, number> = {};
+    const inventorySubByProduct: Record<string, number> = {};
+    (Array.isArray(currentStageInventory) ? currentStageInventory : []).forEach((row) => {
+      const productId = String(row?.productId || '').trim();
+      if (!productId) return;
+      inventoryMainByProduct[productId] = toNumber(row?.mainQty);
+      inventorySubByProduct[productId] = toNumber(row?.subQty);
+    });
+
+    const tabs: SummaryTab[] = [
       ...dynamicTabs,
       {
         key: 'order',
@@ -200,7 +223,16 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
         piecesByProduct: orderPiecesByProduct,
       },
     ];
-  }, [forms, summaries]);
+    tabs.push({
+      key: 'stage_inventory',
+      tone: 'inventory',
+      label: <span className="text-blue-700 font-semibold">موجودی فعلی مرحله "{currentStageName || taskName}"</span>,
+      qtyByProduct: inventoryMainByProduct,
+      subQtyByProduct: inventorySubByProduct,
+      piecesByProduct: {},
+    });
+    return tabs;
+  }, [currentStageInventory, currentStageName, forms, summaries, taskName]);
 
   const [tabKey, setTabKey] = useState<string>(summaryTabs[0]?.key || 'order');
   useEffect(() => {
@@ -218,7 +250,34 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
     const mainMap = activeTab?.qtyByProduct || {};
     const subMap = activeTab?.subQtyByProduct || {};
     const pieceMap = activeTab?.piecesByProduct || {};
-    return (summaries || []).map((row) => {
+    const byProduct = new Map<string, any>();
+
+    (summaries || []).forEach((row) => {
+      const productId = String(row?.productId || '').trim();
+      if (!productId) return;
+      byProduct.set(productId, row);
+    });
+
+    (Array.isArray(currentStageInventory) ? currentStageInventory : []).forEach((row) => {
+      const productId = String(row?.productId || '').trim();
+      if (!productId || byProduct.has(productId)) return;
+      byProduct.set(productId, {
+        productId,
+        productName: String(row?.productName || '-'),
+        productCode: String(row?.productCode || ''),
+        unit: String(row?.unit || ''),
+        subUnit: String(row?.subUnit || ''),
+        sourceQty: 0,
+        sourceSubQty: 0,
+        orderQty: 0,
+        orderSubQty: 0,
+        deliveredQty: 0,
+        deliveredSubQty: 0,
+        orderPieces: [],
+      });
+    });
+
+    return Array.from(byProduct.values()).map((row: any) => {
       const productId = String(row?.productId || '');
       const orderMain = toNumber(row?.orderQty);
       const orderSub = toNumber(row?.orderSubQty);
@@ -226,8 +285,12 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
       const sourceSub = toNumber(row?.sourceSubQty);
       const deliveredMain = toNumber(row?.deliveredQty);
       const deliveredSub = toNumber(row?.deliveredSubQty);
-      const tabMain = activeTab?.tone === 'neutral' ? orderMain : toNumber(mainMap[productId]);
-      const tabSub = activeTab?.tone === 'neutral' ? orderSub : toNumber(subMap[productId]);
+      const tabMain = activeTab?.tone === 'neutral'
+        ? orderMain
+        : toNumber(mainMap[productId]);
+      const tabSub = activeTab?.tone === 'neutral'
+        ? orderSub
+        : toNumber(subMap[productId]);
       return {
         ...row,
         tabMain,
@@ -241,7 +304,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
         pieceDetails: pieceMap[productId] || [],
       };
     });
-  }, [activeTab, summaries]);
+  }, [activeTab, currentStageInventory, summaries]);
 
   const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
   useEffect(() => {
@@ -281,6 +344,43 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
         </div>
       ),
     };
+
+    if (activeTab?.tone === 'inventory') {
+      return [
+        productColumn,
+        {
+          title: `موجودی فعلی (واحد اصلی)`,
+          key: 'stageMain',
+          width: 220,
+          render: (_: any, row: any) => (
+            <span className="font-semibold text-blue-700">{toQty(row.tabMain)} {row.unit || ''}</span>
+          ),
+        },
+        {
+          title: `موجودی فعلی (واحد فرعی)`,
+          key: 'stageSub',
+          width: 220,
+          render: (_: any, row: any) => (
+            <span className="font-semibold text-blue-700">{toQty(row.tabSub)} {row.subUnit || ''}</span>
+          ),
+        },
+        {
+          title: 'اختلاف با سفارش تولید',
+          key: 'inventoryDiffOrder',
+          width: 250,
+          render: (_: any, row: any) => (
+            <div className="text-xs space-y-1">
+              <div className={getSignedClass(row.diffWithOrderMain)}>
+                واحد اصلی: {toQty(row.diffWithOrderMain)} {row.unit || ''}
+              </div>
+              <div className={getSignedClass(row.diffWithOrderSub)}>
+                واحد فرعی: {toQty(row.diffWithOrderSub)} {row.subUnit || ''}
+              </div>
+            </div>
+          ),
+        },
+      ];
+    }
 
     if (activeTab?.tone === 'neutral') {
       return [

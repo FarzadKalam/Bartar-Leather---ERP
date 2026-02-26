@@ -149,6 +149,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
         children: [
           { key: '/production_boms', label: 'شناسنامه‌های تولید (BOM)' },
           { key: '/production_orders', label: 'سفارشات تولید' },
+          { key: '/production_group_orders', label: 'تولیدهای گروهی' },
         ]
       },
       { key: '/suppliers', icon: <BankOutlined />, label: 'تامین کنندگان' },
@@ -497,5 +498,4 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
 };
 
 export default Layout;
-
 

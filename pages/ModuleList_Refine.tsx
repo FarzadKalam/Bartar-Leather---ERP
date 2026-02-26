@@ -107,6 +107,8 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [isWorkflowsModalOpen, setIsWorkflowsModalOpen] = useState(false);
   const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
   const [canOpenWorkflows, setCanOpenWorkflows] = useState(true);
+  const [isCreateSingleOpen, setIsCreateSingleOpen] = useState(false);
+  const [createSingleInitialValues, setCreateSingleInitialValues] = useState<Record<string, any>>({});
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: resolvedModuleId,
@@ -169,7 +171,14 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     setIsWorkflowsModalOpen(false);
     setIsExcelImportModalOpen(false);
     setCanOpenWorkflows(true);
+    setIsCreateSingleOpen(false);
+    setCreateSingleInitialValues({});
   }, [resolvedModuleId, moduleConfig?.defaultViewMode]);
+
+  const openSingleCreateForm = useCallback((initialValues?: Record<string, any>) => {
+    setCreateSingleInitialValues(initialValues || {});
+    setIsCreateSingleOpen(true);
+  }, []);
 
   const fetchPermissions = useCallback(async () => {
     if (!resolvedModuleId) return;
@@ -733,7 +742,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                   <Button
                     type="primary"
                     icon={<PlusOutlined />}
-                    onClick={() => navigate(`/${resolvedModuleId}/create`)}
+                    onClick={() => openSingleCreateForm()}
                     className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/30 shrink-0"
                   >افزودن تکی</Button>
                 )}
@@ -904,9 +913,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                           icon={<PlusOutlined />} 
                           className="mt-2 text-xs text-gray-500 hover:text-leather-600 hover:border-leather-400"
                           onClick={() => {
-                            navigate(`/${resolvedModuleId}/create`, { 
-                              state: { initialValues: { [kanbanGroupBy]: col.value } } 
-                            });
+                            openSingleCreateForm({ [kanbanGroupBy]: col.value });
                           }}
                         >
                           افزودن به {col.label}
@@ -935,7 +942,19 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                 title={isBulkEditMode ? `ویرایش گروهی ${selectedRowKeys.length} مورد` : `ویرایش مورد انتخابی`}
                isBulkEdit={isBulkEditMode}
            />
-       )}
+        )}
+      {isCreateSingleOpen && (
+        <SmartForm
+          module={moduleConfig}
+          visible={isCreateSingleOpen}
+          initialValues={createSingleInitialValues}
+          onCancel={() => {
+            setIsCreateSingleOpen(false);
+            setCreateSingleInitialValues({});
+            tableQueryResult.refetch();
+          }}
+        />
+      )}
       {resolvedModuleId === 'products' && (
         <BulkProductsCreateModal
           open={isBulkProductsModalOpen}

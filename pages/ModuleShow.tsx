@@ -37,6 +37,7 @@ import { canAccessAssignedRecord, resolveFilesAccessPermissions } from '../utils
 import { isMissingRecordFilesError } from '../utils/recordFilesAvailability';
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from '../utils/recordCopy';
 import { attachTaskCompletionIfNeeded, buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
+import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
 import {
   calculateCustomerStatsFromInvoices,
   getDefaultLevelingConfig,
@@ -1043,11 +1044,27 @@ const ModuleShow: React.FC = () => {
     );
   }, [productionModal, productMetaMap]);
 
+  const openProductionWizard = useCallback(() => {
+    if (moduleId !== 'production_orders' || !id) return;
+    const existingGroupOrderId = String(data?.production_group_order_id || '').trim();
+    if (existingGroupOrderId) {
+      navigate(`/production_group_orders/${existingGroupOrderId}`, {
+        state: { selectedOrderIds: [String(id)] },
+      });
+      return;
+    }
+    navigate('/production_group_orders/create', {
+      state: { selectedOrderIds: [String(id)] },
+    });
+  }, [data?.production_group_order_id, id, moduleId, navigate]);
+
   const handleProductionStatusChange = async (nextStatus: string) => {
     if (moduleId !== 'production_orders') return;
-    if (data?.status === nextStatus) return;
     if (nextStatus === 'in_progress') {
-      await openProductionModal('start');
+      openProductionWizard();
+      return;
+    }
+    if (data?.status === nextStatus) {
       return;
     }
     if (nextStatus === 'pending') {
@@ -2371,17 +2388,27 @@ const ModuleShow: React.FC = () => {
     } as any;
   };
 
-  const handleCreateProductSave = async (values: any) => {
+  const handleCreateProductSave = async (values: any, meta?: { productInventory?: any[] }) => {
     try {
       setStatusLoading(true);
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || null;
       const { data: inserted, error } = await supabase
         .from('products')
         .insert(values)
-        .select('id')
+        .select('id, main_unit, sub_unit')
         .single();
       if (error) throw error;
       const productId = inserted?.id;
       if (!productId) throw new Error('ثبت محصول ناموفق بود');
+      await persistProductOpeningInventory({
+        supabase: supabase as any,
+        productId: String(productId),
+        productMainUnit: (inserted as any)?.main_unit ?? values?.main_unit ?? null,
+        productSubUnit: (inserted as any)?.sub_unit ?? values?.sub_unit ?? null,
+        rows: meta?.productInventory || [],
+        userId,
+      });
       setOutputProductId(productId);
       const outputShelf = outputShelfId || null;
       if (!outputShelf) {
@@ -2425,8 +2452,6 @@ const ModuleShow: React.FC = () => {
         await Promise.all(consumedProductIds.map((productId) => syncProductStock(productId)));
       }
       try {
-        const { data: authData } = await supabase.auth.getUser();
-        const userId = authData?.user?.id || null;
         const consumptionTransferPayload = Array.from(consumedGrouped.entries()).map(([key, qty]) => {
           const [productId, fromShelfId] = key.split(':');
           return {
@@ -2451,8 +2476,6 @@ const ModuleShow: React.FC = () => {
       await addFinishedGoods(productId, outputShelf, normalizedQty);
       await syncProductStock(productId);
       try {
-        const { data: authData } = await supabase.auth.getUser();
-        const userId = authData?.user?.id || null;
         await supabase.from('stock_transfers').insert({
           transfer_type: 'production',
           product_id: productId,
@@ -2659,32 +2682,18 @@ const ModuleShow: React.FC = () => {
     });
   }
   if (moduleId === 'production_orders') {
-    if (data?.status === 'in_progress') {
-      if (canUseAction('stop_production')) {
-        headerActions.push({
-          id: 'stop_production',
-          label: 'توقف تولید',
-          variant: 'default',
-          onClick: () => handleProductionStatusChange('pending')
-        });
-      }
-      if (canUseAction('complete_production')) {
-        headerActions.push({
-          id: 'complete_production',
-          label: 'تکمیل تولید',
-          variant: 'primary',
-          onClick: () => handleProductionStatusChange('completed')
-        });
-      }
-    } else if (data?.status === 'pending') {
-      if (canUseAction('start_production')) {
-        headerActions.push({
-          id: 'start_production',
-          label: 'شروع تولید',
-          variant: 'primary',
-          onClick: () => handleProductionStatusChange('in_progress')
-        });
-      }
+    const canOpenProductionWizard =
+      canUseAction('start_production')
+      || canUseAction('stop_production')
+      || canUseAction('complete_production');
+
+    if (canOpenProductionWizard) {
+      headerActions.push({
+        id: 'view_production_status',
+        label: 'مشاهده وضعیت تولید',
+        variant: 'primary',
+        onClick: openProductionWizard
+      });
     }
   }
 
@@ -3041,5 +3050,3 @@ const ModuleShow: React.FC = () => {
 };
 
 export default ModuleShow;
-
-

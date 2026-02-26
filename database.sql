@@ -575,6 +575,18 @@ CREATE INDEX IF NOT EXISTS idx_product_inventory_warehouse ON public.product_inv
 ALTER TABLE public.product_inventory ALTER COLUMN id SET DEFAULT gen_random_uuid();
 UPDATE public.product_inventory SET id = gen_random_uuid() WHERE id IS NULL;
 
+-- سازگاری با نسخه‌های قدیمی که از relation قدیمی shelf_products استفاده می‌کردند
+DO $$
+BEGIN
+  IF to_regclass('public.shelf_products') IS NULL THEN
+    EXECUTE '
+      CREATE VIEW public.shelf_products AS
+      SELECT id, product_id, shelf_id, warehouse_id, stock, created_at, updated_at
+      FROM public.product_inventory
+    ';
+  END IF;
+END $$;
+
 -- RLS برای ماژول‌ها بر اساس مسئول/سازنده
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Assignee access products" ON public.products;

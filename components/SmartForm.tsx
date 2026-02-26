@@ -6,7 +6,6 @@ import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import EditableTable from './EditableTable.tsx';
 import GridTable from './GridTable';
-import SmartTableRenderer from './SmartTableRenderer';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType } from '../types';
@@ -15,6 +14,7 @@ import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
+import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -452,6 +452,50 @@ const SmartForm: React.FC<SmartFormProps> = ({
     }
   }, [module.id, watchedValues, formData, form]);
 
+  const normalizeNumericInput = (raw: any) => {
+    if (raw === null || raw === undefined) return '';
+    return String(raw)
+      .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
+      .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+      .replace(/[\u066C\u060C]/g, ',')
+      .replace(/\s+/g, '')
+      .replace(/,/g, '');
+  };
+
+  const toSafeNumber = (raw: any) => {
+    const normalized = normalizeNumericInput(raw);
+    if (!normalized || normalized === '-' || normalized === '.' || normalized === '-.') return 0;
+    const parsed = parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const normalizeProductInventoryRows = (rows: any[], sourceValues?: any) => {
+    const formValues = form.getFieldsValue();
+    const mainUnit = String(sourceValues?.main_unit ?? formValues?.main_unit ?? formData?.main_unit ?? '').trim();
+    const subUnit = String(sourceValues?.sub_unit ?? formValues?.sub_unit ?? formData?.sub_unit ?? '').trim();
+    return (Array.isArray(rows) ? rows : []).map((row: any) => {
+      const stock = toSafeNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
+      let subStock = toSafeNumber(row?.sub_stock);
+      if (mainUnit && subUnit) {
+        if (mainUnit === subUnit) {
+          subStock = stock;
+        } else {
+          const converted = convertArea(stock, mainUnit as any, subUnit as any);
+          if (Number.isFinite(converted) && converted > 0) {
+            subStock = converted;
+          }
+        }
+      }
+      return {
+        ...row,
+        main_unit: mainUnit || row?.main_unit || null,
+        sub_unit: subUnit || row?.sub_unit || null,
+        stock,
+        sub_stock: Number.isFinite(subStock) ? subStock : 0,
+      };
+    });
+  };
+
   // --- تابع کمکی: دریافت دیتای خلاصه (Summary) ---
   const getSummaryData = (currentData: any) => {
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
@@ -499,11 +543,20 @@ const SmartForm: React.FC<SmartFormProps> = ({
       if (values?.assignee_combo !== undefined) {
         delete values.assignee_combo;
       }
-      const productInventoryRows = Array.isArray(values?.product_inventory) ? values.product_inventory : [];
-      if (requireInventoryShelf && module.id === 'products') {
-        const missingShelf = productInventoryRows.some((row: any) => !row?.shelf_id);
+      let productInventoryRows = Array.isArray(values?.product_inventory) ? values.product_inventory : [];
+      if (module.id === 'products') {
+        productInventoryRows = normalizeProductInventoryRows(productInventoryRows, values);
+      }
+      if (module.id === 'products') {
+        const hasNegative = productInventoryRows.some((row: any) => toSafeNumber(row?.stock) < 0);
+        if (hasNegative) {
+          message.error('موجودی اولیه نمی‌تواند منفی باشد.');
+          setLoading(false);
+          return;
+        }
+        const missingShelf = productInventoryRows.some((row: any) => (toSafeNumber(row?.stock) > 0) && !row?.shelf_id);
         if (missingShelf) {
-          message.error(PRODUCTION_MESSAGES.requireInventoryShelf);
+          message.error(requireInventoryShelf ? PRODUCTION_MESSAGES.requireInventoryShelf : 'برای ثبت موجودی اولیه، انتخاب قفسه نگهداری الزامی است.');
           setLoading(false);
           return;
         }
@@ -625,11 +678,21 @@ const SmartForm: React.FC<SmartFormProps> = ({
           const { data: inserted, error } = await supabase
             .from(module.table)
             .insert(values)
-            .select('id')
+            .select('id, main_unit, sub_unit')
             .single();
           if (error) throw error;
 
           if (inserted?.id) {
+            if (module.id === 'products') {
+              await persistProductOpeningInventory({
+                supabase: supabase as any,
+                productId: String(inserted.id),
+                productMainUnit: (inserted as any)?.main_unit ?? values?.main_unit ?? null,
+                productSubUnit: (inserted as any)?.sub_unit ?? values?.sub_unit ?? null,
+                rows: productInventoryRows,
+                userId,
+              });
+            }
             if (module.id === 'invoices' || module.id === 'purchase_invoices') {
               await applyInvoiceFinalizationInventory({
                 supabase: supabase as any,
@@ -678,10 +741,22 @@ const SmartForm: React.FC<SmartFormProps> = ({
     } catch (err: any) { message.error(err.message); } finally { setLoading(false); }
   };
 
-  const handleValuesChange = (_: any, allValues: any) => {
+  const handleValuesChange = (changedValues: any, allValues: any) => {
     const cleanedValues = Object.fromEntries(
       Object.entries(allValues || {}).filter(([, value]) => value !== undefined)
     );
+    if (
+      module.id === 'products' &&
+      (Object.prototype.hasOwnProperty.call(changedValues || {}, 'main_unit')
+        || Object.prototype.hasOwnProperty.call(changedValues || {}, 'sub_unit'))
+    ) {
+      const normalizedRows = normalizeProductInventoryRows(
+        Array.isArray(allValues?.product_inventory) ? allValues.product_inventory : (formData?.product_inventory || []),
+        allValues
+      );
+      form.setFieldValue('product_inventory', normalizedRows);
+      cleanedValues.product_inventory = normalizedRows;
+    }
     setFormData((prev: any) => ({ ...prev, ...cleanedValues }));
   };
   const checkVisibility = (logicOrRule: any, values?: any) => {
@@ -979,54 +1054,43 @@ const SmartForm: React.FC<SmartFormProps> = ({
                       </div>
                       {block.tableColumns && (
                         <div className="mt-6">
-                          {module.id === 'products' && block.id === 'product_inventory' ? (
-                            <SmartTableRenderer
-                              moduleConfig={{
-                                id: `${module.id}_${block.id}_readonly`,
-                                fields: (block.tableColumns || []).map((col: any, idx: number) => ({
-                                  key: col.key,
-                                  labels: { fa: col.title, en: col.key },
-                                  type: col.type,
-                                  options: col.options,
-                                  relationConfig: col.relationConfig,
-                                  dynamicOptionsCategory: col.dynamicOptionsCategory,
-                                  isTableColumn: true,
-                                  order: idx + 1,
-                                })),
-                              } as any}
-                              data={(Array.isArray(formData[block.id]) ? formData[block.id] : []).map((row: any, idx: number) => ({
-                                id: row?.id || row?.key || `${block.id}_${idx}`,
-                                ...row,
-                              }))}
-                              loading={false}
+                          <Form.Item name={block.id} noStyle>
+                            <EditableTable
+                              block={module.id === 'products' && block.id === 'product_inventory'
+                                ? {
+                                    ...block,
+                                    tableColumns: (block.tableColumns || []).map((col: any) => {
+                                      if (col.key === 'stock') return { ...col, readonly: false };
+                                      if (col.key === 'main_unit' || col.key === 'sub_unit') {
+                                        return {
+                                          ...col,
+                                          defaultValue: formData?.[col.key] ?? form.getFieldValue(col.key) ?? col.defaultValue,
+                                        };
+                                      }
+                                      return col;
+                                    }),
+                                  }
+                                : block}
+                              initialData={formData[block.id] || []}
+                              mode="local"
+                              moduleId={module.id}
                               relationOptions={relationOptions}
                               dynamicOptions={dynamicOptions}
-                              pagination={false}
-                              disableScroll={false}
-                              tableLayout="auto"
+                              canEditModule={canEditModule}
+                              canViewField={(fieldKey) =>
+                                canViewField(`${block.id}.${fieldKey}`) && canViewField(fieldKey)
+                              }
+                              readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
+                              onChange={(newData: any[]) => {
+                                const normalizedData = module.id === 'products' && block.id === 'product_inventory'
+                                  ? normalizeProductInventoryRows(newData, form.getFieldsValue())
+                                  : newData;
+                                const newFormData = { ...formData, [block.id]: normalizedData };
+                                setFormData(newFormData);
+                                form.setFieldValue(block.id, normalizedData);
+                              }}
                             />
-                          ) : (
-                            <Form.Item name={block.id} noStyle>
-                              <EditableTable
-                                block={block}
-                                initialData={formData[block.id] || []}
-                                mode="local"
-                                moduleId={module.id}
-                                relationOptions={relationOptions}
-                                dynamicOptions={dynamicOptions}
-                                canEditModule={canEditModule}
-                                canViewField={(fieldKey) =>
-                                  canViewField(`${block.id}.${fieldKey}`) && canViewField(fieldKey)
-                                }
-                                readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
-                                onChange={(newData: any[]) => {
-                                  const newFormData = { ...formData, [block.id]: newData };
-                                  setFormData(newFormData);
-                                  form.setFieldValue(block.id, newData);
-                                }}
-                              />
-                            </Form.Item>
-                          )}
+                          </Form.Item>
                         </div>
                       )}
                     </div>

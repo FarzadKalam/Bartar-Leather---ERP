@@ -1,16 +1,33 @@
 import { RowCalculationType, SummaryCalculationType, BlockType } from '../types';
 
+const normalizeNumericInput = (raw: any): string => {
+    if (raw === null || raw === undefined) return '';
+    return String(raw)
+        .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
+        .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+        .replace(/[\u066C\u060C]/g, ',')
+        .replace(/\s+/g, '')
+        .replace(/,/g, '');
+};
+
+const toSafeNumber = (raw: any): number => {
+    const normalized = normalizeNumericInput(raw);
+    if (!normalized || normalized === '-' || normalized === '.' || normalized === '-.') return 0;
+    const parsed = parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
 export const calculateRow = (row: any, type: RowCalculationType = RowCalculationType.SIMPLE_MULTIPLY) => {
-    const lengthVal = parseFloat(row.length);
-    const widthVal = parseFloat(row.width);
+    const lengthVal = toSafeNumber(row.length);
+    const widthVal = toSafeNumber(row.width);
     const areaUsage = Number.isFinite(lengthVal) && Number.isFinite(widthVal) ? lengthVal * widthVal : null;
-    const qty = parseFloat(row.quantity)
-        || parseFloat(row.usage)
+    const qty = toSafeNumber(row.quantity)
+        || toSafeNumber(row.usage)
         || (areaUsage !== null ? areaUsage : 0)
-        || parseFloat(row.qty)
-        || parseFloat(row.stock)
+        || toSafeNumber(row.qty)
+        || toSafeNumber(row.stock)
         || 0;
-    const price = parseFloat(row.unit_price) || parseFloat(row.buy_price) || parseFloat(row.price) || 0;
+    const price = toSafeNumber(row.unit_price) || toSafeNumber(row.buy_price) || toSafeNumber(row.price) || 0;
     
     let baseTotal = qty * price;
 
@@ -18,8 +35,8 @@ export const calculateRow = (row: any, type: RowCalculationType = RowCalculation
     if (type === RowCalculationType.INVOICE_ROW) {
         // اصلاح مهم: مالیات به عنوان درصد در نظر گرفته می‌شود
         // مثال: اگر vat = 9 باشد، یعنی 9 درصد
-        let discountInput = parseFloat(row.discount) || 0;
-        let vatInput = parseFloat(row.vat) || 0;
+        let discountInput = toSafeNumber(row.discount) || 0;
+        let vatInput = toSafeNumber(row.vat) || 0;
 
         const discountType = row.discount_type || 'amount';
         const vatType = row.vat_type || 'percent';
@@ -50,7 +67,7 @@ export const calculateSummary = (data: any, blocks: any[], summaryConfig: any) =
         const items = data[invoiceBlock?.id || 'invoiceItems'] || [];
         
         const totalInvoice = items.reduce((sum: number, item: any) => {
-            return sum + (parseFloat(item.total_price) || calculateRow(item, RowCalculationType.INVOICE_ROW));
+            return sum + (toSafeNumber(item.total_price) || calculateRow(item, RowCalculationType.INVOICE_ROW));
         }, 0);
 
         const paymentBlock = blocks.find((b: any) => b.id === 'payments');
@@ -58,7 +75,7 @@ export const calculateSummary = (data: any, blocks: any[], summaryConfig: any) =
         
         const totalReceived = payments.reduce((sum: number, item: any) => {
             if (item?.status !== 'received') return sum;
-            return sum + (parseFloat(item.amount) || 0);
+            return sum + (toSafeNumber(item.amount) || 0);
         }, 0);
 
         return {
@@ -75,7 +92,7 @@ export const calculateSummary = (data: any, blocks: any[], summaryConfig: any) =
             const rows = data[block.id] || [];
             if (Array.isArray(rows)) {
                 rows.forEach((row: any) => {
-                    grandTotal += (parseFloat(row.total_price) || calculateRow(row, block.rowCalculationType));
+                    grandTotal += (toSafeNumber(row.total_price) || calculateRow(row, block.rowCalculationType));
                 });
             }
         }
@@ -87,7 +104,7 @@ export const calculateSummary = (data: any, blocks: any[], summaryConfig: any) =
                     const pieces = grid?.pieces || [];
                     if (Array.isArray(pieces)) {
                         pieces.forEach((piece: any) => {
-                            grandTotal += parseFloat(piece?.total_cost) || parseFloat(piece?.cost_per_item) || 0;
+                            grandTotal += toSafeNumber(piece?.total_cost) || toSafeNumber(piece?.cost_per_item) || 0;
                         });
                     }
                 });

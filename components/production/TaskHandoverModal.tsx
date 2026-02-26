@@ -53,6 +53,8 @@ export type StageHandoverGroup = {
   totalHandoverQty: number;
   collapsed: boolean;
   isConfirmed: boolean;
+  previousDeliveryRows?: StageHandoverDeliveryRow[];
+  previousDeliveredQty?: number;
 };
 
 export type StageHandoverConfirm = {
@@ -316,6 +318,51 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
     setTransferTargetGroupIndex(null);
   };
 
+  const handleDeliveryRowKeyDown = (e: React.KeyboardEvent<HTMLElement>, groupIndex: number) => {
+    if (locked) return;
+    const isSaveShortcut = e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.altKey;
+    if (isSaveShortcut) {
+      e.preventDefault();
+      e.stopPropagation();
+      onConfirmGroup(groupIndex);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = groups[groupIndex]?.key;
+      if (key) setSelectedRowKeys(key, []);
+      onToggleGroup(groupIndex, true);
+    }
+  };
+
+  const handleDeliveryNumericKeyDown = (e: React.KeyboardEvent<HTMLElement>, groupIndex: number) => {
+    if (!(e.ctrlKey || e.metaKey || e.altKey)) {
+      const allowedKeys = new Set([
+        'Backspace',
+        'Delete',
+        'Tab',
+        'Enter',
+        'Escape',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+        '.',
+        ',',
+        '-',
+      ]);
+      const key = e.key;
+      const isDigit = /^[0-9]$/.test(key) || /^[۰-۹]$/.test(key) || /^[٠-٩]$/.test(key);
+      if (!isDigit && !allowedKeys.has(key)) {
+        e.preventDefault();
+      }
+    }
+    handleDeliveryRowKeyDown(e, groupIndex);
+  };
+
   return (
     <Modal
       title="فرم تحویل کالا"
@@ -427,23 +474,52 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
         ) : (
           groups.map((group, groupIndex) => {
             const selectedRowKeys = getSelectedRowKeys(group.key);
-            const deliveryUnitLabel = getUnitSummaryLabel((group.deliveryRows || []).map((row) => row.mainUnit));
+            const consumptionUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.mainUnit));
+            const previousDeliveryRows = Array.isArray(group.previousDeliveryRows) ? group.previousDeliveryRows : [];
+            const previousDeliveredQty = Math.max(
+              0,
+              parseNumberInput(group.previousDeliveredQty ?? previousDeliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0))
+            );
+            const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalHandoverQty));
+            const totalDeliveredWithHistory = previousDeliveredQty + currentDeliveredQty;
+            const deliveryUnitLabel = getUnitSummaryLabel([
+              ...(group.deliveryRows || []).map((row) => row.mainUnit),
+              ...previousDeliveryRows.map((row) => row.mainUnit),
+            ]) || consumptionUnitLabel;
+            const hasDeliveryRows = Array.isArray(group.deliveryRows) && group.deliveryRows.length > 0;
+            const headerToneClass = hasDeliveryRows
+              ? 'bg-[#8b5e3c] text-white shadow-sm'
+              : 'bg-white text-[#6f4a2d] border-b border-dashed border-[#b8895a]';
+            const headerButtonClass = hasDeliveryRows
+              ? '!text-white hover:!text-white/90'
+              : '!text-[#6f4a2d] hover:!text-[#8b5e3c]';
+            const containerClass = hasDeliveryRows
+              ? 'rounded-xl border border-gray-200'
+              : 'rounded-xl border-2 border-dashed border-[#b8895a] bg-white';
+            const headerMetaClass = hasDeliveryRows ? 'text-white/90' : 'text-[#8b5e3c]';
 
             return (
-              <div key={group.key} className="rounded-xl border border-gray-200">
-                <div className="sticky top-0 z-30 bg-[#8b5e3c] px-3 py-2 text-white flex items-center justify-between gap-2 shadow-sm">
-                  <div className="min-w-0 text-xs">
-                    <div>دسته‌بندی: {group.categoryLabel || '-'}</div>
-                    <div className="truncate">
+              <div key={group.key} className={containerClass}>
+                <div className={`sticky top-0 z-30 px-3 py-2 flex items-center justify-between gap-2 ${headerToneClass}`}>
+                  <div className="min-w-0">
+                    <div className="text-xs">دسته‌بندی: {group.categoryLabel || '-'}</div>
+                    <div className="text-xs truncate">
                       محصول: {group.selectedProductName || '-'}
                       {group.selectedProductCode ? ` (${group.selectedProductCode})` : ''}
+                    </div>
+                    <div className={`text-[11px] mt-0.5 ${headerMetaClass}`}>
+                      مورد نیاز کل: <span className="font-semibold">{toQty(group.totalSourceQty || 0)}</span>
+                      {consumptionUnitLabel ? <span className="font-semibold mr-1">{consumptionUnitLabel}</span> : null}
+                      <span className="mx-1">|</span>
+                      تحویل شده کل: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
+                      {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
                       type="text"
                       size="small"
-                      className="!text-white hover:!text-white/90"
+                      className={headerButtonClass}
                       icon={<SaveOutlined />}
                       onClick={() => onConfirmGroup(groupIndex)}
                       disabled={locked}
@@ -454,7 +530,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                     <Button
                       type="text"
                       size="small"
-                      className="!text-white hover:!text-white/90"
+                      className={headerButtonClass}
                       icon={<RightOutlined className={`transition-transform ${group.collapsed ? '' : 'rotate-90'}`} />}
                       onClick={() => onToggleGroup(groupIndex, !group.collapsed)}
                     />
@@ -469,6 +545,78 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                           ? `از مرحله "${sourceStageName}" به مرحله "${taskName}" چه مقدار تحویل می‌دهید؟`
                           : `از مرحله "${taskName}" به مرحله "${destinationStageOption?.label || nextStageName || 'مرحله مقصد'}" چه مقدار تحویل می‌دهید؟`}
                       </div>
+
+                      {previousDeliveryRows.length > 0 ? (
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 p-2">
+                          <div className="text-[11px] text-blue-800 mb-1">
+                            مقادیر تحویل‌شده قبلی (غیرقابل تغییر)
+                          </div>
+                          <Table
+                            size="small"
+                            pagination={false}
+                            dataSource={previousDeliveryRows}
+                            rowKey="key"
+                            scroll={{ x: true }}
+                            columns={[
+                              {
+                                title: 'نام قطعه',
+                                dataIndex: 'name',
+                                key: 'name',
+                                width: 180,
+                                render: (value: string) => <span className="font-medium">{value || '-'}</span>,
+                              },
+                              {
+                                title: 'طول',
+                                dataIndex: 'length',
+                                key: 'length',
+                                width: 90,
+                                render: (value: number) => toQty(value),
+                              },
+                              {
+                                title: 'عرض',
+                                dataIndex: 'width',
+                                key: 'width',
+                                width: 90,
+                                render: (value: number) => toQty(value),
+                              },
+                              {
+                                title: 'تعداد',
+                                dataIndex: 'quantity',
+                                key: 'quantity',
+                                width: 90,
+                                render: (value: number) => toQty(value),
+                              },
+                              {
+                                title: 'واحد اصلی',
+                                dataIndex: 'mainUnit',
+                                key: 'mainUnit',
+                                width: 110,
+                                render: (value: string) => <span className="text-gray-700">{value || '-'}</span>,
+                              },
+                              {
+                                title: 'واحد فرعی',
+                                dataIndex: 'subUnit',
+                                key: 'subUnit',
+                                width: 110,
+                                render: (value: string) => <span className="text-gray-700">{value || '-'}</span>,
+                              },
+                              {
+                                title: 'مقدار تحویل شده',
+                                dataIndex: 'deliveredQty',
+                                key: 'deliveredQty',
+                                width: 140,
+                                render: (_value: number, record: StageHandoverDeliveryRow) => (
+                                  <span className="font-semibold text-[#6f4a2d]">{toQty(calcDeliveredQty(record))}</span>
+                                ),
+                              },
+                            ]}
+                          />
+                          <div className="mt-2 text-[11px] text-blue-900">
+                            جمع مقادیر تحویل شده قبلی: <span className="font-semibold">{toQty(previousDeliveredQty)}</span>
+                            {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                          </div>
+                        </div>
+                      ) : null}
 
                       <div className="flex items-center gap-2 flex-wrap">
                         <Button type="dashed" icon={<PlusOutlined />} onClick={() => onDeliveryRowAdd(groupIndex)} disabled={locked}>
@@ -507,6 +655,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         scroll={{ x: true }}
                         rowSelection={{
                           selectedRowKeys,
+                          columnWidth: isMobile ? 40 : 34,
                           onChange: (keys) => setSelectedRowKeys(group.key, keys.map((k) => String(k))),
                         }}
                         columns={[
@@ -519,6 +668,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               <Input
                                 value={value}
                                 onChange={(e) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', e.target.value)}
+                                onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
                             ),
@@ -527,7 +677,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             title: 'طول',
                             dataIndex: 'length',
                             key: 'length',
-                            width: isMobile ? 160 : 90,
+                            width: isMobile ? 180 : 130,
                             render: (value: number, record: StageHandoverDeliveryRow) => (
                               <InputNumber
                                 value={value}
@@ -536,6 +686,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 stringMode
                                 formatter={(v) => formatGroupedInput(v)}
                                 parser={(v) => parseNumberInput(v)}
+                                onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
                             ),
@@ -544,7 +695,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             title: 'عرض',
                             dataIndex: 'width',
                             key: 'width',
-                            width: isMobile ? 160 : 90,
+                            width: isMobile ? 180 : 130,
                             render: (value: number, record: StageHandoverDeliveryRow) => (
                               <InputNumber
                                 value={value}
@@ -553,6 +704,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 stringMode
                                 formatter={(v) => formatGroupedInput(v)}
                                 parser={(v) => parseNumberInput(v)}
+                                onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
                             ),
@@ -561,7 +713,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             title: 'تعداد',
                             dataIndex: 'quantity',
                             key: 'quantity',
-                            width: isMobile ? 160 : 90,
+                            width: isMobile ? 180 : 130,
                             render: (value: number, record: StageHandoverDeliveryRow) => (
                               <InputNumber
                                 value={value}
@@ -570,6 +722,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 stringMode
                                 formatter={(v) => formatGroupedInput(v)}
                                 parser={(v) => parseNumberInput(v)}
+                                onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
                             ),
@@ -586,6 +739,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainUnit', nextValue)}
                                 className="w-full"
                                 getPopupContainer={() => document.body}
+                                onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
                             ),
@@ -602,6 +756,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subUnit', nextValue)}
                                 className="w-full"
                                 getPopupContainer={() => document.body}
+                                onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
                             ),
@@ -620,23 +775,29 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                           {
                             title: '',
                             key: 'actions',
-                            width: isMobile ? 150 : 120,
+                            width: isMobile ? 96 : 78,
                             render: (_value: any, record: StageHandoverDeliveryRow) => (
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-0.5 task-handover-row-actions">
                                 <Button
                                   type="text"
+                                  size="small"
+                                  className="!w-6 !h-6 !p-0"
                                   icon={<CopyOutlined />}
                                   onClick={() => onDeliveryRowsTransfer(groupIndex, [String(record.key)], groupIndex, 'copy')}
                                   disabled={locked}
                                 />
                                 <Button
                                   type="text"
+                                  size="small"
+                                  className="!w-6 !h-6 !p-0"
                                   icon={<SwapOutlined />}
                                   onClick={() => openTransferDialog(groupIndex, [String(record.key)], 'move')}
                                   disabled={locked}
                                 />
                                 <Button
                                   type="text"
+                                  size="small"
+                                  className="!w-6 !h-6 !p-0"
                                   danger
                                   icon={<DeleteOutlined />}
                                   onClick={() => onDeliveryRowsDelete(groupIndex, [String(record.key)])}
@@ -648,13 +809,21 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         ]}
                       />
                       {(() => {
-                        const diff = (group.totalHandoverQty || 0) - (group.totalSourceQty || 0);
+                        const diff = totalDeliveredWithHistory - Math.max(0, parseNumberInput(group.totalSourceQty));
                         const diffClass =
                           diff > 0 ? 'text-green-700 font-semibold' : diff < 0 ? 'text-red-700 font-semibold' : 'text-gray-700 font-medium';
                         return (
                           <div className="text-xs flex flex-col sm:flex-row gap-4 text-gray-700">
                             <span>
-                              جمع مقدار تحویل شده: <span className="font-semibold">{toQty(group.totalHandoverQty)}</span>
+                              جمع مقدار تحویل جدید: <span className="font-semibold">{toQty(currentDeliveredQty)}</span>
+                              {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                            </span>
+                            <span>
+                              جمع مقادیر تحویل شده قبلی: <span className="font-semibold">{toQty(previousDeliveredQty)}</span>
+                              {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                            </span>
+                            <span>
+                              تحویل شده کل: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
                               {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                             </span>
                             <span className={diffClass}>
@@ -728,6 +897,9 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
         </div>
       </div>
       <style>{`
+        .task-handover-row-actions .ant-btn .anticon {
+          font-size: 12px;
+        }
         @media (max-width: 768px) {
           .task-handover-delivery-table .ant-table-cell {
             padding: 10px 8px !important;

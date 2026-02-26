@@ -24,19 +24,26 @@ export const updateProductStock = async (supabase: SupabaseClient, productId: st
   }
 };
 
-export const fetchShelfOptions = async (supabase: SupabaseClient, productId: string) => {
+export const fetchShelfOptions = async (
+  supabase: SupabaseClient,
+  productId: string,
+  options?: { includeNonPositive?: boolean }
+) => {
   const { data: productRow } = await supabase
     .from('products')
     .select('main_unit')
     .eq('id', productId)
     .maybeSingle();
   const productMainUnit = String(productRow?.main_unit || '').trim();
-  const { data: rows, error } = await supabase
+  let query = supabase
     .from('product_inventory')
     .select('product_id, shelf_id, stock, shelves(system_code, shelf_number, name, warehouses(name))')
     .eq('product_id', productId)
-    .gt('stock', 0)
     .order('stock', { ascending: false });
+  if (!options?.includeNonPositive) {
+    query = query.gt('stock', 0);
+  }
+  const { data: rows, error } = await query;
   if (error) throw error;
 
   return (rows || []).map((row: any) => {
@@ -49,6 +56,8 @@ export const fetchShelfOptions = async (supabase: SupabaseClient, productId: str
     return {
       value: row.shelf_id,
       label: `${shelfLabel} (موجودی: ${stockLabel}${unitSuffix})`,
+      stock: stockLabel,
+      unit: productMainUnit || null,
     };
   });
 };

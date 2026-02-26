@@ -33,6 +33,7 @@ type NormalizeQuantityOptions = {
 
 export type ApplyInventoryDeltasOptions = {
   confirmUnitMismatch?: UnitMismatchConfirmHandler | false;
+  allowNegativeStock?: boolean;
 };
 
 const toNumber = (value: any) => {
@@ -200,7 +201,7 @@ export const applyInventoryDeltas = async (
 
     const currentStock = toNumber(existing?.stock);
     const nextStock = currentStock + delta;
-    if (nextStock < 0) {
+    if (!options?.allowNegativeStock && nextStock < 0) {
       throw new Error('موجودی قفسه کافی نیست');
     }
 

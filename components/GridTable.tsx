@@ -64,6 +64,7 @@ const createEmptyRow = () => ({
     selected_product_name: null,
     selected_product_stock: null,
     selected_product_main_unit: null,
+    selected_product_sub_unit: null,
   },
   specs: {},
   pieces: [{ key: createPieceKey(), ...defaultPiece() }],
@@ -72,8 +73,8 @@ const createEmptyRow = () => ({
 
 const toEnglishDigits = (value: any) =>
   String(value ?? '')
-    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
 
 const normalizeNumberInput = (value: any) =>
   toEnglishDigits(value).replace(/,/g, '').replace(/\u066C/g, '').trim();
@@ -95,7 +96,9 @@ const formatGroupedInput = (value: any) => {
 const parseNumberInput = (value: any) => {
   const normalized = normalizeNumberInput(value);
   if (!normalized) return 0;
-  const parsed = parseFloat(normalized);
+  const sanitized = normalized.replace(/[^0-9.\-]/g, '');
+  if (!sanitized || sanitized === '-' || sanitized === '.' || sanitized === '-.') return 0;
+  const parsed = parseFloat(sanitized);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
@@ -289,34 +292,6 @@ const GridTable: React.FC<GridTableProps> = ({
     };
   };
 
-  const askUnitMismatchResolution = async (payload: {
-    productMainUnit: string | null;
-    productSubUnit: string | null;
-    rowMainLabel: string;
-    rowSubLabel: string;
-  }) => {
-    return new Promise<boolean>((resolve) => {
-      Modal.confirm({
-        title: 'اختلاف واحد محصول و سفارش تولید',
-        content: (
-          <div className="text-xs leading-6">
-            <div className="text-red-600 font-semibold mb-2">
-              واحد محصول انتخاب شده با واحدی که در ردیف قطعات ثبت شده متفاوت است.
-            </div>
-            <div>واحد اصلی محصول: <span className="font-semibold">{payload.productMainUnit || '-'}</span></div>
-            <div>واحد فرعی محصول: <span className="font-semibold">{payload.productSubUnit || '-'}</span></div>
-            <div>واحد اصلی سفارش تولید فعلی: <span className="font-semibold">{payload.rowMainLabel || '-'}</span></div>
-            <div>واحد فرعی سفارش تولید فعلی: <span className="font-semibold">{payload.rowSubLabel || '-'}</span></div>
-          </div>
-        ),
-        okText: 'نام واحد را از محصول انتخاب شده کپی کن',
-        cancelText: 'واحد ها را تغییر نده',
-        onOk: () => resolve(true),
-        onCancel: () => resolve(false),
-      });
-    });
-  };
-
   const cloneGridRowWithNewKeys = (row: any) => {
     const pieces = Array.isArray(row?.pieces)
       ? row.pieces.map((piece: any) => ({ ...piece, key: createPieceKey() }))
@@ -343,6 +318,17 @@ const GridTable: React.FC<GridTableProps> = ({
   const toNumber = (value: any) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const convertDimensionByUnit = (value: any, fromUnitRaw: any, toUnitRaw: any) => {
+    const fromUnit = String(fromUnitRaw || '').trim();
+    const toUnit = String(toUnitRaw || '').trim();
+    const numericValue = toNumber(value);
+    if (!fromUnit || !toUnit || fromUnit === toUnit) return numericValue;
+    const probe = convertArea(1, fromUnit as any, toUnit as any);
+    if (!Number.isFinite(probe) || probe === 0) return numericValue;
+    const converted = convertArea(numericValue, fromUnit as any, toUnit as any);
+    return Number.isFinite(converted) ? converted : numericValue;
   };
 
   const focusSameColumnInSiblingRow = (target: EventTarget | null, direction: 'up' | 'down') => {
@@ -375,7 +361,8 @@ const GridTable: React.FC<GridTableProps> = ({
     ctx: { rowIndex: number; rowKey: string; rowCanEdit: boolean }
   ) => {
     if (!ctx.rowCanEdit) return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const isSaveShortcut = e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.altKey;
+    if (!isSaveShortcut && (e.ctrlKey || e.metaKey || e.altKey)) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -392,10 +379,12 @@ const GridTable: React.FC<GridTableProps> = ({
     }
 
     if (e.key === 'Enter') {
-      if (mode === 'db' && activeEditRowKey === ctx.rowKey) {
+      if (isSaveShortcut) {
         e.preventDefault();
         e.stopPropagation();
-        void handleSave();
+        if (mode === 'db' && activeEditRowKey === ctx.rowKey) {
+          void handleSave();
+        }
       }
       return;
     }
@@ -403,8 +392,42 @@ const GridTable: React.FC<GridTableProps> = ({
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
+      if (mode === 'db' && activeEditRowKey === ctx.rowKey) {
+        cancelEditRow({ rowKey: ctx.rowKey, collapse: true });
+        return;
+      }
       updateRow(ctx.rowIndex, { collapsed: true });
     }
+  };
+
+  const handleNumericPieceEditorKeyDown = (
+    e: React.KeyboardEvent<HTMLElement>,
+    ctx: { rowIndex: number; rowKey: string; rowCanEdit: boolean }
+  ) => {
+    if (!(e.ctrlKey || e.metaKey || e.altKey)) {
+      const key = e.key;
+      const allowedKeys = new Set([
+        'Backspace',
+        'Delete',
+        'Tab',
+        'Enter',
+        'Escape',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+        '.',
+        ',',
+        '-',
+      ]);
+      const isDigit = /^[0-9]$/.test(key) || /^[۰-۹]$/.test(key) || /^[٠-٩]$/.test(key);
+      if (!isDigit && !allowedKeys.has(key)) {
+        e.preventDefault();
+      }
+    }
+    handlePieceEditorKeyDown(e, ctx);
   };
 
   const applyCalculations = (gridRow: any) => {
@@ -566,8 +589,18 @@ const GridTable: React.FC<GridTableProps> = ({
     setActiveEditRowKey(rowKey);
   };
 
-  const cancelEditRow = () => {
-    setTempData(JSON.parse(JSON.stringify(data)));
+  const cancelEditRow = (options?: { rowKey?: string; collapse?: boolean }) => {
+    const restored = JSON.parse(JSON.stringify(data));
+    if (options?.collapse && options?.rowKey) {
+      const targetIndex = restored.findIndex((row: any, idx: number) => getRowKeyValue(row, idx) === options.rowKey);
+      if (targetIndex >= 0) {
+        restored[targetIndex] = {
+          ...restored[targetIndex],
+          collapsed: true,
+        };
+      }
+    }
+    setTempData(restored);
     setActiveEditRowKey(null);
   };
 
@@ -614,6 +647,7 @@ const GridTable: React.FC<GridTableProps> = ({
         selected_product_name: null,
         selected_product_stock: null,
         selected_product_main_unit: null,
+        selected_product_sub_unit: null,
       };
       row.collapsed = false;
       row.specs_locked = false;
@@ -628,31 +662,13 @@ const GridTable: React.FC<GridTableProps> = ({
       const productMainUnit = product?.main_unit ? String(product.main_unit) : null;
       const productSubUnit = product?.sub_unit ? String(product.sub_unit) : null;
 
-      const mainUnitMismatch =
-        !!productMainUnit &&
-        !!currentUnits.main &&
-        productMainUnit !== String(currentUnits.main);
-      const subUnitMismatch =
-        !!productSubUnit &&
-        !!currentUnits.sub &&
-        productSubUnit !== String(currentUnits.sub);
-
-      let shouldCopyUnits = true;
-      if (mainUnitMismatch || subUnitMismatch) {
-        shouldCopyUnits = await askUnitMismatchResolution({
-          productMainUnit,
-          productSubUnit,
-          rowMainLabel: currentUnits.mainLabel,
-          rowSubLabel: currentUnits.subLabel,
-        });
-      }
-
       row.header = {
         ...row.header,
         selected_product_id: product?.id || productId,
         selected_product_name: product?.name || '',
         selected_product_stock: product?.stock ?? 0,
         selected_product_main_unit: product?.main_unit || null,
+        selected_product_sub_unit: product?.sub_unit || null,
       };
       row.collapsed = false;
 
@@ -667,9 +683,19 @@ const GridTable: React.FC<GridTableProps> = ({
 
       const pieces = (row.pieces || []).map((piece: any) => ({
         ...piece,
+        length: convertDimensionByUnit(
+          piece?.length,
+          piece?.main_unit || currentUnits.main || productMainUnit,
+          productMainUnit || piece?.main_unit || currentUnits.main
+        ),
+        width: convertDimensionByUnit(
+          piece?.width,
+          piece?.main_unit || currentUnits.main || productMainUnit,
+          productMainUnit || piece?.main_unit || currentUnits.main
+        ),
         waste_rate: product?.waste_rate ?? piece.waste_rate,
-        main_unit: shouldCopyUnits ? (product?.main_unit ?? piece.main_unit) : piece.main_unit,
-        sub_unit: shouldCopyUnits ? (product?.sub_unit ?? piece.sub_unit) : piece.sub_unit,
+        main_unit: productMainUnit ?? piece.main_unit,
+        sub_unit: productSubUnit ?? piece.sub_unit,
         unit_price: product?.buy_price ?? piece.unit_price,
       }));
       row.pieces = pieces;
@@ -1364,7 +1390,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           className="p-0 !text-white hover:!text-white/90"
                           icon={<CloseOutlined />}
                           disabled={saving}
-                          onClick={cancelEditRow}
+                          onClick={() => cancelEditRow({ rowKey, collapse: true })}
                         />
                       </>
                     ) : (
@@ -1569,7 +1595,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
-                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
+                                  onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1588,7 +1614,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
-                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
+                                  onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1607,7 +1633,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
-                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
+                                  onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1627,7 +1653,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })}
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
-                                  onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
+                                  onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                 />
                               )
                               : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
@@ -1638,7 +1664,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'main_unit',
                           key: 'main_unit',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            rowCanEdit ? (
+                            rowCanEdit && !row.header?.selected_product_id ? (
                               <Select
                                 value={val}
                                 options={unitOptions}
@@ -1658,7 +1684,7 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'sub_unit',
                           key: 'sub_unit',
                           render: (val: any, _record: any, pieceIndex: number) => (
-                            rowCanEdit ? (
+                            rowCanEdit && !row.header?.selected_product_id ? (
                               <Select
                                 value={val}
                                 options={unitOptions}
@@ -1734,7 +1760,7 @@ const GridTable: React.FC<GridTableProps> = ({
                                     onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })}
                                     formatter={(v) => formatGroupedInput(v)}
                                     parser={(v) => parseNumberInput(v)}
-                                    onKeyDown={(e) => handlePieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
+                                    onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                   />
                                 )
                                 : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>

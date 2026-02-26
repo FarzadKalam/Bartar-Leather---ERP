@@ -14,6 +14,7 @@ import TaskHandoverModal, {
 } from './production/TaskHandoverModal';
 import TaskHandoverFormsModal, {
   type StageHandoverFormListRow,
+  type StageHandoverInventoryRow,
   type StageHandoverSummaryRow,
 } from './production/TaskHandoverFormsModal';
 import DateObject from 'react-date-object';
@@ -117,6 +118,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [handoverForms, setHandoverForms] = useState<StageHandoverForm[]>([]);
   const [nextStageTotalsByProduct, setNextStageTotalsByProduct] = useState<Record<string, number>>({});
   const [nextStageSubTotalsByProduct, setNextStageSubTotalsByProduct] = useState<Record<string, number>>({});
+  const [handoverStageInventoryRows, setHandoverStageInventoryRows] = useState<StageHandoverInventoryRow[]>([]);
   const [handoverNextTask, setHandoverNextTask] = useState<any | null>(null);
   const [activeHandoverFormId, setActiveHandoverFormId] = useState<string | null>(null);
   const [handoverFormsModalOpen, setHandoverFormsModalOpen] = useState(false);
@@ -183,6 +185,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     const parsed = parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
   }, []);
+  const isLineCreationLocked = !isBom && String(orderStatus || '').toLowerCase() === 'in_progress';
 
   const categoryLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -732,6 +735,111 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
   }, [normalizeHandoverDeliveryRow, recalcHandoverGroup, resolveCategoryLabel, toNumber]);
 
+  const loadStageInventoryRows = useCallback(async (
+    targetShelfId: string | null,
+    groups: StageHandoverGroup[]
+  ) => {
+    if (!targetShelfId) {
+      setHandoverStageInventoryRows([]);
+      return;
+    }
+    const productIds = Array.from(
+      new Set(
+        (Array.isArray(groups) ? groups : [])
+          .map((group) => String(group?.selectedProductId || '').trim())
+          .filter(Boolean)
+      )
+    );
+    if (!productIds.length) {
+      setHandoverStageInventoryRows([]);
+      return;
+    }
+
+    const stockByProduct = new Map<string, { mainQty: number; subQty: number }>();
+
+    const { data: inventorySourceRows, error: inventoryError } = await supabase
+      .from('product_inventory')
+      .select('product_id, stock')
+      .eq('shelf_id', targetShelfId)
+      .in('product_id', productIds);
+
+    if (!inventoryError) {
+      (inventorySourceRows || []).forEach((row: any) => {
+        const productId = String(row?.product_id || '').trim();
+        if (!productId) return;
+        stockByProduct.set(productId, {
+          mainQty: toNumber(row?.stock),
+          subQty: 0,
+        });
+      });
+    } else {
+      const inventoryErrorText = [
+        inventoryError?.message,
+        inventoryError?.details,
+        inventoryError?.hint,
+      ].filter(Boolean).join(' ');
+      const hasLegacyRelationIssue =
+        /shelf_products/i.test(inventoryErrorText)
+        || (/product_inventory/i.test(inventoryErrorText) && /does not exist/i.test(inventoryErrorText));
+
+      if (!hasLegacyRelationIssue) {
+        throw inventoryError;
+      }
+
+      const { data: transferRows, error: transferError } = await supabase
+        .from('stock_transfers')
+        .select('product_id, delivered_qty, required_qty, from_shelf_id, to_shelf_id')
+        .in('product_id', productIds)
+        .or(`from_shelf_id.eq.${targetShelfId},to_shelf_id.eq.${targetShelfId}`);
+      if (transferError) throw transferError;
+
+      (transferRows || []).forEach((row: any) => {
+        const productId = String(row?.product_id || '').trim();
+        if (!productId) return;
+        const qty = Math.max(0, toNumber(row?.delivered_qty || row?.required_qty));
+        if (!qty) return;
+
+        const fromShelfId = String(row?.from_shelf_id || '').trim();
+        const toShelfId = String(row?.to_shelf_id || '').trim();
+        const prev = stockByProduct.get(productId) || { mainQty: 0, subQty: 0 };
+        const nextMain = prev.mainQty + (toShelfId === targetShelfId ? qty : 0) - (fromShelfId === targetShelfId ? qty : 0);
+        stockByProduct.set(productId, {
+          mainQty: nextMain,
+          subQty: prev.subQty,
+        });
+      });
+    }
+
+    const metaByProduct = new Map<string, { name: string; code: string; unit: string; subUnit: string }>();
+    (Array.isArray(groups) ? groups : []).forEach((group) => {
+      const productId = String(group?.selectedProductId || '').trim();
+      if (!productId || metaByProduct.has(productId)) return;
+      const firstPiece = Array.isArray(group?.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
+      metaByProduct.set(productId, {
+        name: String(group?.selectedProductName || '-'),
+        code: String(group?.selectedProductCode || ''),
+        unit: String(firstPiece?.mainUnit || ''),
+        subUnit: String(firstPiece?.subUnit || ''),
+      });
+    });
+
+    const inventoryRows: StageHandoverInventoryRow[] = productIds.map((productId) => {
+      const stock = stockByProduct.get(productId) || { mainQty: 0, subQty: 0 };
+      const meta = metaByProduct.get(productId) || { name: '-', code: '', unit: '', subUnit: '' };
+      return {
+        productId,
+        productName: meta.name,
+        productCode: meta.code,
+        unit: meta.unit,
+        subUnit: meta.subUnit,
+        mainQty: Math.max(0, toNumber(stock.mainQty)),
+        subQty: Math.max(0, toNumber(stock.subQty)),
+      };
+    });
+
+    setHandoverStageInventoryRows(inventoryRows);
+  }, [toNumber]);
+
   const openTaskHandoverModal = useCallback(async (task: any, providedTasks?: any[]) => {
     if (!task?.id || !recordId || isBom) return;
     try {
@@ -806,6 +914,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           targetShelfId: targetShelfId ? String(targetShelfId) : null,
         })
       );
+      await loadStageInventoryRows(targetShelfId ? String(targetShelfId) : null, mergedGroups);
 
       const defaultGiverSourceId = previousTask?.assignee_id || order?.assignee_id || null;
       const defaultGiverSourceType = previousTask?.assignee_type || order?.assignee_type || null;
@@ -1031,6 +1140,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     getHandoverFromTask,
     buildGroupsFromPreviousStage,
     buildGroupsFromOrder,
+    loadStageInventoryRows,
     mergeSavedGroups,
     recalcHandoverGroup,
     resolveCategoryLabel,
@@ -1831,6 +1941,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     setHandoverSourceStageValue(null);
     setHandoverSourceShelfId(null);
     setHandoverDestinationStageId(null);
+    setHandoverStageInventoryRows([]);
   }, []);
 
   const handleConfirmGiver = useCallback(async () => {
@@ -1845,6 +1956,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const handleAddLine = async (values: any) => {
     if (!recordId) return;
+    if (isLineCreationLocked) {
+      message.warning('در وضعیت در حال تولید امکان افزودن خط جدید وجود ندارد.');
+      return;
+    }
     try {
       let nextNo = values.line_no;
       if (!nextNo) {
@@ -2358,6 +2473,58 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
   }, [assigneeLabelFromIds, getHandoverFromTask, getLineTaskChain, handoverForms, handoverTask, tasks, toGroupTotals, toNumber]);
 
+  const buildHandoverGroupHistoryKey = useCallback((group: any, fallbackIndex: number) => {
+    const categoryLabel = String(group?.categoryLabel || '').trim();
+    const productId = String(group?.selectedProductId || '').trim();
+    if (categoryLabel || productId) return `${categoryLabel}::${productId}`;
+    return String(group?.key || `group_${fallbackIndex}`);
+  }, []);
+
+  const handoverPreviousRowsByGroupKey = useMemo<Record<string, StageHandoverDeliveryRow[]>>(() => {
+    const map: Record<string, StageHandoverDeliveryRow[]> = {};
+    const activeFormId = String(activeHandoverFormId || '').trim();
+    (handoverForms || []).forEach((form) => {
+      if (activeFormId && String(form?.id || '').trim() === activeFormId) return;
+      const groups = Array.isArray(form?.groups) ? form.groups : [];
+      groups.forEach((group: any, groupIndex: number) => {
+        const groupKey = buildHandoverGroupHistoryKey(group, groupIndex);
+        if (!groupKey) return;
+        const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+        const normalizedRows = rows.map((row: any, rowIndex: number) => ({
+          key: String(row?.key || `${String(form?.id || 'form')}_${groupIndex}_${rowIndex}`),
+          pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
+          name: String(row?.name || ''),
+          length: Math.max(0, toNumber(row?.length)),
+          width: Math.max(0, toNumber(row?.width)),
+          quantity: Math.max(0, toNumber(row?.quantity)),
+          mainUnit: String(row?.mainUnit || row?.main_unit || ''),
+          subUnit: String(row?.subUnit || row?.sub_unit || ''),
+          deliveredQty: Math.max(0, toNumber(row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
+        }));
+        if (!normalizedRows.length) return;
+        map[groupKey] = [...(map[groupKey] || []), ...normalizedRows];
+      });
+    });
+    return map;
+  }, [activeHandoverFormId, buildHandoverGroupHistoryKey, handoverForms, toNumber]);
+
+  const handoverEditorGroups = useMemo<StageHandoverGroup[]>(() => {
+    return (handoverGroups || []).map((group, groupIndex) => {
+      const groupKey = buildHandoverGroupHistoryKey(group, groupIndex);
+      const previousRows = handoverPreviousRowsByGroupKey[groupKey] || [];
+      const previousDeliveredQty = previousRows.reduce((sum, row) => {
+        const explicitQty = toNumber((row as any)?.deliveredQty);
+        if (explicitQty > 0) return sum + explicitQty;
+        return sum + (Math.max(0, toNumber((row as any)?.length)) * Math.max(0, toNumber((row as any)?.width)) * Math.max(0, toNumber((row as any)?.quantity)));
+      }, 0);
+      return {
+        ...group,
+        previousDeliveryRows: previousRows,
+        previousDeliveredQty,
+      };
+    });
+  }, [buildHandoverGroupHistoryKey, handoverGroups, handoverPreviousRowsByGroupKey, toNumber]);
+
   const renderPopupContent = (task: any) => (
     <div className="w-72 p-1 font-['Vazirmatn']">
       <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-2">
@@ -2545,6 +2712,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const handleCopyLine = async (line: any) => {
     if (!recordId || !line?.id) return;
+    if (isLineCreationLocked) {
+      message.warning('در وضعیت در حال تولید امکان افزودن خط جدید وجود ندارد.');
+      return;
+    }
     try {
       setLoading(true);
       const { data: maxRow, error: maxError } = await supabase
@@ -2735,6 +2906,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                     icon={<CopyOutlined />}
                     onClick={() => handleCopyLine(line)}
                     className="text-amber-700 hover:!text-amber-600"
+                    disabled={isLineCreationLocked}
                   >
                     کپی خط
                   </Button>
@@ -2864,12 +3036,16 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
       {!readOnly && !isBom && (
         <div className="flex justify-start">
-          <Tooltip title="افزودن خط تولید جدید">
+          <Tooltip title={isLineCreationLocked ? 'در وضعیت در حال تولید امکان افزودن خط جدید وجود ندارد.' : 'افزودن خط تولید جدید'}>
             <Button
               type="dashed"
               icon={<PlusOutlined />}
               size={compact ? 'small' : 'middle'}
-              onClick={() => setIsLineModalOpen(true)}
+              onClick={() => {
+                if (isLineCreationLocked) return;
+                setIsLineModalOpen(true);
+              }}
+              disabled={isLineCreationLocked}
               className="border-amber-300 text-amber-700 hover:!border-amber-600 hover:!text-amber-600 hover:!bg-amber-50"
             >
               افزودن خط
@@ -3037,6 +3213,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         loading={handoverLoading}
         taskName={String(handoverTask?.name || handoverTask?.title || 'مرحله')}
         orderTitle={handoverOrderTitle}
+        currentStageName={String(handoverTask?.name || handoverTask?.title || 'مرحله')}
+        currentStageInventory={handoverStageInventoryRows}
         sourceStageName={String(handoverContext?.sourceStageName || 'شروع تولید')}
         summaries={handoverSummaryRows}
         forms={handoverFormRows}
@@ -3064,7 +3242,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         destinationStageId={handoverDestinationStageId}
         stageOptions={handoverStageOptions}
         centralSourceShelfOptions={centralSourceShelfOptions}
-        groups={handoverGroups}
+        groups={handoverEditorGroups}
         shelfOptions={productionShelfOptions}
         targetShelfId={handoverContext?.targetShelfId || null}
         giverConfirmation={handoverContext?.giverConfirmation || { confirmed: false }}

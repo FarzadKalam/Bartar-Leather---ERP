@@ -42,7 +42,7 @@ const BLOCKS = {
         width: 180,
         relationConfig: { targetModule: 'shelves', targetField: 'name' },
       },
-      { key: 'quantity', title: 'تعداد', type: FieldType.NUMBER, width: 100 },
+      { key: 'quantity', title: 'مقدار', type: FieldType.NUMBER, width: 100 },
       {
         key: 'main_unit',
         title: 'واحد اصلی',
@@ -69,7 +69,7 @@ const BLOCKS = {
       { key: 'unit_price', title: 'قیمت واحد (تومان)', type: FieldType.PRICE, width: 150 },
       { key: 'discount', title: 'تخفیف (تومان/٪)', type: FieldType.PERCENTAGE_OR_AMOUNT, width: 130, showTotal: true },
       { key: 'vat', title: 'ارزش افزوده (تومان/٪)', type: FieldType.PERCENTAGE_OR_AMOUNT, width: 130, showTotal: true },
-      { key: 'total_price', title: 'جمع کل (تومان)', type: FieldType.PRICE, width: 160, showTotal: true },
+      { key: 'total_price', title: 'جمع کل (تومان)', type: FieldType.PRICE, width: 160, showTotal: true, readonly: true },
     ],
   },
 

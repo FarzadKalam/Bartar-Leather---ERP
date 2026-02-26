@@ -108,7 +108,7 @@ export const applyInvoiceFinalizationInventory = async ({
 
   if (deltas.length === 0) return { applied: false };
 
-  await applyInventoryDeltas(supabase, deltas);
+  await applyInventoryDeltas(supabase, deltas, { allowNegativeStock: true });
 
   const { error: insertError } = await supabase
     .from('stock_transfers')

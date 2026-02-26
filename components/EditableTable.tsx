@@ -105,7 +105,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const [loadingData, setLoadingData] = useState(false);
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [expandedProducts, setExpandedProducts] = useState<Record<string, { loading: boolean; data: any[] }>>({});
-  const [shelfOptionsByRow, setShelfOptionsByRow] = useState<Record<string, { loading: boolean; options: { label: string; value: string }[] }>>({});
+  const [shelfOptionsByRow, setShelfOptionsByRow] = useState<Record<string, { loading: boolean; options: { label: string; value: string; stock?: number; unit?: string | null }[] }>>({});
   const [localDynamicOptions, setLocalDynamicOptions] = useState<Record<string, any[]>>({});
   const [rowReloadVersion, setRowReloadVersion] = useState<Record<string, number>>({});
   const [currentProductUnits, setCurrentProductUnits] = useState<{ mainUnit: string | null; subUnit: string | null }>({ mainUnit: null, subUnit: null });
@@ -198,7 +198,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   // --- مقداردهی اولیه ---
   useEffect(() => {
-    if (mode !== 'external_view' && !populateSource?.recordId && !isProductInventory && !isShelfInventory && !isProductStockMovements) {
+    const shouldUseLocalInit =
+      mode === 'local'
+      || (!isProductInventory && !isShelfInventory && !isProductStockMovements);
+    if (mode !== 'external_view' && !populateSource?.recordId && shouldUseLocalInit) {
       const safeData = Array.isArray(initialData) ? initialData : [];
       const dataWithKey = safeData.map((item, index) => ({
         ...item,
@@ -458,7 +461,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       }
     }
 
-    if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'length', 'width', 'main_quantity', 'sub_quantity'].includes(key)) {
+    if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'discount_type', 'vat_type', 'length', 'width', 'main_quantity', 'sub_quantity'].includes(key)) {
       newData[index]['total_price'] = calculateRow(newData[index], block.rowCalculationType);
     }
 
@@ -1074,7 +1077,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const loadShelvesForRow = async (rowKey: string, productId: string) => {
     setShelfOptionsByRow((prev) => ({ ...prev, [rowKey]: { loading: true, options: prev[rowKey]?.options || [] } }));
     try {
-      const options = await fetchShelfOptions(supabase, productId);
+      const options = await fetchShelfOptions(supabase, productId, { includeNonPositive: isAnyInvoiceItems });
       setShelfOptionsByRow((prev) => ({ ...prev, [rowKey]: { loading: false, options } }));
     } catch (err) {
       console.error(err);
@@ -1295,6 +1298,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
           !!readonlyWhen?.field &&
           Object.prototype.hasOwnProperty.call(record || {}, readonlyWhen.field) &&
           (record as any)[readonlyWhen.field] === readonlyWhen.equals;
+        const resolvedText = (isAnyInvoiceItems && col.key === 'total_price')
+          ? calculateRow(record, block.rowCalculationType)
+          : text;
 
         const fieldConfig: ModuleField = {
           key: col.key,
@@ -1312,6 +1318,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             || ((record as any)?._lockedFields || []).includes(col.key)
             || (isProductionOrder && isBomItemBlock && (record as any)?.selected_product_id && !editableAfterSelection.has(col.key))
             || readonlyByCondition
+            || (isAnyInvoiceItems && col.key === 'total_price')
             || (isInvoiceItems && col.key === 'source_shelf_id' && !record?.product_id),
         };
         if (col.imageSourceMode) {
@@ -1349,17 +1356,47 @@ const EditableTable: React.FC<EditableTableProps> = ({
         const isMovementQty = isProductStockMovements && col.key === 'main_quantity' && !isEditing;
         const movementType = String((record as any)?.voucher_type || '');
         const movementColor = movementType === 'incoming' ? 'text-green-600' : movementType === 'outgoing' ? 'text-red-600' : 'text-blue-600';
-
-        if (isMovementQty) {
-          return <span className={`persian-number font-bold ${movementColor}`}>{toPersianNumber(text || 0)}</span>;
+        let invoiceQuantityWarning: string | null = null;
+        if (isInvoiceItems && col.key === 'quantity') {
+          const selectedShelfId = String((record as any)?.source_shelf_id || '');
+          if (selectedShelfId) {
+            const selectedShelf = (shelfOptionsByRow[rowKey]?.options || []).find(
+              (item) => String(item?.value || '') === selectedShelfId
+            );
+            if (selectedShelf) {
+              const shelfStock = toSafeNumber((selectedShelf as any)?.stock);
+              const rowQty = toSafeNumber((record as any)?.quantity);
+              const remain = shelfStock - rowQty;
+              if (remain < 0) {
+                const unitLabel = String(
+                  (record as any)?.main_unit
+                  || (selectedShelf as any)?.unit
+                  || ''
+                ).trim();
+                invoiceQuantityWarning = `موجودی: ${toPersianNumber(remain)}${unitLabel ? ` ${unitLabel}` : ''}`;
+              }
+            }
+          }
         }
 
-        return (
+        if (isMovementQty) {
+          return <span className={`persian-number font-bold ${movementColor}`}>{toPersianNumber(resolvedText || 0)}</span>;
+        }
+
+        if (isAnyInvoiceItems && col.key === 'total_price') {
+          return (
+            <span className="persian-number text-gray-700 dark:text-gray-200">
+              {toPersianNumber((calculateRow(record, block.rowCalculationType) || 0).toLocaleString('en-US'))}
+            </span>
+          );
+        }
+
+        const fieldNode = (
           <div className="flex items-center gap-1 w-full min-w-0 max-w-full overflow-hidden">
             <div className="flex-1 min-w-0 overflow-hidden">
               <SmartFieldRenderer
                 field={fieldConfig}
-                value={text}
+                value={resolvedText}
                 onChange={handleChange}
                 forceEditMode={isEditing}
                 options={options}
@@ -1382,6 +1419,17 @@ const EditableTable: React.FC<EditableTableProps> = ({
             )}
           </div>
         );
+        if (invoiceQuantityWarning) {
+          return (
+            <div className="flex flex-col gap-0.5 w-full min-w-0">
+              {fieldNode}
+              <div className="text-[10px] leading-4 text-red-500 pr-1">
+                {invoiceQuantityWarning}
+              </div>
+            </div>
+          );
+        }
+        return fieldNode;
       },
     })) || []),
     ...(isEditing
@@ -1586,12 +1634,16 @@ const EditableTable: React.FC<EditableTableProps> = ({
                     const amounts = getInvoiceAmounts(current);
                     return prev + (col.key === 'discount' ? amounts.discountAmount : amounts.vatAmount);
                   }, 0);
+                } else if (isAnyInvoiceItems && col.key === 'total_price') {
+                  total = pageData.reduce((prev: number, current: any) => {
+                    return prev + calculateRow(current, block.rowCalculationType);
+                  }, 0);
                 } else if (isAnyInvoicePayments && col.key === 'amount') {
                   total = pageData.reduce((prev: number, current: any) =>
-                    current?.status === 'received' ? prev + (parseFloat(current[col.key]) || 0) : prev,
+                    current?.status === 'received' ? prev + toSafeNumber(current[col.key]) : prev,
                   0);
                 } else {
-                  total = pageData.reduce((prev: number, current: any) => prev + (parseFloat(current[col.key]) || 0), 0);
+                  total = pageData.reduce((prev: number, current: any) => prev + toSafeNumber(current[col.key]), 0);
                 }
                 cells.push(
                   <Table.Summary.Cell index={cellIndex} key={`total_${index}`}>
