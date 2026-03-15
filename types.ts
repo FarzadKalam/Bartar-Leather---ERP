@@ -188,12 +188,26 @@ export interface BlockDefinition {
   };
   tableColumns?: {
     key: string;
-    title: string;
+    title?: string;
     type: FieldType;
     width?: number;
     showTotal?: boolean; // <--- این خط جدید است: برای نمایش جمع کل در پایین ستون
     relationConfig?: { targetModule: string; targetField: string; };
-  rowCalculationType?: RowCalculationType;
+    rowCalculationType?: RowCalculationType;
+    options?: SelectOption[];
+    dynamicOptionsCategory?: string;
+    readonly?: boolean;
+    defaultValue?: any;
+    labels?: { fa: string; en?: string };
+    location?: FieldLocation | 'header' | 'block';
+    order?: number;
+    nature?: FieldNature;
+    isTableColumn?: boolean;
+    filterable?: boolean;
+    filterKey?: string;
+    render?: (value: any, record: any) => any;
+    imageSourceMode?: string;
+    readonlyWhen?: { field: string; equals: any };
   }[];
   // ویژگی اتصال به دیتای خارجی
   externalDataConfig?: {

@@ -5,8 +5,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { MODULES } from "../moduleRegistry";
 import SmartTableRenderer from "../components/SmartTableRenderer";
 import { BlockType, FieldType, SavedView, ViewMode } from "../types";
-import { App, Badge, Button, Empty, Skeleton } from "antd";
-import { FileExcelOutlined, PlusOutlined } from "@ant-design/icons";
+import { App, Badge, Button, Dropdown, Empty, Skeleton } from "antd";
+import { FileExcelOutlined, MoreOutlined, PlusOutlined } from "@ant-design/icons";
 import ViewManager from "../components/ViewManager";
 import SmartForm from "../components/SmartForm";
 import { supabase } from "../supabaseClient";
@@ -109,6 +109,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [canOpenWorkflows, setCanOpenWorkflows] = useState(true);
   const [isCreateSingleOpen, setIsCreateSingleOpen] = useState(false);
   const [createSingleInitialValues, setCreateSingleInitialValues] = useState<Record<string, any>>({});
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: resolvedModuleId,
@@ -155,6 +156,12 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     }
     return () => document.body.classList.remove("overflow-hidden");
   }, [isFullscreen]);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   useEffect(() => {
     setViewMode(moduleConfig?.defaultViewMode || ViewMode.LIST);
@@ -704,7 +711,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 
             {selectedRowKeys.length === 0 && (
               <div className="flex items-center gap-2 shrink-0">
-                {canOpenWorkflows && (
+                {!isMobile && canOpenWorkflows && (
                   <Button
                     onClick={() => setIsWorkflowsModalOpen(true)}
                     className="rounded-xl"
@@ -712,7 +719,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                     گردش کارها
                   </Button>
                 )}
-                {canEditModule && (
+                {!isMobile && canEditModule && (
                   <Button
                     icon={<FileExcelOutlined />}
                     onClick={() => setIsExcelImportModalOpen(true)}
@@ -745,6 +752,23 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                     onClick={() => openSingleCreateForm()}
                     className="rounded-xl bg-leather-600 hover:!bg-leather-500 shadow-lg shadow-leather-500/30 shrink-0"
                   >افزودن تکی</Button>
+                )}
+                {isMobile && (canOpenWorkflows || canEditModule) && (
+                  <Dropdown
+                    placement="bottomLeft"
+                    menu={{
+                      items: [
+                        canOpenWorkflows
+                          ? { key: "workflows", label: "گردش کارها", onClick: () => setIsWorkflowsModalOpen(true) }
+                          : null,
+                        canEditModule
+                          ? { key: "excel", label: "وارد کردن از اکسل", onClick: () => setIsExcelImportModalOpen(true), icon: <FileExcelOutlined /> }
+                          : null,
+                      ].filter(Boolean) as any,
+                    }}
+                  >
+                    <Button icon={<MoreOutlined />} className="rounded-xl" />
+                  </Dropdown>
                 )}
               </div>
             )}

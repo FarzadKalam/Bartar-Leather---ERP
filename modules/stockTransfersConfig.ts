@@ -27,6 +27,16 @@ export const stockTransfersConfig: ModuleDefinition = {
       ],
     },
     {
+      key: 'bundle_id',
+      type: FieldType.RELATION,
+      labels: { fa: 'بسته محصول (اختیاری)', en: 'Product Bundle' },
+      relationConfig: {
+        targetModule: 'product_bundles',
+        targetField: 'bundle_number', // فیلدی که در دراپ‌دان نمایش داده می‌شود
+      },
+      isTableColumn: true, // نمایش در جدول تاریخچه حواله‌ها
+      },
+    {
       key: 'product_id',
       labels: { fa: 'محصول', en: 'Product' },
       type: FieldType.RELATION,

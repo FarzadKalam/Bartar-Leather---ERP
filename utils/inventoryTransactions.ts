@@ -5,6 +5,7 @@ import { toPersianNumber } from './persianNumberFormatter';
 export interface InventoryDelta {
   productId: string;
   shelfId: string;
+  bundleId?: string | null;   // ← اضافه شد
   delta: number;
   unit?: string | null;
 }
@@ -150,13 +151,20 @@ export const normalizeQuantityToProductMainUnit = async (
 };
 
 export const aggregateInventoryDeltas = (deltas: InventoryDelta[]) => {
-  const map = new Map<string, number>();
+  // key سه‌تایی: productId:shelfId:bundleId (یا __null__ برای null)
+  const map = new Map<string, { delta: number; bundleId: string | null }>();
   deltas.forEach((item) => {
     if (!item?.productId || !item?.shelfId) return;
     const qty = toNumber(item.delta);
     if (!qty) return;
-    const key = `${item.productId}:${item.shelfId}`;
-    map.set(key, (map.get(key) || 0) + qty);
+    const bundleKey = item.bundleId ?? '__null__';           // ← اضافه شد
+    const key = `${item.productId}:${item.shelfId}:${bundleKey}`;  // ← اصلاح شد
+    const existing = map.get(key);
+    if (existing) {
+      existing.delta += qty;
+    } else {
+      map.set(key, { delta: qty, bundleId: item.bundleId ?? null }); // ← اضافه شد
+    }
   });
   return map;
 };
@@ -186,17 +194,29 @@ export const applyInventoryDeltas = async (
   }
 
   const aggregated = aggregateInventoryDeltas(normalizedDeltas);
-  for (const [key, delta] of aggregated.entries()) {
-    const [productId, shelfId] = key.split(':');
+
+  // ← کل این حلقه اصلاح شد تا bundleId را هم بخواند
+  for (const [key, { delta, bundleId }] of aggregated.entries()) {
+    const parts = key.split(':');
+    const productId = parts[0];
+    const shelfId = parts[1];
+    // parts[2] = bundleKey (مستقیم از bundleId استفاده می‌کنیم)
     if (!productId || !shelfId) continue;
 
-    const { data: existing, error: existingError } = await supabase
+    // ساخت query با در نظر گرفتن bundle_id
+    let selectQuery = supabase
       .from('product_inventory')
       .select('id, stock, warehouse_id')
       .eq('product_id', productId)
-      .eq('shelf_id', shelfId)
-      .maybeSingle();
+      .eq('shelf_id', shelfId);
 
+    if (bundleId) {
+      selectQuery = selectQuery.eq('bundle_id', bundleId);
+    } else {
+      selectQuery = selectQuery.is('bundle_id', null);
+    }
+
+    const { data: existing, error: existingError } = await selectQuery.maybeSingle();
     if (existingError) throw existingError;
 
     const currentStock = toNumber(existing?.stock);
@@ -208,6 +228,7 @@ export const applyInventoryDeltas = async (
     const payload: any = {
       product_id: productId,
       shelf_id: shelfId,
+      bundle_id: bundleId,   // ← اضافه شد
       stock: nextStock,
     };
     if (existing?.warehouse_id !== undefined) {
@@ -216,7 +237,9 @@ export const applyInventoryDeltas = async (
 
     const { error: upsertError } = await supabase
       .from('product_inventory')
-      .upsert(payload, { onConflict: 'product_id,shelf_id' });
+      .upsert(payload, {
+        onConflict: 'product_id,shelf_id,bundle_id',  // ← اصلاح شد
+      });
 
     if (upsertError) throw upsertError;
   }
@@ -238,6 +261,7 @@ export const syncSingleProductStock = async (supabase: SupabaseClient, productId
   const mainUnit = productRow?.main_unit as UnitValue | undefined;
   const subUnit = productRow?.sub_unit as UnitValue | undefined;
   const subStock = mainUnit && subUnit ? convertArea(totalStock, mainUnit, subUnit) : 0;
+
   const { error: updateError } = await supabase
     .from('products')
     .update({ stock: totalStock, sub_stock: subStock })

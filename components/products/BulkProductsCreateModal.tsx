@@ -141,7 +141,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
     .sort((a, b) => (a.order || 0) - (b.order || 0)), [visibility]);
 
   const createEmptyRow = useCallback((): BulkRow => {
-    const r: BulkRow = { key: makeKey(), auto_name_enabled: true, name: '', manual_code: '', image_url: '', opening_stock: 0, opening_shelf_id: null };
+    const r: BulkRow = { key: makeKey(), auto_name_enabled: true, name: '', manual_code: '', image_url: '', opening_stock: 0, opening_shelf_id: null, bundle_id: null };
     rowFields.forEach((f) => { if (f.defaultValue !== undefined) r[f.key] = f.defaultValue; });
     return r;
   }, [rowFields]);
@@ -150,10 +150,19 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
     setLoading(true);
     try {
       const [productCategoriesRes] = await Promise.all([
-        supabase.from('dynamic_options').select('label,value').eq('category', 'product_categories').eq('is_active', true).order('display_order', { ascending: true }),
+        supabase
+          .from('dynamic_options')
+          .select('label,value')
+          .eq('category', 'product_categories')
+          .eq('is_active', true)
+          .order('display_order', { ascending: true }),
       ]);
-      if (productCategoriesRes.error) throw productCategoriesRes.error;
-      setProductCategoryOptions((productCategoriesRes.data || []) as DynamicOption[]);
+      if (!productCategoriesRes.error) {
+        setProductCategoryOptions((productCategoriesRes.data || []) as DynamicOption[]);
+      } else {
+        console.warn('Product categories load failed', productCategoriesRes.error);
+        setProductCategoryOptions([]);
+      }
 
       const dynCats = new Set<string>();
       [...sharedFields, ...rowFields].forEach((f) => { if (f.dynamicOptionsCategory) dynCats.add(f.dynamicOptionsCategory); });
@@ -165,17 +174,49 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       setDynamicOptions(dynMap);
 
       const relMap: Record<string, RelationOption[]> = {};
-      const relFields = [...rowFields, { key: 'opening_shelf_id', type: FieldType.RELATION, relationConfig: { targetModule: 'shelves', targetField: 'name' } as any } as ModuleField]
+      const relFields = [
+        ...rowFields,
+        { key: 'opening_shelf_id', type: FieldType.RELATION, relationConfig: { targetModule: 'shelves', targetField: 'name' } as any } as ModuleField,
+        { key: 'bundle_id', type: FieldType.RELATION, relationConfig: { targetModule: 'product_bundles', targetField: 'bundle_number' } as any } as ModuleField,
+      ]
         .filter((f) => f.type === FieldType.RELATION && f.relationConfig?.targetModule);
       for (const field of relFields) {
         const target = field.relationConfig?.targetModule;
-        const targetField = field.relationConfig?.targetField || 'name';
+        const rawTargetField = field.relationConfig?.targetField;
+        const targetField = (target === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
+          ? 'bundle_number'
+          : (rawTargetField || 'name');
         if (!target) continue;
-        const { data, error } = await supabase.from(target).select(`id,${targetField},system_code,shelf_number`).limit(400);
-        if (error) continue;
-        relMap[field.key] = (data || []).map((r: any) => ({
+
+        let selectFields = `id,${targetField}`;
+        if (target === 'shelves') selectFields = `id,${targetField},system_code,shelf_number`;
+        if (target !== 'product_bundles' && target !== 'shelves') selectFields = `id,${targetField},system_code`;
+
+        const trySelect = async (fields: string) => {
+          const { data, error } = await supabase.from(target).select(fields).limit(400);
+          if (error) return null;
+          return data || [];
+        };
+
+        let data = await trySelect(selectFields);
+        if (!data && selectFields.includes('system_code')) {
+          data = await trySelect(`id,${targetField}`);
+        }
+
+        if (!data) continue;
+        relMap[field.key] = data.map((r: any) => ({
           value: String(r.id),
-          label: `${r[targetField] || r.shelf_number || r.system_code || r.id}${r.system_code ? ` (${r.system_code})` : ''}`,
+          label: `${r[targetField] || r.system_code || r.id}${r.system_code ? ` (${r.system_code})` : ''}`,
+        }));
+      }
+      if (!relMap.bundle_id) {
+        const { data } = await supabase
+          .from('product_bundles')
+          .select('id,bundle_number,system_code')
+          .limit(400);
+        relMap.bundle_id = (data || []).map((r: any) => ({
+          value: String(r.id),
+          label: `${r.bundle_number || r.id}${r.system_code ? ` (${r.system_code})` : ''}`,
         }));
       }
       setRelationOptions(relMap);
@@ -330,10 +371,11 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
   }, [buildName, msg, onClose, onCreated, productCategory, productType, rawCategory, rowFields, rows, sharedFields, sharedValues, validate]);
 
   const tableColumns = useMemo(() => [
-    { key: 'image_url', title: <PaperClipOutlined />, type: imageField?.type || FieldType.IMAGE, width: 76, imageSourceMode: 'gallery' },
+    { key: 'image_url', title: <PaperClipOutlined />, type: imageField?.type || FieldType.IMAGE, width: 76 },
     { key: 'manual_code', title: manualCodeField?.labels?.fa || 'کد دستی', type: manualCodeField?.type || FieldType.TEXT, width: 150 },
     ...rowFields.map((f) => ({ key: f.key, title: f.labels?.fa || f.key, type: f.type, options: f.options, relationConfig: f.relationConfig, dynamicOptionsCategory: f.dynamicOptionsCategory, defaultValue: f.defaultValue })),
     { key: 'opening_stock', title: 'موجودی اول دوره', type: FieldType.NUMBER, width: 140, defaultValue: 0 },
+    { key: 'bundle_id', title: 'بسته محصول', type: FieldType.RELATION, width: 200, relationConfig: { targetModule: 'product_bundles', targetField: 'bundle_number' } },
     { key: 'opening_shelf_id', title: 'قفسه نگهداری', type: FieldType.RELATION, width: 220, relationConfig: { targetModule: 'shelves', targetField: 'name' } },
     { key: 'auto_name_enabled', title: 'نامگذاری خودکار', type: FieldType.CHECKBOX, width: 140, defaultValue: true },
     { key: 'name', title: nameField?.labels?.fa || 'نام محصول', type: nameField?.type || FieldType.TEXT, width: 240, readonlyWhen: { field: 'auto_name_enabled', equals: true } },

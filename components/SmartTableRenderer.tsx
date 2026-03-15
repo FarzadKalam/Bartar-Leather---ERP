@@ -299,11 +299,11 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
             return <Tag color={opt?.color || 'default'} style={{fontSize: '10px', marginRight: 0}}>{label}</Tag>;
         }
         if (field.type === FieldType.SELECT) {
-            const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions);
+            const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions, record, field.relationConfig);
             return <span className="text-xs text-gray-600 dark:text-gray-300">{label}</span>;
         }
         if (field.type === FieldType.RELATION) {
-            const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions);
+            const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions, record, field.relationConfig);
             const targetModule = (field as any)?.relationConfig?.targetModule;
             if (!targetModule || !value) {
               return <span className="text-xs text-leather-600 hover:underline font-medium">{label}</span>;
@@ -391,7 +391,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
             return (
               <div className="flex flex-wrap gap-1">
                 {value.map((val: any, idx: number) => {
-                  const label = getSingleOptionLabel(field, val, dynamicOptions, relationOptions);
+                  const label = getSingleOptionLabel(field, val, dynamicOptions, relationOptions, record, field.relationConfig);
                   return (
                     <Tag key={idx} color="default" style={{fontSize: '9px', marginRight: 0, backgroundColor: '#fef3c7', borderColor: '#d97706', color: '#92400e'}} className="font-medium">
                       {label}

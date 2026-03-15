@@ -8,7 +8,7 @@ import EditableTable from './EditableTable.tsx';
 import GridTable from './GridTable';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
-import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType } from '../types';
+import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType, ModuleField } from '../types';
 import { convertArea } from '../utils/unitConversions';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
@@ -158,7 +158,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
     // تابع کمکی برای دریافت دیتا با کد سیستمی
     const fetchOptionsForField = async (targetModule?: string, targetField?: string, key?: string) => {
         // اگر پارامترهای ضروری موجود نیستند، کاری انجام نده
-        if (!targetModule || !targetField || !key) return;
+        if (!targetModule || !key) return;
+        const resolvedTargetField = (targetModule === 'product_bundles' && (!targetField || targetField === 'name'))
+          ? 'bundle_number'
+          : (targetField || 'name');
 
         try {
             const isShelvesTarget = targetModule === 'shelves';
@@ -166,14 +169,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
             // تلاش برای گرفتن نام + کد سیستمی
             const { data, error } = await supabase
                 .from(targetModule)
-                .select(`id, ${targetField}, system_code${extraSelect}`)
+                .select(`id, ${resolvedTargetField}, system_code${extraSelect}`)
                 .limit(100);
             
             if (!error && data) {
                 options[key] = data.map((item: any) => ({
                     label: item.system_code
-                      ? `${item[targetField] || item.shelf_number || item.system_code || item.id} (${item.system_code})`
-                      : (item[targetField] || item.shelf_number || item.system_code || item.id),
+                      ? `${item[resolvedTargetField] || item.shelf_number || item.system_code || item.id} (${item.system_code})`
+                      : (item[resolvedTargetField] || item.shelf_number || item.system_code || item.id),
                     value: item.id
                 }));
                 return;
@@ -184,12 +187,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
             // تلاش دوم: فقط نام
             const { data } = await supabase
                 .from(targetModule)
-                .select(`id, ${targetField}`)
+                .select(`id, ${resolvedTargetField}`)
                 .limit(100);
             
             if (data) {
                 options[key] = data.map((item: any) => ({
-                    label: item[targetField],
+                    label: item[resolvedTargetField],
                     value: item.id
                 }));
             }
@@ -496,6 +499,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
     });
   };
 
+  const normalizeFieldForBulkEdit = (field: ModuleField) => {
+    if (!isBulkEdit) return field;
+    return {
+      ...field,
+      validation: field.validation ? { ...field.validation, required: false } : { required: false },
+    } as ModuleField;
+  };
+
   // --- تابع کمکی: دریافت دیتای خلاصه (Summary) ---
   const getSummaryData = (currentData: any) => {
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
@@ -581,13 +592,16 @@ const SmartForm: React.FC<SmartFormProps> = ({
           values.name = nextName;
         }
       }
-      if (module.id === 'products') {
-        delete values.product_inventory;
-      }
-      if (module.id === 'shelves') {
-        delete values.shelf_inventory;
-        delete values.shelf_stock_movements;
-        delete values.task_shelf_inventory;
+        if (module.id === 'products') {
+          delete values.product_inventory;
+        }
+        if (module.id === 'product_bundles') {
+          delete values.bundle_stock_movements;
+        }
+        if (module.id === 'shelves') {
+          delete values.shelf_inventory;
+          delete values.shelf_stock_movements;
+          delete values.task_shelf_inventory;
         delete values.task_shelf_stock_movements;
       }
       if (module.id === 'production_orders') {
@@ -949,20 +963,21 @@ const SmartForm: React.FC<SmartFormProps> = ({
               {/* Header Fields */}
               {headerFields.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-5 bg-gray-50 dark:bg-white/5 p-3 md:p-4 rounded-2xl border border-gray-100 dark:border-gray-800">
-                  {headerFields.map(field => {
-                     if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
-                     let options = field.options; 
-                     if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
-                     if (field.type === FieldType.RELATION) options = relationOptions[field.key];
-                     return (
-                        <div key={field.key} className={field.type === FieldType.IMAGE ? 'row-span-2' : ''}>
-                          <SmartFieldRenderer 
-                            field={field} 
-                            value={formData[field.key]} 
-                            onChange={(val) => {
-                              form.setFieldValue(field.key, val);
-                              setFormData({ ...form.getFieldsValue(), [field.key]: val });
-                            }}
+                    {headerFields.map(field => {
+                       if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
+                       let options = field.options; 
+                       if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
+                       if (field.type === FieldType.RELATION) options = relationOptions[field.key];
+                       const resolvedField = normalizeFieldForBulkEdit(field as ModuleField);
+                       return (
+                          <div key={field.key} className={field.type === FieldType.IMAGE ? 'row-span-2' : ''}>
+                            <SmartFieldRenderer 
+                              field={resolvedField} 
+                              value={formData[field.key]} 
+                              onChange={(val) => {
+                                form.setFieldValue(field.key, val);
+                                setFormData({ ...form.getFieldsValue(), [field.key]: val });
+                              }}
                             forceEditMode={true}
                             options={options}
                             moduleId={module.id}
@@ -1004,6 +1019,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 if (canViewField(String(block.id)) === false) return null;
                 if (module.id === 'products' && block.id === 'product_stock_movements') return null;
                 if (module.id === 'products' && block.id === 'product_inventory' && !!recordId) return null;
+                if (module.id === 'product_bundles' && block.id === 'bundle_stock_movements') return null;
                 if (module.id === 'shelves' && block.id === 'shelf_stock_movements') return null;
                 if (module.id === 'tasks' && block.id === 'task_shelf_stock_movements') return null;
 
@@ -1027,24 +1043,25 @@ const SmartForm: React.FC<SmartFormProps> = ({
                       </Divider>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {blockFields.map(field => {
-                          if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
-                           let fieldValue = formData[field.key];
-                           let isReadOnly = false;
-                           // فیلدهای خلاصه اگر محاسبه شده باشند
-                           if (currentSummaryData && summaryConfigObj?.calculationType === SummaryCalculationType.INVOICE_FINANCIALS) {                               // لاجیک نمایشی فیلدهای خلاصه
-                           }
-                           let options = field.options;
-                           if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
-                           if (field.type === FieldType.RELATION) options = relationOptions[field.key];
-                           return (
-                             <SmartFieldRenderer 
-                               key={field.key}
-                               field={field}
-                               value={fieldValue}
-                               recordId={recordId}
-                               onChange={(val) => {
-                                 if (!isReadOnly) { form.setFieldValue(field.key, val); setFormData({ ...form.getFieldsValue(), [field.key]: val }); }
-                               }}
+                            if (field.logic && !checkVisibility(field.logic, currentValues)) return null;
+                             let fieldValue = formData[field.key];
+                             let isReadOnly = false;
+                             // فیلدهای خلاصه اگر محاسبه شده باشند
+                             if (currentSummaryData && summaryConfigObj?.calculationType === SummaryCalculationType.INVOICE_FINANCIALS) {                               // لاجیک نمایشی فیلدهای خلاصه
+                             }
+                             let options = field.options;
+                             if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
+                             if (field.type === FieldType.RELATION) options = relationOptions[field.key];
+                            const resolvedField = normalizeFieldForBulkEdit(field as ModuleField);
+                            return (
+                              <SmartFieldRenderer 
+                                key={field.key}
+                                field={resolvedField}
+                                value={fieldValue}
+                                recordId={recordId}
+                                onChange={(val) => {
+                                  if (!isReadOnly) { form.setFieldValue(field.key, val); setFormData({ ...form.getFieldsValue(), [field.key]: val }); }
+                                }}
                                forceEditMode={true} options={options}
                                moduleId={module.id}
                                allValues={formData}

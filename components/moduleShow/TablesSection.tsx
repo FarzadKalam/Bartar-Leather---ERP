@@ -6,6 +6,7 @@ import ProductionStagesField from '../../components/ProductionStagesField';
 import { calculateSummary } from '../../utils/calculations';
 import { SummaryCalculationType, FieldType } from '../../types';
 import { supabase } from '../../supabaseClient';
+import BundleStockMovementsPanel from '../productBundles/BundleStockMovementsPanel';
 
 // 👇 اینترفیس اصلاح شد: حذف linkedBomData و ...
 interface TablesSectionProps {
@@ -116,7 +117,15 @@ const TablesSection: React.FC<TablesSectionProps> = ({
         .filter((b: any) => (b.visibleIf ? checkVisibility(b.visibleIf) : true))
           .map((block: any) => (
         <div key={block.id}>
-          {block.type === 'grid_table' ? (
+          {module.id === 'product_bundles' && block.id === 'bundle_stock_movements' ? (
+            <BundleStockMovementsPanel
+              block={block}
+              recordId={data.id}
+              relationOptions={relationOptions}
+              dynamicOptions={dynamicOptions}
+              canEditModule={canEditModule}
+            />
+          ) : block.type === 'grid_table' ? (
             <GridTable
               block={block}
               initialData={data[block.id] || []}

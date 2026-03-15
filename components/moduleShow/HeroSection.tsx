@@ -5,7 +5,7 @@ import {
   ClockCircleOutlined,
   EditOutlined,
   HistoryOutlined,
-  LoadingOutlined,
+  PictureOutlined,
   SafetyCertificateOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
@@ -131,7 +131,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
               />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                <LoadingOutlined className="text-3xl opacity-20" />
+                <PictureOutlined className="text-3xl opacity-40" />
                 <span className="text-xs">بدون تصویر</span>
               </div>
             )}

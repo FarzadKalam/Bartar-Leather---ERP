@@ -103,7 +103,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   }>>([]);
   const [globalImageGalleryLoading, setGlobalImageGalleryLoading] = useState(false);
   const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
-  const canShowFilesGallery = supportsFilesGallery && canViewFilesManager;
+  const canShowFilesGallery = supportsFilesGallery && canViewFilesManager && !!recordId;
 
   const fieldLabel = field?.labels?.fa || label || 'بدون نام';
   const fieldType = field?.type || type || FieldType.TEXT;
@@ -118,7 +118,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     const configured = relationConfigAny?.targetField;
     if (configured) return String(configured);
     const moduleFields = quickCreateTargetModule?.fields || [];
-    const preferredKeys = ['name', 'title', 'full_name', 'business_name', 'shelf_number', 'system_code'];
+    const preferredKeys = ['name', 'title', 'full_name', 'business_name', 'shelf_number', 'system_code', 'bundle_number'];
     const preferred = moduleFields.find((f: any) => preferredKeys.includes(String(f?.key || '')));
     if (preferred?.key) return String(preferred.key);
     const headerField = moduleFields.find((f: any) => f?.location === 'header');
@@ -389,7 +389,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
         if (quickField.type === FieldType.RELATION && quickField.relationConfig?.targetModule) {
           const targetModule = quickField.relationConfig.targetModule;
-          const targetField = (quickField.relationConfig as any)?.targetField || 'name';
+          const rawTargetField = (quickField.relationConfig as any)?.targetField;
+          const targetField = (targetModule === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
+            ? 'bundle_number'
+            : (rawTargetField || 'name');
           const isShelvesTarget = targetModule === 'shelves';
           const extraSelect = isShelvesTarget ? ', shelf_number' : '';
           try {
@@ -400,8 +403,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             if (error) throw error;
             relationMap[quickField.key] = (data || []).map((item: any) => ({
               label: item.system_code
-                ? `${item[targetField] || item.shelf_number || item.system_code || item.id} (${item.system_code})`
-                : (item[targetField] || item.shelf_number || item.id),
+                ? `${item[targetField] || item.shelf_number || item.bundle_number || item.system_code || item.id} (${item.system_code})`
+                : (item[targetField] || item.shelf_number || item.bundle_number || item.id),
               value: item.id,
             }));
           } catch (err) {
@@ -838,23 +841,34 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     <div><UploadOutlined /><div style={{ marginTop: 8 }}>آپلود</div></div>
                   )}
               </Upload>
-              {canShowFilesGallery && (
-                <>
-                  <Button size="small" onClick={() => setIsGalleryOpen(true)}>
-                    گالری
-                  </Button>
-                  <RecordFilesManager
-                    open={isGalleryOpen}
-                    onClose={() => setIsGalleryOpen(false)}
-                    moduleId={String(moduleId || '')}
-                    recordId={recordId}
-                    mainImage={value}
-                    onMainImageChange={(url) => onChange(url)}
-                    canEdit={!!canEditFilesManager && !!forceEditMode && !isReadonly}
-                    canDelete={!!canDeleteFilesManager && !!forceEditMode && !isReadonly}
-                  />
-                </>
-              )}
+                {canShowFilesGallery && (
+                  <>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        if (!recordId) {
+                          msg.warning('ابتدا رکورد را ذخیره کنید');
+                          return;
+                        }
+                        setIsGalleryOpen(true);
+                      }}
+                    >
+                      گالری
+                    </Button>
+                    {!!recordId && (
+                      <RecordFilesManager
+                        open={isGalleryOpen}
+                        onClose={() => setIsGalleryOpen(false)}
+                        moduleId={String(moduleId || '')}
+                        recordId={recordId}
+                        mainImage={value}
+                        onMainImageChange={(url) => onChange(url)}
+                        canEdit={!!canEditFilesManager && !!forceEditMode && !isReadonly}
+                        canDelete={!!canDeleteFilesManager && !!forceEditMode && !isReadonly}
+                      />
+                    )}
+                  </>
+                )}
             </div>
         );
 
@@ -1039,6 +1053,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   onCancel,
   onOk,
 }) => {
+  const watchedValues = Form.useWatch([], form);
   const renderQuickField = (field: ModuleField) => {
     const isDisabled = (field as any)?.readonly === true;
     const baseSelectProps = {
@@ -1089,19 +1104,29 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
           : (field.options || []);
         return <Select {...baseSelectProps} options={opts as any[]} />;
       }
-      case FieldType.MULTI_SELECT: {
-        const opts = field.dynamicOptionsCategory
-          ? (dynamicOptions[field.dynamicOptionsCategory] || [])
-          : (field.options || []);
-        return <Select {...baseSelectProps} mode="multiple" options={opts as any[]} />;
-      }
-      case FieldType.RELATION:
-        return <Select {...baseSelectProps} options={relationOptions[field.key] || []} />;
-      case FieldType.DATE:
-        return <Input placeholder="YYYY-MM-DD" disabled={isDisabled} />;
-      case FieldType.TIME:
-        return <Input placeholder="HH:mm" disabled={isDisabled} />;
-      case FieldType.DATETIME:
+        case FieldType.MULTI_SELECT: {
+          const opts = field.dynamicOptionsCategory
+            ? (dynamicOptions[field.dynamicOptionsCategory] || [])
+            : (field.options || []);
+          return <Select {...baseSelectProps} mode="multiple" options={opts as any[]} />;
+        }
+        case FieldType.RELATION:
+          return (
+            <SmartFieldRenderer
+              field={field}
+              value={(watchedValues as any)?.[field.key]}
+              onChange={(val) => form.setFieldValue(field.key, val)}
+              options={relationOptions[field.key] || []}
+              forceEditMode={true}
+              compactMode={true}
+              allValues={watchedValues || {}}
+            />
+          );
+        case FieldType.DATE:
+          return <Input placeholder="YYYY-MM-DD" disabled={isDisabled} />;
+        case FieldType.TIME:
+          return <Input placeholder="HH:mm" disabled={isDisabled} />;
+        case FieldType.DATETIME:
         return <Input placeholder="YYYY-MM-DD HH:mm" disabled={isDisabled} />;
       case FieldType.CHECKBOX:
         return <Switch disabled={isDisabled} />;
@@ -1125,7 +1150,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       cancelText="انصراف"
       confirmLoading={loading}
       destroyOnHidden
-      zIndex={2000} 
+      zIndex={5200} 
     >
       <Form
         form={form}

@@ -659,16 +659,34 @@ const ModuleShow: React.FC = () => {
     if (!id || !moduleConfig) return;
     setLoading(true);
     
-    try {
+        try {
+        let querySelect = `
+            *,
+            created_at,
+            updated_at,
+            created_by,
+            updated_by
+        `;
+
+        if (moduleId === 'products') {
+            querySelect += `,
+            product_inventory (
+                *,
+                product_bundles (
+                    id,
+                    bundle_number
+                ),
+                shelves (
+                    id,
+                    name,
+                    shelf_number
+                )
+            )`;
+        }
+
         const { data: record, error } = await supabase
             .from(moduleId)
-            .select(`
-                *,
-                created_at,
-                updated_at,
-                created_by,
-                updated_by
-            `)
+            .select(querySelect)
             .eq('id', id)
             .single();
 
@@ -680,7 +698,34 @@ const ModuleShow: React.FC = () => {
             .eq('record_id', id);
 
         const tags = tagsData?.map((item: any) => item.tags).filter(Boolean) || [];
-        
+          // استخراج بسته‌های محصول از موجودی و تزریق به آپشن‌ها برای رفع مشکل خط تیره (-)
+                    // === [شروع کد اصلاح شده برای تزریق آپشن‌ها] ===
+          const productInventory = (record as any).product_inventory;
+          
+          if (moduleId === 'products' && productInventory) {
+            const extractedBundles = productInventory
+              .filter((inv: any) => inv && inv.product_bundles) // فقط ردیف‌های دارای بسته
+              .map((inv: any) => ({
+                label: String(inv.product_bundles.bundle_number), // تبدیل قطعی به رشته
+                value: inv.product_bundles.id,
+                name: String(inv.product_bundles.bundle_number)
+              }));
+              
+            // حذف مقادیر تکراری با استفاده از Map
+            const uniqueBundles = Array.from(new Map(extractedBundles.map((item: any) => [item.value, item])).values());
+            
+            if (uniqueBundles.length > 0) {
+              setRelationOptions((prev: any) => ({
+                ...prev,
+                product_bundles: uniqueBundles, // 👈 شاه‌کلید! جدول‌ها در این سیستم به دنبال نام ماژول می‌گردند
+                bundle_id: uniqueBundles,       // محض احتیاط
+                product_inventory_bundle_id: uniqueBundles // محض احتیاط مضاعف
+              }));
+            }
+          }
+          // === [پایان کد اصلاح شده] ===
+
+
         const hasModuleViewAccess = modulePermissions.view !== false;
         const assignedAccess = canAccessAssignedRecord(record, currentUserId, currentUserRoleId);
 
@@ -692,6 +737,7 @@ const ModuleShow: React.FC = () => {
 
         setAccessDenied(false);
         setCurrentTags(tags);
+        
         let nextRecord: any = record;
         if (moduleId === 'products') {
           const mainUnit = nextRecord?.main_unit;
@@ -704,6 +750,7 @@ const ModuleShow: React.FC = () => {
             }
           }
         }
+        
         if (moduleId === 'customers') {
           if (!nextRecord?.customer_status) {
             nextRecord = {
@@ -739,6 +786,7 @@ const ModuleShow: React.FC = () => {
             console.warn('Background customer sync failed', syncErr);
           });
         }
+        
         setData(nextRecord);
     } catch (err: any) {
         console.error(err);
@@ -746,6 +794,7 @@ const ModuleShow: React.FC = () => {
     } finally {
         setLoading(false);
     }
+
   }, [id, moduleConfig, moduleId, msg, currentUserId, currentUserRoleId, modulePermissions.view]);
 
   useEffect(() => {
@@ -795,11 +844,17 @@ const ModuleShow: React.FC = () => {
 
     const { data: inventoryRows } = await supabase
       .from('product_inventory')
-      .select('product_id, shelf_id, stock')
+      .select('product_id, shelf_id, stock, bundle_id')
       .in('product_id', productIds)
       .gt('stock', 0);
 
+    console.log('🔍 inventoryRows با bundle_id:', inventoryRows);
+    console.log('🔍 نمونه ردیف با bundle_id:', inventoryRows?.find(r => r.bundle_id));
+    console.log('🔍 تعداد ردیف‌ها:', inventoryRows?.length);
+
     const rows = (inventoryRows || []).filter((row: any) => row?.product_id && row?.shelf_id);
+    console.log('🔍 ردیف‌های فیلتر شده:', rows);
+
     const shelfIds = Array.from(new Set(rows.map((row: any) => String(row.shelf_id))));
     let shelfMap = new Map<string, { label: string; isProductionWarehouse: boolean }>();
     if (shelfIds.length > 0) {
@@ -1178,25 +1233,32 @@ const ModuleShow: React.FC = () => {
 
     const relOpts: Record<string, any[]> = {};
     for (const field of relFields) {
-      if (field.relationConfig) {
-        const targetField = field.relationConfig.targetField || 'name';
-        if (field.relationConfig.dependsOn && recordData) {
-          const dependsOnValue = recordData[field.relationConfig.dependsOn];
-          if (dependsOnValue) {
-            try {
-              const isShelvesTarget = dependsOnValue === 'shelves';
-              const extraSelect = isShelvesTarget ? ', shelf_number' : '';
-              const { data: relData } = await supabase
-                .from(dependsOnValue)
-                .select(`id, ${targetField}, system_code${extraSelect}`)
-                .limit(200);
-              if (relData) {
-                const options = relData.map((i: any) => {
-                  const baseLabel = i?.[targetField] || i?.shelf_number || i?.system_code || i?.id;
-                  return {
-                    label: i.system_code ? `${baseLabel} (${i.system_code})` : baseLabel,
-                    value: i.id,
-                    module: dependsOnValue,
+        if (field.relationConfig) {
+          const targetModule = field.relationConfig.targetModule;
+          const rawTargetField = field.relationConfig.targetField;
+          const targetField = (targetModule === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
+            ? 'bundle_number'
+            : (rawTargetField || 'name');
+          if (field.relationConfig.dependsOn && recordData) {
+            const dependsOnValue = recordData[field.relationConfig.dependsOn];
+            const dependsOnTargetField = (dependsOnValue === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
+              ? 'bundle_number'
+              : targetField;
+            if (dependsOnValue) {
+              try {
+                const isShelvesTarget = dependsOnValue === 'shelves';
+                const extraSelect = isShelvesTarget ? ', shelf_number' : '';
+                const { data: relData } = await supabase
+                  .from(dependsOnValue)
+                  .select(`id, ${dependsOnTargetField}, system_code${extraSelect}`)
+                  .limit(200);
+                if (relData) {
+                  const options = relData.map((i: any) => {
+                    const baseLabel = i?.[dependsOnTargetField] || i?.shelf_number || i?.system_code || i?.bundle_number || i?.id;
+                    return {
+                      label: i.system_code ? `${baseLabel} (${i.system_code})` : baseLabel,
+                      value: i.id,
+                      module: dependsOnValue,
                     name: baseLabel,
                     system_code: i.system_code
                   };
@@ -1234,6 +1296,9 @@ const ModuleShow: React.FC = () => {
               if (field.key.includes('_')) relOpts[field.key.split('_').pop()!] = options;
             }
           } catch (err) {
+            console.log('🔍 relationOptions بعد از fetchOptions:', relOpts);
+            console.log('🔍 آیا bundle_id در relationOptions وجود دارد؟', 'bundle_id' in relOpts);
+            console.log('🔍 آیا product_bundles در relationOptions وجود دارد؟', 'product_bundles' in relOpts);
             console.warn(`Could not fetch options for ${field.key}:`, err);
           }
         }
@@ -1892,12 +1957,15 @@ const ModuleShow: React.FC = () => {
           opt = dynamicOptions[cat]?.find((o: any) => o.value === value);
           if (opt) return opt.label;
       }
-      if (field.type === FieldType.RELATION) {
-          for (const key in relationOptions) {
-              const found = relationOptions[key]?.find((o: any) => o.value === value);
-              if (found) return found.label;
+      for (const key in relationOptions) {
+          const found = relationOptions[key]?.find((o: any) => o.value === value);
+          if (found) {
+              console.log('🔍 لیبل پیدا شد:', { key, value, label: found.label });
+              return found.label;
           }
       }
+    console.log('🔍 لیبل پیدا نشد برای value:', value);
+
       return value;
   };
 

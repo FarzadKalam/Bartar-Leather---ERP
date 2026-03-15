@@ -85,7 +85,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
           .maybeSingle(),
         supabase
           .from('stock_transfers')
-          .select('id, transfer_type, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at')
+          .select('id, transfer_type, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id,bundle_number)')
           .eq('product_id', recordId)
           .order('created_at', { ascending: true }),
       ]);
@@ -129,6 +129,8 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
           main_quantity: Math.abs(parseFloat(row?.delivered_qty) || 0),
           sub_unit: nextUnits.subUnit,
           sub_quantity: Math.abs(parseFloat(row?.required_qty) || 0),
+          bundle_id: (row?.product_bundles as any)?.id || row?.bundle_id || null,
+          product_bundles: row?.product_bundles || null,   
           from_shelf_id: fromShelf,
           to_shelf_id: toShelf,
           invoice_id: isPurchaseSource ? null : (row?.invoice_id || null),
@@ -204,44 +206,78 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   }, [quickCreateOpen, mainQuantity, mainUnit, subUnit, quickCreateForm]);
 
   const displayFields = useMemo(() => {
-    const baseFields = (block.tableColumns || []).map((col: any, index: number) => ({
-      key: col.key,
-      type: col.type,
-      labels: { fa: col.title, en: col.key },
-      options: col.options,
-      relationConfig: col.relationConfig,
-      dynamicOptionsCategory: col.dynamicOptionsCategory,
+  const baseFields = (block.tableColumns || []).map((col: any, index: number) => ({
+    key: col.key,
+    type: col.type,
+    labels: { fa: col.title, en: col.key },
+    options: col.options,
+    relationConfig: col.relationConfig,
+    dynamicOptionsCategory: col.dynamicOptionsCategory,
+    isTableColumn: true,
+    order: index + 1,
+  })) as ModuleField[];
+
+  // ✅ تغییر اصلی: اضافه کردن فیلد بسته محصول به جدول
+  const bundleField = {
+    key: 'bundle_id',
+    type: FieldType.RELATION,
+    labels: { fa: 'بسته محصول', en: 'Product Bundle' },
+    relationConfig: { targetModule: 'product_bundles', targetField: 'bundle_number' },
+    isTableColumn: true,
+    order: baseFields.length + 1,
+  };
+
+  // ✅ اضافه کردن فیلد فقط اگر وجود نداشته باشد
+  if (!baseFields.some(field => field.key === 'bundle_id')) {
+    baseFields.push(bundleField);
+  }
+
+  if (canEditModule) {
+    baseFields.push({
+      key: 'row_actions',
+      type: FieldType.TEXT,
+      labels: { fa: 'عملیات', en: 'Actions' },
       isTableColumn: true,
-      order: index + 1,
-    })) as ModuleField[];
-    if (canEditModule) {
-      baseFields.push({
-        key: 'row_actions',
-        type: FieldType.TEXT,
-        labels: { fa: 'عملیات', en: 'Actions' },
-        isTableColumn: true,
-        order: baseFields.length + 1,
-      } as ModuleField);
-    }
-    return baseFields;
-  }, [block.tableColumns, canEditModule]);
+      order: baseFields.length + 1,
+    } as ModuleField);
+  }
+
+  return baseFields;
+}, [block.tableColumns, canEditModule]);
 
   const tableModuleConfig = useMemo(() => ({
     id: 'product_stock_movements_view',
     fields: displayFields,
   }) as any, [displayFields]);
 
+// در useMemo مربوط به tableRelationOptions
+
   const tableRelationOptions = useMemo(() => {
     const next: Record<string, any[]> = { ...relationOptions };
+
+    // loop اصلی روی block.tableColumns
     (block.tableColumns || []).forEach((col: any) => {
       if (col.type !== FieldType.RELATION) return;
       next[col.key] = getRelationOptions(col.key, col.relationConfig?.targetModule);
     });
+
+    // ★ اضافه شده: loop روی displayFields برای پوشش فیلدهایی که
+    // دستی اضافه شدند (مثل bundle_id) ★
+    displayFields.forEach((col: any) => {
+      if (col.type !== FieldType.RELATION) return;
+      if (!next[col.key] || next[col.key].length === 0) {
+        next[col.key] = getRelationOptions(col.key, col.relationConfig?.targetModule);
+      }
+    });
+
     return next;
-  }, [block.tableColumns, getRelationOptions, relationOptions]);
+  }, [block.tableColumns, displayFields, getRelationOptions, relationOptions]);
+
 
   const baseAddFields = useMemo(() => {
     const includeKeys = new Set([
+      'product_id',
+      'bundle_id',
       'voucher_type',
       'source',
       'main_unit',
@@ -325,17 +361,18 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     fromShelfId: string | null;
     toShelfId: string | null;
     mainUnit?: string | null;
+    bundleId?: string | null;  // ← اضافه شد
   }, multiplier = 1) => {
-    const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
+    const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null; bundleId?: string | null }> = [];  // ← bundleId اضافه شد
     const qty = Math.abs(parseFloat(String(payload.qtyMain)) || 0) * multiplier;
     if (!qty) return deltas;
     if (payload.voucherType === 'incoming' && payload.toShelfId) {
-      deltas.push({ productId: recordId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null });
+      deltas.push({ productId: recordId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
     } else if (payload.voucherType === 'outgoing' && payload.fromShelfId) {
-      deltas.push({ productId: recordId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null });
+      deltas.push({ productId: recordId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
     } else if (payload.voucherType === 'transfer' && payload.fromShelfId && payload.toShelfId) {
-      deltas.push({ productId: recordId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null });
-      deltas.push({ productId: recordId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null });
+      deltas.push({ productId: recordId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
+      deltas.push({ productId: recordId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
     }
     return deltas;
   };
@@ -371,6 +408,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       fromShelfId,
       toShelfId,
       mainUnit: values?.main_unit ? String(values.main_unit) : (productUnits.mainUnit || null),
+      bundleId: values?.bundle_id ? String(values.bundle_id) : null,
     };
   };
 
@@ -415,6 +453,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         fromShelfId: editingRow?.from_shelf_id ? String(editingRow.from_shelf_id) : null,
         toShelfId: editingRow?.to_shelf_id ? String(editingRow.to_shelf_id) : null,
         mainUnit: editingRow?.main_unit ? String(editingRow.main_unit) : (productUnits.mainUnit || null),
+        bundleId: editingRow?.bundle_id ? String(editingRow.bundle_id) : null,  // ← اضافه شد
       }, -1) : [];
       if (rollbackDeltas.length || nextDeltas.length) {
         await applyInventoryDeltas(supabase as any, [...rollbackDeltas, ...nextDeltas]);
@@ -433,6 +472,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         to_shelf_id: normalized.toShelfId,
         sender_id: currentUserId,
         receiver_id: currentUserId,
+        bundle_id: normalized.bundleId ?? null,
       };
       if (editingRow?.id) {
         const { error: updateError } = await supabase
@@ -492,6 +532,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
             fromShelfId: row?.from_shelf_id ? String(row.from_shelf_id) : null,
             toShelfId: row?.to_shelf_id ? String(row.to_shelf_id) : null,
             mainUnit: row?.main_unit ? String(row.main_unit) : (productUnits.mainUnit || null),
+            bundleId: row?.bundle_id ? String(row.bundle_id) : null,
           }, -1);
           if (rollbackDeltas.length) {
             await applyInventoryDeltas(supabase as any, rollbackDeltas);

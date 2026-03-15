@@ -4,6 +4,7 @@ import { convertArea, HARD_CODED_UNIT_OPTIONS, type UnitValue } from './unitConv
 
 type OpeningInventoryRow = {
   shelf_id?: unknown;
+  bundle_id?: unknown;
   stock?: unknown;
   main_quantity?: unknown;
   quantity?: unknown;
@@ -45,6 +46,24 @@ const toNumber = (raw: unknown): number => {
 
 const normalizeUnit = (value: unknown) => String(value || '').trim();
 
+const normalizeRelationId = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || typeof value === 'number') {
+    const trimmed = String(value).trim();
+    return trimmed ? trimmed : null;
+  }
+  if (typeof value === 'object') {
+    const anyValue = value as { value?: unknown; id?: unknown };
+    const candidate = anyValue?.value ?? anyValue?.id;
+    if (candidate !== undefined && candidate !== null) {
+      const trimmed = String(candidate).trim();
+      return trimmed ? trimmed : null;
+    }
+  }
+  const fallback = String(value).trim();
+  return fallback ? fallback : null;
+};
+
 export const persistProductOpeningInventory = async ({
   supabase,
   productId,
@@ -60,11 +79,13 @@ export const persistProductOpeningInventory = async ({
   if (!sourceRows.length) return;
 
   const normalizedRows = sourceRows.map((row) => {
-    const shelfId = String(row?.shelf_id || '').trim();
+    const shelfId = normalizeRelationId(row?.shelf_id) || '';
+    const bundleId = normalizeRelationId(row?.bundle_id);
     const qtyMain = toNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
     const qtySub = toNumber(row?.sub_stock ?? 0);
     return {
       shelfId,
+      bundleId,
       qtyMain,
       qtySub,
       rowMainUnit: normalizeUnit(row?.main_unit),
@@ -87,8 +108,16 @@ export const persistProductOpeningInventory = async ({
 
   const mainUnit = normalizeUnit(productMainUnit);
   const subUnit = normalizeUnit(productSubUnit);
-  const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
+  const deltas: Array<{ productId: string; shelfId: string; bundleId?: string | null; delta: number; unit?: string | null }> = [];
   const transfers: Array<Record<string, unknown>> = [];
+  const bundleItems = rowsWithQty
+    .filter(row => row.bundleId) // فقط ردیف‌هایی که بسته دارند
+    .map(row => ({
+      bundle_id: row.bundleId,
+      product_id: normalizedProductId,
+      quantity: row.qtyMain,
+    }));
+
 
   rowsWithQty.forEach((row) => {
     const rowMainUnit = row.rowMainUnit || mainUnit;
@@ -108,6 +137,7 @@ export const persistProductOpeningInventory = async ({
     deltas.push({
       productId: normalizedProductId,
       shelfId: row.shelfId,
+      bundleId: row.bundleId ?? null, 
       delta: row.qtyMain,
       unit: rowMainUnit || null,
     });
@@ -115,6 +145,7 @@ export const persistProductOpeningInventory = async ({
     transfers.push({
       transfer_type: 'opening_balance',
       product_id: normalizedProductId,
+      bundle_id: row.bundleId ?? null,
       delivered_qty: row.qtyMain,
       required_qty: Math.abs(resolvedSubQty || 0),
       invoice_id: null,
@@ -131,9 +162,20 @@ export const persistProductOpeningInventory = async ({
     await syncMultipleProductsStock(supabase, [normalizedProductId]);
   }
 
+  if (bundleItems.length > 0) {
+    const { error: bundleError } = await supabase
+      .from('bundle_items')
+      .upsert(bundleItems, { onConflict: 'bundle_id,product_id' });
+    
+    if (bundleError) {
+      console.error('Error upserting bundle_items:', bundleError);
+      // می‌توانید اینجا خطا بیندازید یا فقط لاگ کنید
+    }
+  }
+
   if (transfers.length) {
     const { error } = await supabase.from('stock_transfers').insert(transfers);
     if (error) throw error;
   }
-};
 
+};

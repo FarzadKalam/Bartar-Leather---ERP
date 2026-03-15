@@ -433,7 +433,10 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
     const isHighlighted = highlightFileId && highlightFileId === item.id;
     const fileLabel = getDisplayFileName(item);
     return (
-      <div key={item.id} className={`relative group border rounded-lg p-1 ${isHighlighted ? 'border-leather-500 ring-2 ring-leather-200' : 'border-gray-100'}`}>
+      <div
+        key={item.id}
+        className={`relative group rounded-lg p-1 border bg-white/70 dark:bg-[#1f1f1f] ${isHighlighted ? 'border-leather-500 ring-2 ring-leather-200' : 'border-gray-200 dark:border-gray-700'}`}
+      >
         <div className="h-40 overflow-hidden rounded">
           {item.file_type === 'video' ? (
             <video src={item.file_url} controls className="w-full h-full object-cover rounded" preload="metadata" />
@@ -481,7 +484,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
         </div>
       )}
 
-      <div className="mt-2">
+      <div className="mt-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-[#1f1f1f] p-3">
         <div className="mb-2 text-sm font-bold text-gray-700">عکس‌ها ({imageItems.length})</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {imageItems.map((item, idx) => renderMediaCard(item, idx, 'image', imageItems.length))}
@@ -489,7 +492,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
         </div>
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-[#1f1f1f] p-3">
         <div className="mb-2 text-sm font-bold text-gray-700">فیلم‌ها ({videoItems.length})</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {videoItems.map((item, idx) => renderMediaCard(item, idx, 'video', videoItems.length))}
@@ -497,7 +500,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
         </div>
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-[#1f1f1f] p-3">
         <div className="mb-2 text-sm font-bold text-gray-700">فایل‌ها ({documentItems.length})</div>
         <List
           locale={{ emptyText: 'فایلی ثبت نشده است.' }}
@@ -507,7 +510,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
             const isHighlighted = highlightFileId && highlightFileId === item.id;
             return (
               <List.Item
-                className={`rounded-lg px-3 ${isHighlighted ? 'bg-leather-50 border border-leather-200' : ''}`}
+                className={`rounded-lg px-3 border ${isHighlighted ? 'bg-leather-50 border-leather-200' : 'border-gray-200 dark:border-gray-700 bg-white/70 dark:bg-[#1f1f1f]'}`}
                 actions={[
                   <Button key={`download-${item.id}`} size="small" icon={<DownloadOutlined />} onClick={() => downloadFile(item)}>دانلود</Button>,
                   <Button key={`delete-${item.id}`} size="small" danger icon={<DeleteOutlined />} disabled={!canDeleteFiles} onClick={() => handleDelete(item.id)}>حذف</Button>,

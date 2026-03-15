@@ -747,7 +747,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const totalHandoverQty = deliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0);
       const totalSourceQty = Math.max(
         0,
-        toNumber(group?.totalSourceQty ?? group?.total_source_qty ?? pieces.reduce((sum, piece) => sum + toNumber(piece?.sourceQty), 0))
+        toNumber(group?.totalSourceQty ?? group?.total_source_qty ?? pieces.reduce((sum: number, piece: any) => sum + toNumber(piece?.sourceQty), 0))
       );
       const totalOrderQty = Math.max(
         0,

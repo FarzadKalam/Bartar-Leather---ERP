@@ -1718,3 +1718,35 @@ WHERE pi.product_id IS NOT NULL
   );
 
 COMMIT;
+
+
+-- 1. اضافه کردن bundle_id به stock_transfers
+ALTER TABLE public.stock_transfers
+  ADD COLUMN IF NOT EXISTS bundle_id uuid REFERENCES public.product_bundles(id) ON DELETE SET NULL;
+
+-- 2. اضافه کردن bundle_id به product_inventory
+ALTER TABLE public.product_inventory
+  ADD COLUMN IF NOT EXISTS bundle_id uuid REFERENCES public.product_bundles(id) ON DELETE SET NULL;
+
+-- 3. حذف unique constraint قدیمی
+ALTER TABLE public.product_inventory
+  DROP CONSTRAINT IF EXISTS product_inventory_product_id_shelf_id_key;
+
+-- 4. unique constraint جدید با bundle_id
+--    NULL-safe: هر ترکیب (product, shelf, bundle) یکتاست
+--    وقتی bundle_id = NULL، فقط یک رکورد بدون bundle مجاز است
+ALTER TABLE public.product_inventory
+  ADD CONSTRAINT product_inventory_product_shelf_bundle_key
+  UNIQUE NULLS NOT DISTINCT (product_id, shelf_id, bundle_id);
+
+-- 5. ایندکس برای جستجوی سریع
+CREATE INDEX IF NOT EXISTS idx_product_inventory_bundle
+  ON public.product_inventory (bundle_id)
+  WHERE bundle_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_bundle
+  ON public.stock_transfers (bundle_id)
+  WHERE bundle_id IS NOT NULL;
+
+ALTER TABLE public.bundle_items ADD CONSTRAINT bundle_items_bundle_product_unique UNIQUE (bundle_id, product_id);
+

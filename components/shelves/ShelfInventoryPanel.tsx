@@ -29,7 +29,7 @@ const ShelfInventoryPanel: React.FC<ShelfInventoryPanelProps> = ({
     try {
       const { data, error } = await supabase
         .from('product_inventory')
-        .select('id, product_id, stock, created_at, products(name, system_code, main_unit, sub_unit)')
+        .select('id, product_id, bundle_id, stock, created_at, products(name, system_code, main_unit, sub_unit), product_bundles:bundle_id(id, bundle_number)')
         .eq('shelf_id', recordId)
         .order('created_at', { ascending: true });
 
@@ -48,6 +48,8 @@ const ShelfInventoryPanel: React.FC<ShelfInventoryPanelProps> = ({
           product_id: row?.product_id || null,
           product_name: row?.products?.name || '',
           product_code: row?.products?.system_code || '-',
+          bundle_id: (row?.product_bundles as any)?.id || row?.bundle_id || null,
+          product_bundles: row?.product_bundles || null,
           main_unit: mainUnit,
           main_stock: mainStock,
           sub_unit: subUnit,
@@ -103,12 +105,23 @@ const ShelfInventoryPanel: React.FC<ShelfInventoryPanelProps> = ({
       order: 2,
     },
     {
+      key: 'bundle_id',
+      type: FieldType.RELATION,
+      labels: { fa: 'بسته محصول', en: 'Product Bundle' },
+      relationConfig: {
+        targetModule: 'product_bundles',
+        targetField: 'bundle_number',
+      },
+      isTableColumn: true,
+      order: 3,
+    },
+    {
       key: 'main_unit',
       type: FieldType.SELECT,
       labels: { fa: 'واحد اصلی', en: 'Main Unit' },
       options: HARD_CODED_UNIT_OPTIONS,
       isTableColumn: true,
-      order: 3,
+      order: 3.5,
     },
     {
       key: 'main_stock',
@@ -139,10 +152,26 @@ const ShelfInventoryPanel: React.FC<ShelfInventoryPanelProps> = ({
     fields: tableFields,
   }) as any, [tableFields]);
 
+  // ★ اضافه شده: ساخت relation options برای bundle_id از داده‌های join شده ★
+  const bundleRelationOptions = useMemo(() => {
+    const byRecord = new Map<string, { label: string; value: string }>();
+    rows.forEach((row: any) => {
+      const bundleObj = row?.product_bundles;
+      if (!bundleObj) return;
+      const bundleId = String(bundleObj.id || row?.bundle_id || '');
+      if (!bundleId) return;
+      const bundleNumber = bundleObj.bundle_number || '';
+      const label = bundleNumber ? String(bundleNumber) : bundleId;
+      byRecord.set(bundleId, { label, value: bundleId });
+    });
+    return Array.from(byRecord.values());
+  }, [rows]);
+
   const tableRelationOptions = useMemo(() => ({
     ...relationOptions,
     product_id: productRelationOptions,
-  }), [productRelationOptions, relationOptions]);
+    bundle_id: bundleRelationOptions, 
+  }), [productRelationOptions, bundleRelationOptions, relationOptions]);
 
   const totals = useMemo(() => {
     const main = rows.reduce((sum: number, row: any) => sum + (parseFloat(row?.main_stock) || 0), 0);

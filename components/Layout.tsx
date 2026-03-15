@@ -137,6 +137,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
         icon: <GoldOutlined />,
         label: 'انبار',
         children: [
+          { key: '/product_bundles', label: 'بسته‌های محصول' },
           { key: '/warehouses', label: 'انبارها' },
           { key: '/shelves', label: 'قفسه‌ها' },
           { key: '/stock_transfers', label: 'تردد کالاها' }

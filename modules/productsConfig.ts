@@ -36,7 +36,9 @@ const fieldsArray: any[] = [
     key: 'main_unit', labels: { fa: 'واحد اصلی', en: 'Main Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/5,
     options: HARD_CODED_UNIT_OPTIONS,
     nature: FieldNature.PREDEFINED,
-    isKey: false
+    isKey: false,
+    isTableColumn: true,
+    validation: { required: true },
   },
   {
     key: 'sub_unit', labels: { fa: 'واحد فرعی', en: 'Sub Unit' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/4,
@@ -227,6 +229,20 @@ export const createBomTableColumns = (
 export const createShelfInventoryTableColumns = () => {
   return [
     {
+  key: 'bundle_id',
+  title: 'بسته محصول',
+  type: FieldType.RELATION,
+  relationConfig: { 
+    targetModule: 'product_bundles', 
+    targetField: 'bundle_number' 
+  },
+  // اضافه کردن render برای اطمینان از نمایش
+  render: (value: any, record: any) => {
+    // اگر داده‌ها به صورت Join شده برمی‌گردند (مثل product_bundles.bundle_number)
+    return record.product_bundles?.bundle_number || value || '-';
+  }
+},
+    {
       key: 'shelf_id',
       title: 'نام قفسه',
       type: FieldType.RELATION,
@@ -298,7 +314,16 @@ export const createProductStockMovementsTableColumns = () => {
       options: HARD_CODED_UNIT_OPTIONS,
       readonly: true
     },
-    { key: 'sub_quantity', title: 'مقدار واحد فرعی', type: FieldType.NUMBER, showTotal: true },
+    { key: 'sub_quantity',
+      title: 'مقدار واحد فرعی',
+      type: FieldType.NUMBER,
+      showTotal: true },
+    {
+      key: 'bundle_id',
+      title: 'بسته محصول',
+      type: FieldType.RELATION,
+      relationConfig: { targetModule: 'product_bundles', targetField: 'bundle_number' }
+    },
     {
       key: 'from_shelf_id',
       title: 'قفسه برداشت',
@@ -344,6 +369,19 @@ export const createShelfItemsTableColumns = () => {
       title: 'محصول',
       type: FieldType.RELATION,
       relationConfig: { targetModule: 'products', targetField: 'name' }
+    },
+    {
+      key: 'bundle_id',
+      labels: { fa: 'بسته محصول', en: 'Product Bundle' },
+      type: FieldType.RELATION,
+      location: FieldLocation.HEADER,
+      order: 2,
+      nature: FieldNature.PREDEFINED,
+      isTableColumn: true,
+      relationConfig: { 
+        targetModule: 'product_bundles', 
+        targetField: 'bundle_number' // ✅ تغییر از 'name' به 'bundle_number'
+      }
     },
     {
       key: 'main_unit',

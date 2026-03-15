@@ -37,7 +37,22 @@ export const fetchShelfOptions = async (
   const productMainUnit = String(productRow?.main_unit || '').trim();
   let query = supabase
     .from('product_inventory')
-    .select('product_id, shelf_id, stock, shelves(system_code, shelf_number, name, warehouses(name))')
+    .select(`
+      product_id,
+      shelf_id,
+      bundle_id,
+      stock,
+      shelves(
+        system_code,
+        shelf_number,
+        name,
+        warehouses(name)
+      ),
+      product_bundles:bundle_id(
+        id,
+        bundle_number
+      )
+    `)
     .eq('product_id', productId)
     .order('stock', { ascending: false });
   if (!options?.includeNonPositive) {
@@ -53,9 +68,10 @@ export const fetchShelfOptions = async (
     const shelfLabel = [systemCode, shelfNumber, warehouseName].filter(Boolean).join(' - ');
     const stockLabel = typeof row.stock === 'number' ? row.stock : parseFloat(row.stock) || 0;
     const unitSuffix = productMainUnit ? ` ${productMainUnit}` : '';
+    const bundleNumber = row?.product_bundles?.bundle_number || '';
     return {
       value: row.shelf_id,
-      label: `${shelfLabel} (موجودی: ${stockLabel}${unitSuffix})`,
+      label: `${shelfLabel}${bundleNumber ? ` - بسته ${bundleNumber}` : ''} (موجودی: ${stockLabel}${unitSuffix})`,
       stock: stockLabel,
       unit: productMainUnit || null,
     };

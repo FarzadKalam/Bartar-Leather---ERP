@@ -97,6 +97,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const isPurchaseInvoicePayments = moduleId === 'purchase_invoices' && block?.id === 'payments';
   const isAnyInvoicePayments = isInvoicePayments || isPurchaseInvoicePayments;
   const isShelfInventoryBlock = block?.id === 'product_inventory' || block?.id === 'shelf_inventory';
+  // ===== Bundle Contents -> load from bundle_items =====
+  const isBundleContents = moduleId === 'product_bundles' && block?.id === 'bundleContents';
 
   const [isEditing, setIsEditing] = useState(mode === 'local' && !isReadOnly);
   const [data, setData] = useState<any[]>(initialData || []);
@@ -116,6 +118,76 @@ const EditableTable: React.FC<EditableTableProps> = ({
     return empty;
   });
   const [userToggledCollapse, setUserToggledCollapse] = useState(false);
+
+  useEffect(() => {
+    if (!isBundleContents || !recordId) return;
+    let cancelled = false;
+    const fetchBundleItems = async () => {
+      try {
+        const { data: rows, error } = await supabase
+          .from('product_inventory')
+          .select('id, product_id, stock, products(name, system_code, main_unit, sub_unit)')
+          .eq('bundle_id', recordId)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+        if (cancelled) return;
+
+        const aggregate = new Map<string, {
+          product_id: string;
+          product_name: string;
+          system_code: string;
+          main_unit: string;
+          sub_unit: string;
+          quantity: number;
+        }>();
+
+        (rows || []).forEach((r: any) => {
+          const productId = String(r.product_id || '');
+          if (!productId) return;
+          const mainUnit = r.products?.main_unit || '';
+          const subUnit = r.products?.sub_unit || '';
+          const qty = parseFloat(r.stock) || 0;
+          const existing = aggregate.get(productId);
+          if (existing) {
+            existing.quantity += qty;
+            aggregate.set(productId, existing);
+            return;
+          }
+          aggregate.set(productId, {
+            product_id: productId,
+            product_name: r.products?.name || '',
+            system_code: r.products?.system_code || '',
+            main_unit: mainUnit,
+            sub_unit: subUnit,
+            quantity: qty,
+          });
+        });
+
+        const mapped = Array.from(aggregate.values()).map((row, i) => {
+          const subQty = row.main_unit && row.sub_unit
+            ? convertArea(row.quantity, row.main_unit as any, row.sub_unit as any)
+            : 0;
+          return {
+            ...row,
+            key: `bundle_item_${i}`,
+            sub_quantity: Number.isFinite(subQty) ? subQty : 0,
+          };
+        });
+
+        setData(mapped);
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to load bundle items:', err);
+        }
+      }
+    };
+
+    fetchBundleItems();
+    return () => {
+      cancelled = true;
+    };
+  }, [isBundleContents, recordId]);
 
   useEffect(() => {
     if (userToggledCollapse) return;
@@ -296,7 +368,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
         let query = supabase
           .from('product_inventory')
-          .select('id, product_id, shelf_id, warehouse_id, stock, created_at, products(main_unit,sub_unit), shelves(warehouse_id,system_code,shelf_number,name,warehouses(id,name))');
+          .select(
+            'id, product_id, shelf_id, warehouse_id, bundle_id, stock, created_at, products(main_unit,sub_unit), shelves(warehouse_id,system_code,shelf_number,name,warehouses(id,name)), product_bundles:bundle_id(id,bundle_number)'
+          );
         if (isProductInventory) query = query.eq('product_id', recordId);
         if (isShelfInventory) query = query.eq('shelf_id', recordId);
         const { data: rows, error } = await query.order('created_at', { ascending: true });
@@ -336,6 +410,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
               row?.shelves?.warehouse_id ??
               row?.shelves?.warehouses?.id ??
               null,
+            bundle_id: row?.bundle_id ?? (row?.product_bundles as any)?.id ?? null,
+            product_bundles: row?.product_bundles ?? null,
             main_unit: mainUnit,
             sub_unit: subUnit,
             sub_stock: Number.isFinite(subStock) ? subStock : 0,
@@ -438,15 +514,25 @@ const EditableTable: React.FC<EditableTableProps> = ({
       }
     }
 
-    if (isAnyInvoiceItems && ['quantity', 'main_unit', 'sub_unit'].includes(key)) {
-      const qtyMain = toSafeNumber(newData[index]?.quantity);
-      const mainUnit = String(newData[index]?.main_unit || '');
-      const subUnit = String(newData[index]?.sub_unit || '');
-      const converted = mainUnit && subUnit
-        ? convertArea(qtyMain, mainUnit as any, subUnit as any)
-        : 0;
-      newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
-    }
+      if (isAnyInvoiceItems && ['quantity', 'main_unit', 'sub_unit'].includes(key)) {
+        const qtyMain = toSafeNumber(newData[index]?.quantity);
+        const mainUnit = String(newData[index]?.main_unit || '');
+        const subUnit = String(newData[index]?.sub_unit || '');
+        const converted = mainUnit && subUnit
+          ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+          : 0;
+        newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
+      }
+
+      if (isBundleContents && ['quantity', 'main_unit', 'sub_unit'].includes(key)) {
+        const qtyMain = toSafeNumber(newData[index]?.quantity);
+        const mainUnit = String(newData[index]?.main_unit || '');
+        const subUnit = String(newData[index]?.sub_unit || '');
+        const converted = mainUnit && subUnit
+          ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+          : 0;
+        newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
+      }
 
     if (key === 'selected_product_id' && !value) {
       newData[index]['selected_shelf_id'] = null;
@@ -540,17 +626,31 @@ const EditableTable: React.FC<EditableTableProps> = ({
             }
           });
 
-          if (isAnyInvoiceItems && key === 'product_id') {
-            currentRow.main_unit = record?.main_unit || currentRow.main_unit || null;
-            currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || null;
-            const qtyMain = toSafeNumber(currentRow?.quantity);
-            const mainUnit = String(currentRow?.main_unit || '');
-            const subUnit = String(currentRow?.sub_unit || '');
-            const converted = mainUnit && subUnit
-              ? convertArea(qtyMain, mainUnit as any, subUnit as any)
-              : 0;
-            currentRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
-          }
+            if (isAnyInvoiceItems && key === 'product_id') {
+              currentRow.main_unit = record?.main_unit || currentRow.main_unit || null;
+              currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || null;
+              const qtyMain = toSafeNumber(currentRow?.quantity);
+              const mainUnit = String(currentRow?.main_unit || '');
+              const subUnit = String(currentRow?.sub_unit || '');
+              const converted = mainUnit && subUnit
+                ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+                : 0;
+              currentRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
+            }
+
+            if (isBundleContents && key === 'product_id') {
+              currentRow.product_name = record?.name || currentRow.product_name || '';
+              currentRow.system_code = record?.system_code || currentRow.system_code || '';
+              currentRow.main_unit = record?.main_unit || currentRow.main_unit || '';
+              currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || '';
+              const qtyMain = toSafeNumber(currentRow?.quantity);
+              const mainUnit = String(currentRow?.main_unit || '');
+              const subUnit = String(currentRow?.sub_unit || '');
+              const converted = mainUnit && subUnit
+                ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+                : 0;
+              currentRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
+            }
 
           if (isInvoiceItems && key === 'product_id') {
             currentRow.source_shelf_id = null;
@@ -904,6 +1004,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
               product_id: recordId,
               shelf_id: row.shelf_id,
               warehouse_id: row.warehouse_id ?? null,
+              bundle_id: row.bundle_id ?? null,
               stock: parseFloat(row.stock) || 0,
             }));
         }
@@ -915,6 +1016,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
               product_id: row.product_id,
               shelf_id: recordId,
               warehouse_id: row.warehouse_id ?? null,
+              bundle_id: row.bundle_id ?? null,
               stock: parseFloat(row.stock) || 0,
             }));
         }
@@ -922,7 +1024,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
         if (payload.length > 1) {
           const dedupedMap = new Map<string, any>();
           payload.forEach((row: any) => {
-            const key = `${row.product_id}_${row.shelf_id}`;
+            const bundleKey = row.bundle_id ?? '__null__';
+            const key = `${row.product_id}_${row.shelf_id}_${bundleKey}`;
             const existing = dedupedMap.get(key);
             if (!existing) {
               dedupedMap.set(key, row);
@@ -932,6 +1035,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
               dedupedMap.set(key, {
                 ...existing,
                 warehouse_id: row.warehouse_id ?? existing.warehouse_id ?? null,
+                bundle_id: row.bundle_id ?? existing.bundle_id ?? null,
                 stock: existingStock + nextStock,
               });
             }
@@ -939,9 +1043,11 @@ const EditableTable: React.FC<EditableTableProps> = ({
           payload = Array.from(dedupedMap.values());
         }
 
-        const newKeys = new Set(payload.map((row: any) => `${row.product_id}_${row.shelf_id}`));
+        const newKeys = new Set(
+          payload.map((row: any) => `${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`)
+        );
         const removedIds = data
-          .filter((row: any) => !newKeys.has(`${row.product_id}_${row.shelf_id}`) && row.id)
+          .filter((row: any) => !newKeys.has(`${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`) && row.id)
           .map((row: any) => row.id);
 
         if (removedIds.length > 0) {
@@ -956,7 +1062,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
         if (payload.length > 0) {
           const { data: saved, error: upsertError } = await supabase
             .from('product_inventory')
-            .upsert(payload, { onConflict: 'product_id,shelf_id' })
+            .upsert(payload, { onConflict: 'product_id,shelf_id,bundle_id' })
             .select('*');
           if (upsertError) throw upsertError;
           savedRows = saved || [];
@@ -989,12 +1095,105 @@ const EditableTable: React.FC<EditableTableProps> = ({
         return;
       }
 
+      // ===== Bundle Contents → save to bundle_items =====
+      if (isBundleContents && recordId) {
+        try {
+          // 1. Get existing items to find deleted ones
+          const { data: existingItems } = await supabase
+            .from('bundle_items')
+            .select('id')
+            .eq('bundle_id', recordId);
+
+          const existingIds = new Set((existingItems || []).map((item: any) => item.id));
+          const currentIds = new Set(
+            tempData
+              .filter((row: any) => row.id && typeof row.id === 'number')
+              .map((row: any) => row.id)
+          );
+
+          // 2. Delete removed items
+          const idsToDelete = [...existingIds].filter((id) => !currentIds.has(id));
+          if (idsToDelete.length > 0) {
+            const { error: deleteError } = await supabase
+              .from('bundle_items')
+              .delete()
+              .in('id', idsToDelete);
+
+            if (deleteError) {
+              console.error('Error deleting bundle items:', deleteError);
+              throw deleteError;
+            }
+          }
+
+          // 3. Prepare rows for upsert
+          const rowsToUpsert = tempData
+            .filter((row: any) => row.product_id)
+            .map((row: any) => ({
+              ...(row.id && typeof row.id === 'number' ? { id: row.id } : {}),
+              bundle_id: recordId,
+              product_id: row.product_id,
+              quantity: parseFloat(row.quantity) || 0,
+            }));
+
+          // 4. Upsert valid rows
+          let savedRows: any[] = [];
+          if (rowsToUpsert.length > 0) {
+            const { data: upsertedData, error: upsertError } = await supabase
+              .from('bundle_items')
+              .upsert(rowsToUpsert, { onConflict: 'id' })
+              .select('id, bundle_id, product_id, quantity, products(name, system_code, main_unit, sub_unit)');
+
+            if (upsertError) {
+              console.error('Error upserting bundle items:', upsertError);
+              throw upsertError;
+            }
+            savedRows = upsertedData || [];
+          }
+
+          // 5. Update local state
+          const mappedRows = savedRows.map((row: any, index: number) => {
+            const mainUnit = row.products?.main_unit || '';
+            const subUnit = row.products?.sub_unit || '';
+            const qtyMain = parseFloat(row.quantity) || 0;
+            const subQty = mainUnit && subUnit
+              ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+              : 0;
+            return {
+              ...row,
+              key: row.id || `row-${index}`,
+              product_name: row.products?.name || '',
+              system_code: row.products?.system_code || '',
+              main_unit: mainUnit,
+              sub_unit: subUnit,
+              sub_quantity: Number.isFinite(subQty) ? subQty : 0,
+            };
+          });
+
+          // 6. Log changes
+          const oldValue = data.map(({ key, ...rest }: any) => rest);
+          const newValue = mappedRows.map(({ key, ...rest }: any) => rest);
+          await insertChangelog(supabase, moduleId, recordId, block, oldValue, newValue);
+
+          setData(mappedRows);
+          if (onSaveSuccess) onSaveSuccess(mappedRows);
+          message.success('محتوای بسته ذخیره شد');
+          setIsEditing(false);
+          return;
+        } catch (err: any) {
+          console.error('Failed to save bundle items:', err);
+          message.error(err.message || 'خطا در ذخیره محتوای بسته');
+          return;
+        }
+      }
+
+
       const dataToSave = tempData.map(({ key, ...rest }) => ({
         ...rest,
         total_price: calculateRow(rest, block.rowCalculationType),
       }));
 
       const updatePayload: any = { [block.id]: dataToSave };
+      
       const { error } = await supabase.from(moduleId).update(updatePayload).eq('id', recordId);
       if (error) throw error;
 
@@ -1085,6 +1284,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     }
   };
 
+  
   const visibleColumns = (block.tableColumns || []).filter((col: any) =>
     canViewField ? canViewField(col.key) !== false : true
   );
@@ -1394,14 +1594,16 @@ const EditableTable: React.FC<EditableTableProps> = ({
         const fieldNode = (
           <div className="flex items-center gap-1 w-full min-w-0 max-w-full overflow-hidden">
             <div className="flex-1 min-w-0 overflow-hidden">
-              <SmartFieldRenderer
-                field={fieldConfig}
-                value={resolvedText}
-                onChange={handleChange}
-                forceEditMode={isEditing}
-                options={options}
-                compactMode={true}
-              />
+                <SmartFieldRenderer
+                  field={fieldConfig}
+                  value={resolvedText}
+                  onChange={handleChange}
+                  forceEditMode={isEditing}
+                  options={options}
+                  compactMode={true}
+                  moduleId={moduleId}
+                  recordId={recordId}
+                />
             </div>
             {col.type === FieldType.PERCENTAGE_OR_AMOUNT && typeKey && (
               <Button
