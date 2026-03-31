@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Image, Select, Space, Tag, Upload } from 'antd';
+import type { UploadProps } from 'antd';
 import {
   AppstoreOutlined,
   ClockCircleOutlined,
@@ -30,7 +31,15 @@ interface HeroSectionProps {
   getOptionLabel: (field: any, value: any) => string;
   getUserName: (uid: string) => string;
   handleAssigneeChange: (value: string) => void;
-  getAssigneeOptions: () => any[];
+  getAssigneeOptions: () => Array<{
+    label: React.ReactNode;
+    title?: string;
+    options: Array<{
+      label: React.ReactNode;
+      value: string;
+      emoji?: React.ReactNode;
+    }>;
+  }>;
   assigneeIcon: React.ReactNode;
   onImageUpdate: (file: File) => Promise<boolean> | boolean;
   onMainImageChange?: (url: string | null) => void;
@@ -75,6 +84,12 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   const shouldOpenGalleryFromQuery = queryParams.get('gallery') === '1';
   const highlightFileId = queryParams.get('fileId');
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const assigneeOptions = useMemo(() => getAssigneeOptions(), [getAssigneeOptions]);
+
+  const handleBeforeImageUpload: UploadProps['beforeUpload'] = async (file) => {
+    await onImageUpdate(file as File);
+    return false;
+  };
 
   useEffect(() => {
     if (canOpenFilesGallery && shouldOpenGalleryFromQuery) {
@@ -137,7 +152,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
             )}
 
             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center backdrop-blur-sm gap-2">
-              <Upload showUploadList={false} beforeUpload={onImageUpdate}>
+              <Upload showUploadList={false} beforeUpload={handleBeforeImageUpload}>
                 <Button type="primary" icon={<UploadOutlined />} className="bg-leather-500 border-none" disabled={!canEditModule}>
                   تغییر تصویر
                 </Button>
@@ -173,13 +188,22 @@ const HeroSection: React.FC<HeroSectionProps> = ({
                     placeholder="انتخاب کنید"
                     className="min-w-[140px] font-bold text-gray-700 dark:text-gray-300"
                     styles={{ popup: { root: { minWidth: 200 } } }}
-                    options={getAssigneeOptions()}
-                    optionRender={(option) => (
-                      <Space>
-                        <span role="img" aria-label={option.data.label}>{(option.data as any).emoji}</span>
-                        {option.data.label}
-                      </Space>
-                    )}
+                    options={assigneeOptions}
+                    optionRender={(option) => {
+                      const optionData = option.data as {
+                        label?: React.ReactNode;
+                        value?: string;
+                        emoji?: React.ReactNode;
+                      };
+                      const ariaLabel = typeof optionData.label === 'string' ? optionData.label : (optionData.value ?? '');
+
+                      return (
+                        <Space>
+                          <span role="img" aria-label={ariaLabel}>{optionData.emoji}</span>
+                          {optionData.label}
+                        </Space>
+                      );
+                    }}
                     disabled={!canEditModule}
                   />
                   <div className="w-6 h-6 flex items-center justify-center">{assigneeIcon}</div>

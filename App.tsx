@@ -173,7 +173,6 @@ function App() {
             options={{
               syncWithLocation: true, 
               warnWhenUnsavedChanges: true, 
-              projectId: "bartar-leather-erp",
             }}
           >
             <Routes>
@@ -223,6 +222,5 @@ function App() {
 }
 
 export default App;
-
 
 

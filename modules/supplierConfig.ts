@@ -8,7 +8,7 @@ export const supplierModule: ModuleDefinition = {
   defaultViewMode: ViewMode.LIST,
   fields: [
     { key: 'image_url', labels: { fa: 'لوگو/تصویر', en: 'Logo' }, type: FieldType.IMAGE, location: FieldLocation.HEADER, order: 1 },
-    { key: 'business_name', labels: { fa: 'نام تجاری/فروشگاه', en: 'Business Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, validation: { required: true }, isKey: true, isTableColumn: true },
+    { key: 'business_name', labels: { fa: 'نام تجاری/فروشگاه', en: 'Business Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 2, validation: { required: true }, uniqueness: { enabled: true, normalization: 'trim_lower_spaces', message: 'تأمین‌کننده‌ای با این نام قبلاً ثبت شده است.' }, isKey: true, isTableColumn: true },
     { key: 'last_name', labels: { fa: 'نام خانوادگی رابط', en: 'Contact Last Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 3, isTableColumn: true },
     { key: 'supply_type', labels: { fa: 'زمینه فعالیت', en: 'Type' }, type: FieldType.SELECT, location: FieldLocation.HEADER, order: 4, dynamicOptionsCategory: 'supply_type', isTableColumn: true },
     {

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Tabs } from 'antd';
 import EditableTable from '../EditableTable';
 import { FieldType } from '../../types';
@@ -59,6 +59,33 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
   const visibleFieldGroups = (fieldGroups || []).filter((block: any) =>
     canViewField ? canViewField(String(block.id)) !== false : true
   );
+  const quickAddTargetBlockId = useMemo(() => {
+    if (moduleId === 'products') return 'product_inventory';
+    if (moduleId === 'tasks') return 'task_shelf_inventory';
+    return null;
+  }, [moduleId]);
+  const [activeTabKey, setActiveTabKey] = useState<string | null>(visibleFieldGroups[0]?.id || null);
+
+  useEffect(() => {
+    const firstVisibleKey = visibleFieldGroups[0]?.id || null;
+    if (!firstVisibleKey) {
+      setActiveTabKey(null);
+      return;
+    }
+    const stillVisible = visibleFieldGroups.some((block: any) => String(block.id) === String(activeTabKey));
+    if (!stillVisible) {
+      setActiveTabKey(firstVisibleKey);
+    }
+  }, [activeTabKey, visibleFieldGroups]);
+
+  useEffect(() => {
+    if (!stockMovementQuickAddSignal || !quickAddTargetBlockId) return;
+    const targetVisible = visibleFieldGroups.some((block: any) => String(block.id) === quickAddTargetBlockId);
+    if (targetVisible) {
+      setActiveTabKey(quickAddTargetBlockId);
+    }
+  }, [quickAddTargetBlockId, stockMovementQuickAddSignal, visibleFieldGroups]);
+
   if (visibleFieldGroups.length === 0) return null;
 
   const renderBlockContent = (block: any) => (
@@ -179,6 +206,8 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
   return (
     <div className="field-groups-tabs bg-white dark:bg-[#1a1a1a] p-1 md:p-1 sm:p-0 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 mb-6">
       <Tabs
+        activeKey={activeTabKey || visibleFieldGroups[0]?.id}
+        onChange={setActiveTabKey}
         tabBarStyle={{ padding: '0 24px', marginBottom: 0 }}
         items={visibleFieldGroups.map(block => ({
           key: block.id,

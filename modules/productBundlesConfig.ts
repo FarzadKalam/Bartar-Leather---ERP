@@ -55,19 +55,19 @@ export const productBundlesConfig: ModuleDefinition = {
 
 
     // --- اطلاعات پایه ---
-    {
-      key: 'shelf_id',
-      labels: { fa: 'قفسه انبار', en: 'Storage Shelf' },
-      type: FieldType.RELATION,
-      location: FieldLocation.HEADER,
+    //{
+      //key: 'shelf_id',
+      ///labels: { fa: 'قفسه انبار', en: 'Storage Shelf' },
+      //type: FieldType.RELATION,
+      //location: FieldLocation.HEADER,
       //blockId: 'baseInfo',
-      order: 2,
-      relationConfig: {
-        targetModule: 'shelves', // TODO: در صورت نیاز تصحیح شود
-        targetField: 'name'
-      },
-      nature: FieldNature.PREDEFINED
-    },
+      //order: 2,
+      //relationConfig: {
+        //targetModule: 'shelves', // TODO: در صورت نیاز تصحیح شود
+        //targetField: 'name'
+      //},
+      //nature: FieldNature.PREDEFINED
+    //},
 
     
   ],

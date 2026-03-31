@@ -10,6 +10,18 @@ type ProductFilter = {
   dynamicOptions?: any[];
 };
 
+type ProductQueryMeta = {
+  matchMode: 'all' | 'exact' | 'partial';
+  matchedFilterCount: number;
+  totalFilterCount: number;
+};
+
+type ProductQueryResult<T = any> = {
+  data: T[];
+  error: any;
+  meta: ProductQueryMeta;
+};
+
 export const buildProductFilters = (
   tableColumns: any[],
   rowData: any,
@@ -130,17 +142,23 @@ const matchesFilter = (recordRawValue: any, filter: ProductFilter) => {
   return recordValue === filterValue;
 };
 
+const countMatchedFilters = (row: any, filters: ProductFilter[]) =>
+  filters.reduce((count, filter) => (
+    matchesFilter(row?.[filter.filterKey], filter) ? count + 1 : count
+  ), 0);
+
 export const runProductsQuery = async (
   supabase: SupabaseClient,
-  activeFilters: ProductFilter[]
-) => {
+  activeFilters: ProductFilter[],
+  selectClause = '*'
+): Promise<ProductQueryResult> => {
   const safeServerFilterKeys = new Set(['product_type', 'category']);
   const serverFilters = activeFilters.filter((f) => safeServerFilterKeys.has(f.filterKey));
   const clientFilters = activeFilters.filter((f) => !safeServerFilterKeys.has(f.filterKey));
 
   let query: any = supabase
     .from('products')
-    .select('*');
+    .select(selectClause);
 
   serverFilters.forEach((f) => {
     let values = Array.isArray(f.value) ? f.value : [f.value];
@@ -167,15 +185,68 @@ export const runProductsQuery = async (
   });
 
   const { data, error } = await query.limit(2000);
-  if (error) return { data: null, error };
-
-  if (clientFilters.length === 0) {
-    return { data: data || [], error: null };
+  if (error) {
+    return {
+      data: [],
+      error,
+      meta: {
+        matchMode: 'all',
+        matchedFilterCount: 0,
+        totalFilterCount: clientFilters.length,
+      },
+    };
   }
 
-  const filtered = (data || []).filter((row: any) =>
-    clientFilters.every((filter) => matchesFilter(row?.[filter.filterKey], filter))
-  );
+  if (clientFilters.length === 0) {
+    return {
+      data: data || [],
+      error: null,
+      meta: {
+        matchMode: 'all',
+        matchedFilterCount: 0,
+        totalFilterCount: 0,
+      },
+    };
+  }
 
-  return { data: filtered, error: null };
+  const ranked = (data || [])
+    .map((row: any) => ({
+      row,
+      matchedFilterCount: countMatchedFilters(row, clientFilters),
+    }))
+    .sort((a: any, b: any) => {
+      if (b.matchedFilterCount !== a.matchedFilterCount) {
+        return b.matchedFilterCount - a.matchedFilterCount;
+      }
+      const aStock = Number(a.row?.stock ?? 0);
+      const bStock = Number(b.row?.stock ?? 0);
+      if (bStock !== aStock) return bStock - aStock;
+      return String(a.row?.name || '').localeCompare(String(b.row?.name || ''), 'fa');
+    });
+
+  const exact = ranked.filter((item: any) => item.matchedFilterCount === clientFilters.length);
+  if (exact.length > 0) {
+    return {
+      data: exact.map((item: any) => item.row),
+      error: null,
+      meta: {
+        matchMode: 'exact',
+        matchedFilterCount: clientFilters.length,
+        totalFilterCount: clientFilters.length,
+      },
+    };
+  }
+
+  const partial = ranked.filter((item: any) => item.matchedFilterCount > 0);
+  const bestMatchedCount = partial[0]?.matchedFilterCount ?? 0;
+
+  return {
+    data: (partial.length > 0 ? partial : ranked).map((item: any) => item.row),
+    error: null,
+    meta: {
+      matchMode: 'partial',
+      matchedFilterCount: bestMatchedCount,
+      totalFilterCount: clientFilters.length,
+    },
+  };
 };

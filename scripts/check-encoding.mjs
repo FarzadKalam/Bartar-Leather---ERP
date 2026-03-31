@@ -65,7 +65,16 @@ for (const relativeFile of trackedFiles) {
   if (!isTextFile(relativeFile)) continue;
 
   const filePath = path.join(projectRoot, relativeFile);
-  const fileBytes = fs.readFileSync(filePath);
+  let fileBytes;
+  try {
+    fileBytes = fs.readFileSync(filePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      // File was deleted but still tracked in git index; skip it.
+      continue;
+    }
+    throw error;
+  }
 
   let content = '';
   try {

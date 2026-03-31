@@ -134,6 +134,13 @@ export interface FieldValidation {
   customMessage?: string;
 }
 
+export interface FieldUniqueness {
+  enabled?: boolean;
+  scopeKeys?: string[];
+  normalization?: 'trim' | 'trim_lower' | 'trim_lower_spaces';
+  message?: string;
+}
+
 export interface FieldAccess {
   viewRoles: UserRole[]; 
   editRoles: UserRole[]; 
@@ -173,6 +180,7 @@ export interface ModuleField {
   isCalculated?: boolean;
   relationConfig?: { targetModule: string; targetField?: string; filter?: Record<string, any>; dependsOn?: string; };  
   defaultValue?: any;
+  uniqueness?: FieldUniqueness;
 }
 
 export interface BlockDefinition {

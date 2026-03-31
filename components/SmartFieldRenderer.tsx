@@ -17,6 +17,8 @@ import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
+import { checkFieldDuplicate, findDuplicateUniqueFields, getUniqueFieldMessage, isUniqueField } from '../utils/fieldUniqueness';
+import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
 
 const normalizeDigitsToEnglish = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
@@ -79,10 +81,12 @@ interface SmartFieldRendererProps {
   canViewFilesManager?: boolean;
   canEditFilesManager?: boolean;
   canDeleteFilesManager?: boolean;
+  popupContainer?: HTMLElement | null;
+  popupZIndex?: number;
 }
 
 const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({ 
-  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false, canViewFilesManager = true, canEditFilesManager = true, canDeleteFilesManager = true
+  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false, canViewFilesManager = true, canEditFilesManager = true, canDeleteFilesManager = true, popupContainer, popupZIndex
 }) => {
   const { message: msg } = App.useApp();
   const [uploading, setUploading] = useState(false);
@@ -104,6 +108,16 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const [globalImageGalleryLoading, setGlobalImageGalleryLoading] = useState(false);
   const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
   const canShowFilesGallery = supportsFilesGallery && canViewFilesManager && !!recordId;
+  const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  const resolvedPopupZIndex = popupZIndex ?? 13000;
+  const resolvePopupContainer = (trigger?: HTMLElement | null) => {
+    if (popupContainer) return popupContainer;
+    const overlayParent = trigger?.closest(
+      '.ant-modal-root, .ant-modal-wrap, .ant-modal-content, .ant-drawer, .ant-drawer-root, .ant-drawer-content, .ant-drawer-content-wrapper',
+    );
+    if (overlayParent instanceof HTMLElement) return overlayParent;
+    return document.body;
+  };
 
   const fieldLabel = field?.labels?.fa || label || 'بدون نام';
   const fieldType = field?.type || type || FieldType.TEXT;
@@ -182,6 +196,21 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   if (!compactMode && forceEditMode && field?.nature === FieldNature.SYSTEM) {
       return <Input type="hidden" value={value} />;
   }
+
+  const uniqueValidator = isUniqueField(field) && moduleId
+    ? async (_: any, currentValue: any) => {
+        const duplicateCheck = await checkFieldDuplicate({
+          moduleId,
+          field,
+          value: currentValue,
+          recordId,
+          allValues,
+        });
+        if (duplicateCheck.isDuplicate) {
+          throw new Error(getUniqueFieldMessage(field));
+        }
+      }
+    : null;
 
   const formatPersian = (val: any, kind: 'DATE' | 'TIME' | 'DATETIME') => {
     if (!val) return '-';
@@ -366,52 +395,69 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     const loadOptions = async () => {
       const relationMap: Record<string, any[]> = {};
       const dynamicMap: Record<string, any[]> = {};
+      const dynamicCategories = Array.from(new Set(
+        quickCreateFields
+          .map((quickField: any) => String(quickField?.dynamicOptionsCategory || '').trim())
+          .filter(Boolean)
+      ));
 
-      for (const quickField of quickCreateFields) {
-        if (!quickField?.key) continue;
-
-        if (quickField.dynamicOptionsCategory) {
-          try {
-            const { data } = await supabase
-              .from('dynamic_options')
-              .select('label, value')
-              .eq('category', quickField.dynamicOptionsCategory)
-              .eq('is_active', true)
-              .order('display_order', { ascending: true });
-            dynamicMap[quickField.dynamicOptionsCategory] = (data || []).map((item: any) => ({
-              label: item.label,
-              value: item.value,
-            }));
-          } catch (err) {
-            console.warn('Failed loading dynamic options:', quickField.dynamicOptionsCategory, err);
-          }
+      await Promise.all(dynamicCategories.map(async (category) => {
+        try {
+          const { data } = await supabase
+            .from('dynamic_options')
+            .select('label, value')
+            .eq('category', category)
+            .eq('is_active', true)
+            .order('display_order', { ascending: true });
+          dynamicMap[category] = (data || []).map((item: any) => ({
+            label: item.label,
+            value: item.value,
+          }));
+        } catch (err) {
+          console.warn('Failed loading dynamic options:', category, err);
         }
+      }));
 
-        if (quickField.type === FieldType.RELATION && quickField.relationConfig?.targetModule) {
-          const targetModule = quickField.relationConfig.targetModule;
-          const rawTargetField = (quickField.relationConfig as any)?.targetField;
-          const targetField = (targetModule === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
-            ? 'bundle_number'
-            : (rawTargetField || 'name');
-          const isShelvesTarget = targetModule === 'shelves';
-          const extraSelect = isShelvesTarget ? ', shelf_number' : '';
-          try {
+      const relationQueryCache = new Map<string, any[]>();
+      const relationFields = quickCreateFields.filter((quickField: any) =>
+        !!quickField?.key
+        && quickField.type === FieldType.RELATION
+        && !!quickField.relationConfig?.targetModule
+      );
+
+      await Promise.all(relationFields.map(async (quickField: any) => {
+        const targetModule = quickField.relationConfig.targetModule;
+        const rawTargetField = (quickField.relationConfig as any)?.targetField;
+        const targetField = (targetModule === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
+          ? 'bundle_number'
+          : (rawTargetField || 'name');
+        const queryCacheKey = JSON.stringify({ targetModule, targetField });
+
+        try {
+          let options = relationQueryCache.get(queryCacheKey);
+          if (!options) {
+            const isShelvesTarget = targetModule === 'shelves';
+            const extraSelect = isShelvesTarget ? ', shelf_number' : '';
             const { data, error } = await supabase
               .from(targetModule)
               .select(`id, ${targetField}, system_code${extraSelect}`)
               .limit(200);
             if (error) throw error;
-            relationMap[quickField.key] = (data || []).map((item: any) => ({
-              label: item.system_code
-                ? `${item[targetField] || item.shelf_number || item.bundle_number || item.system_code || item.id} (${item.system_code})`
-                : (item[targetField] || item.shelf_number || item.bundle_number || item.id),
+            options = (data || []).map((item: any) => ({
+              label: formatRelationOptionLabel(
+                targetModule,
+                item[targetField] || item.shelf_number || item.bundle_number || item.system_code || item.id,
+                item.system_code,
+              ),
               value: item.id,
             }));
-          } catch (err) {
-            console.warn('Failed loading relation options:', quickField.key, err);
+            relationQueryCache.set(queryCacheKey, options);
           }
+          relationMap[quickField.key] = options;
+        } catch (err) {
+          console.warn('Failed loading relation options:', quickField.key, err);
         }
-      }
+      }));
 
       if (!cancelled) {
         setQuickCreateRelationOptions(relationMap);
@@ -443,6 +489,21 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
       if (!payload[quickCreateTargetField]) {
         throw new Error(`فیلد "${quickCreateTargetField}" الزامی است.`);
+      }
+
+      const duplicateFields = await findDuplicateUniqueFields({
+        moduleId: quickCreateTargetModuleId,
+        fields: quickCreateFields,
+        values: payload,
+      });
+      if (duplicateFields.length > 0) {
+        quickCreateForm.setFields(
+          duplicateFields.map((item) => ({
+            name: item.fieldKey,
+            errors: [item.message],
+          }))
+        );
+        return;
       }
 
       const selectFields = Array.from(new Set(['id', quickCreateTargetField])).join(', ');
@@ -610,8 +671,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     placeholder={compactMode ? '' : "انتخاب کنید"}
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
-                    getPopupContainer={() => document.body}
-                    popupRootStyle={{ zIndex: 4000 }}
+                    getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
+                    popupRootStyle={{ zIndex: resolvedPopupZIndex }}
                 />
             );
         }
@@ -622,8 +683,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 options={fieldOptions}
                 allowClear
                 optionFilterProp="label"
-                getPopupContainer={() => document.body}
-                styles={{ popup: { root: { zIndex: 4000 } } }}
+                getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
+                styles={{ popup: { root: { zIndex: resolvedPopupZIndex } } }}
             />
         );
 
@@ -639,8 +700,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     mode="multiple"
                 onOptionsUpdate={onOptionsUpdate}
                 disabled={!forceEditMode}
-                getPopupContainer={() => document.body}
-                popupRootStyle={{ zIndex: 4000 }}
+                getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
+                popupRootStyle={{ zIndex: resolvedPopupZIndex }}
                 />
             );
         }
@@ -652,20 +713,23 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 options={fieldOptions}
                 allowClear
                 optionFilterProp="label"
-                getPopupContainer={() => document.body}
-                styles={{ popup: { root: { zIndex: 4000 } } }}
+                getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
+                styles={{ popup: { root: { zIndex: resolvedPopupZIndex } } }}
             />
         );
 
       case FieldType.RELATION:
         const canQuickCreate = !!field.relationConfig?.targetModule;
         let filteredOptions = fieldOptions;
+        const relationPopupRootStyle = isMobileViewport
+          ? { zIndex: resolvedPopupZIndex, width: 'min(92vw, 420px)', maxWidth: 'calc(100vw - 24px)' }
+          : { zIndex: resolvedPopupZIndex, minWidth: 320 };
         
         const relConfigAny = field.relationConfig as any;
         if (relConfigAny?.dependsOn && allValues) {
              const depVal = allValues[relConfigAny.dependsOn];
              if (!depVal) {
-                 return <Select disabled placeholder="ابتدا فیلد مرتبط را انتخاب کنید" style={{width:'100%'}} value={value} options={[]} />;
+                 return <Select disabled placeholder="ابتدا فیلد مرتبط را انتخاب کنید" style={{width:'100%'}} value={value} options={[]} getPopupContainer={(trigger) => resolvePopupContainer(trigger)} styles={{ popup: { root: { zIndex: resolvedPopupZIndex } } }} />;
              }
              filteredOptions = fieldOptions.filter((opt: any) => opt.module === depVal);
         }
@@ -680,9 +744,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     showSearch
                     options={filteredOptions}
                     optionFilterProp="label"
-                    getPopupContainer={() => document.body}
-                    popupMatchSelectWidth={false}
-                    styles={{ popup: { root: { zIndex: 4000, minWidth: 320 } } }}
+                    getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
+                    popupMatchSelectWidth={isMobileViewport}
+                    styles={{ popup: { root: relationPopupRootStyle } }}
                     filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                     popupRender={(menu) => (
                         <>
@@ -747,6 +811,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             className="w-full"
             disabled={!forceEditMode}
             placeholder={compactMode ? undefined : "انتخاب تاریخ"}
+            popupContainer={popupContainer}
+            popupZIndex={resolvedPopupZIndex}
           />
         );
 
@@ -759,6 +825,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             className="w-full"
             disabled={!forceEditMode}
             placeholder={compactMode ? undefined : "انتخاب زمان"}
+            popupContainer={popupContainer}
+            popupZIndex={resolvedPopupZIndex}
           />
         );
 
@@ -771,6 +839,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             className="w-full"
             disabled={!forceEditMode}
             placeholder={compactMode ? undefined : "انتخاب تاریخ و زمان"}
+            popupContainer={popupContainer}
+            popupZIndex={resolvedPopupZIndex}
           />
         );
 
@@ -951,11 +1021,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 <RelationQuickCreateInline 
                     open={quickCreateOpen}
                     label={fieldLabel}
+                    moduleId={quickCreateTargetModuleId}
                     fields={quickCreateFields}
                     form={quickCreateForm}
                     loading={quickCreateLoading}
                     relationOptions={quickCreateRelationOptions}
                     dynamicOptions={quickCreateDynamicOptions}
+                    popupZIndex={resolvedPopupZIndex + 20}
                     onCancel={closeQuickCreate}
                     onOk={handleQuickCreate}
                 />
@@ -984,8 +1056,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const formItemProps: any = {
       label: fieldLabel,
       name: fieldKey,
-      rules: [{ required: isRequired, message: 'الزامی است' }],
+      rules: [
+        ...(isRequired ? [{ required: true, message: 'الزامی است' }] : []),
+        ...(uniqueValidator ? [{ validator: uniqueValidator }] : []),
+      ],
       valuePropName: fieldType === FieldType.CHECKBOX ? 'checked' : 'value',
+      validateTrigger: uniqueValidator ? ['onBlur', 'onSubmit'] : undefined,
+      validateFirst: true,
   };
 
   return (
@@ -998,11 +1075,13 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             <RelationQuickCreateInline 
                 open={quickCreateOpen}
                 label={fieldLabel}
+                moduleId={quickCreateTargetModuleId}
                 fields={quickCreateFields}
                 form={quickCreateForm}
                 loading={quickCreateLoading}
                 relationOptions={quickCreateRelationOptions}
                 dynamicOptions={quickCreateDynamicOptions}
+                popupZIndex={resolvedPopupZIndex + 20}
                 onCancel={closeQuickCreate}
                 onOk={handleQuickCreate}
             />
@@ -1033,11 +1112,13 @@ export default SmartFieldRenderer;
 interface QuickCreateProps {
   open: boolean;
   label: string;
+  moduleId?: string;
   fields: ModuleField[];
   form: any;
   loading: boolean;
   relationOptions: Record<string, any[]>;
   dynamicOptions: Record<string, any[]>;
+  popupZIndex?: number;
   onCancel: () => void;
   onOk: () => void;
 }
@@ -1045,100 +1126,19 @@ interface QuickCreateProps {
 export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   open,
   label,
+  moduleId,
   fields,
   form,
   loading,
   relationOptions,
   dynamicOptions,
+  popupZIndex,
   onCancel,
   onOk,
 }) => {
   const watchedValues = Form.useWatch([], form);
-  const renderQuickField = (field: ModuleField) => {
-    const isDisabled = (field as any)?.readonly === true;
-    const baseSelectProps = {
-      showSearch: true,
-      allowClear: true,
-      optionFilterProp: 'label' as const,
-      getPopupContainer: () => document.body,
-      styles: { popup: { root: { zIndex: 5000 } } },
-      className: 'w-full',
-      disabled: isDisabled,
-    };
-
-    switch (field.type) {
-      case FieldType.TEXT:
-        return (
-          <Input
-            allowClear
-            disabled={isDisabled}
-          />
-        );
-      case FieldType.LONG_TEXT:
-        return (
-          <Input.TextArea
-            rows={2}
-            disabled={isDisabled}
-          />
-        );
-      case FieldType.NUMBER:
-      case FieldType.PRICE:
-      case FieldType.PERCENTAGE:
-      case FieldType.PERCENTAGE_OR_AMOUNT:
-      case FieldType.STOCK:
-        return (
-          <InputNumber
-            className="w-full persian-number"
-            controls={false}
-            disabled={isDisabled}
-            stringMode
-            inputMode="decimal"
-            formatter={(val, info) => formatNumericForInput(info?.input ?? val, true)}
-            parser={(val) => normalizeNumericString(val)}
-          />
-        );
-      case FieldType.SELECT:
-      case FieldType.STATUS: {
-        const opts = field.dynamicOptionsCategory
-          ? (dynamicOptions[field.dynamicOptionsCategory] || [])
-          : (field.options || []);
-        return <Select {...baseSelectProps} options={opts as any[]} />;
-      }
-        case FieldType.MULTI_SELECT: {
-          const opts = field.dynamicOptionsCategory
-            ? (dynamicOptions[field.dynamicOptionsCategory] || [])
-            : (field.options || []);
-          return <Select {...baseSelectProps} mode="multiple" options={opts as any[]} />;
-        }
-        case FieldType.RELATION:
-          return (
-            <SmartFieldRenderer
-              field={field}
-              value={(watchedValues as any)?.[field.key]}
-              onChange={(val) => form.setFieldValue(field.key, val)}
-              options={relationOptions[field.key] || []}
-              forceEditMode={true}
-              compactMode={true}
-              allValues={watchedValues || {}}
-            />
-          );
-        case FieldType.DATE:
-          return <Input placeholder="YYYY-MM-DD" disabled={isDisabled} />;
-        case FieldType.TIME:
-          return <Input placeholder="HH:mm" disabled={isDisabled} />;
-        case FieldType.DATETIME:
-        return <Input placeholder="YYYY-MM-DD HH:mm" disabled={isDisabled} />;
-      case FieldType.CHECKBOX:
-        return <Switch disabled={isDisabled} />;
-      default:
-        return (
-          <Input
-            allowClear
-            disabled={isDisabled}
-          />
-        );
-    }
-  };
+  const [modalContentElement, setModalContentElement] = useState<HTMLElement | null>(null);
+  const resolvedPopupZIndex = popupZIndex ?? 13020;
 
   return (
     <Modal
@@ -1150,7 +1150,18 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       cancelText="انصراف"
       confirmLoading={loading}
       destroyOnHidden
-      zIndex={5200} 
+      zIndex={resolvedPopupZIndex - 20}
+      afterOpenChange={(visible) => {
+        if (!visible) {
+          setModalContentElement(null);
+          return;
+        }
+        window.setTimeout(() => {
+          const modalBodies = Array.from(document.querySelectorAll('.ant-modal .ant-modal-content'));
+          const modalBody = modalBodies[modalBodies.length - 1] || null;
+          setModalContentElement(modalBody instanceof HTMLElement ? modalBody : null);
+        }, 0);
+      }}
     >
       <Form
         form={form}
@@ -1166,7 +1177,24 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
             valuePropName={field.type === FieldType.CHECKBOX ? 'checked' : 'value'}
             rules={field.validation?.required ? [{ required: true, message: 'الزامی است' }] : undefined}
           >
-            {renderQuickField(field)}
+            <SmartFieldRenderer
+              field={field}
+              value={(watchedValues as any)?.[field.key]}
+              onChange={(val) => form.setFieldValue(field.key, val)}
+              options={
+                field.type === FieldType.RELATION
+                  ? (relationOptions[field.key] || [])
+                  : field.dynamicOptionsCategory
+                    ? (dynamicOptions[field.dynamicOptionsCategory] || [])
+                    : (field.options || [])
+              }
+              forceEditMode={true}
+              compactMode={true}
+              allValues={watchedValues || {}}
+              moduleId={moduleId}
+              popupContainer={modalContentElement}
+              popupZIndex={resolvedPopupZIndex}
+            />
           </Form.Item>
         ))}
       </Form>

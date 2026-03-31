@@ -17,6 +17,7 @@ import { fetchShelfOptions, updateProductStock } from './editableTable/inventory
 import { buildProductFilters, runProductsQuery } from './editableTable/productionOrderHelpers';
 import { MODULES } from '../moduleRegistry';
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
+import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
 
 const { Text } = Typography;
 
@@ -85,6 +86,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   readOnly,
 }) => {
   const isReadOnly = block?.readonly === true || readOnly === true || canEditModule === false;
+  const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
   const isProductInventory = moduleId === 'products' && block?.id === 'product_inventory';
   const isProductStockMovements = moduleId === 'products' && block?.id === 'product_stock_movements';
   const isShelfInventory = moduleId === 'shelves' && block?.id === 'shelf_inventory';
@@ -118,6 +120,20 @@ const EditableTable: React.FC<EditableTableProps> = ({
     return empty;
   });
   const [userToggledCollapse, setUserToggledCollapse] = useState(false);
+
+  const resolveSelectPopupContainer = (trigger?: HTMLElement | null) => {
+    const overlayParent = trigger?.closest(
+      '.ant-modal-root, .ant-modal-wrap, .ant-modal-content, .ant-drawer, .ant-drawer-root, .ant-drawer-content, .ant-drawer-content-wrapper',
+    );
+    if (overlayParent instanceof HTMLElement) return overlayParent;
+    return document.body;
+  };
+
+  const getSelectPopupRootStyle = (desktopMinWidth = 240): React.CSSProperties => (
+    isMobileViewport
+      ? { zIndex: 4000, width: `min(92vw, ${Math.max(desktopMinWidth, 420)}px)`, maxWidth: 'calc(100vw - 24px)' }
+      : { zIndex: 4000, minWidth: desktopMinWidth, maxWidth: 'calc(100vw - 48px)' }
+  );
 
   useEffect(() => {
     if (!isBundleContents || !recordId) return;
@@ -273,6 +289,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
     const shouldUseLocalInit =
       mode === 'local'
       || (!isProductInventory && !isShelfInventory && !isProductStockMovements);
+    // bundle contents are loaded from DB and should not be overridden by initialData
+    if (isBundleContents && mode === 'db') return;
     if (mode !== 'external_view' && !populateSource?.recordId && shouldUseLocalInit) {
       const safeData = Array.isArray(initialData) ? initialData : [];
       const dataWithKey = safeData.map((item, index) => ({
@@ -1372,10 +1390,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
           render: (text: any, _record: any, index: number) => {
             const rowKey = getRowKey(_record);
             const productsState = expandedProducts[rowKey];
-            const productOptions = (productsState?.data || []).map((item: any) => ({
-              value: item.id,
-              label: item.system_code ? `${item.system_code} - ${item.name}` : item.name,
-            }));
+             const productOptions = (productsState?.data || []).map((item: any) => ({
+               value: item.id,
+               label: formatRelationOptionLabel('products', item.name, item.system_code),
+             }));
 
             if (text) {
               return (
@@ -1399,6 +1417,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
                   showSearch
                   options={productOptions}
                   optionFilterProp="label"
+                  popupMatchSelectWidth={isMobileViewport}
                   onDropdownVisibleChange={(open) => {
                     if (!open) return;
                     ensureRowExpanded(rowKey);
@@ -1418,8 +1437,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
                     if (product) applySelectedProduct(index, rowKey, product);
                   }}
                   className="w-full"
-                  getPopupContainer={() => document.body}
-                  styles={{ popup: { root: { zIndex: 4000 } } }}
+                  getPopupContainer={(trigger) => resolveSelectPopupContainer(trigger)}
+                  styles={{ popup: { root: getSelectPopupRootStyle(300) } }}
                 />
                 <QrScanPopover
                   label=""
@@ -1448,6 +1467,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
                   value={record?.selected_shelf_id || null}
                   loading={shelvesState?.loading}
                   options={shelvesState?.options || []}
+                  popupMatchSelectWidth={isMobileViewport}
                   onChange={(val) => {
                     if (rowIndex < 0) return;
                     updateRow(rowIndex, 'selected_shelf_id', val || null);
@@ -1462,8 +1482,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
                   allowClear
                   className="w-full"
                   status={hasProduct && !record?.selected_shelf_id ? 'error' : undefined}
-                  getPopupContainer={() => document.body}
-                  styles={{ popup: { root: { zIndex: 4000 } } }}
+                  getPopupContainer={(trigger) => resolveSelectPopupContainer(trigger)}
+                  styles={{ popup: { root: getSelectPopupRootStyle(260) } }}
                 />
                 <QrScanPopover
                   label=""

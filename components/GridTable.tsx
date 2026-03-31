@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Table, Typography, message } from 'antd';
 import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -156,6 +156,10 @@ const GridTable: React.FC<GridTableProps> = ({
   const [transferTargetProductId, setTransferTargetProductId] = useState<string | null>(null);
   const [transferProductOptions, setTransferProductOptions] = useState<Array<{ label: string; value: string; category?: string | null }>>([]);
   const [transferProductOptionsLoading, setTransferProductOptionsLoading] = useState(false);
+  const productPreviewCacheRef = useRef(new Map<string, {
+    rows: any[];
+    meta: { matchMode: 'all' | 'exact' | 'partial'; matchedFilterCount: number; totalFilterCount: number };
+  }>());
 
   const productModule = MODULES['products'];
   const specFieldsByBlock = useMemo(() => {
@@ -197,6 +201,10 @@ const GridTable: React.FC<GridTableProps> = ({
   }, [initialData, mode, activeEditRowKey]);
 
   const categories = block?.gridConfig?.categories || [];
+  const mergedDynamicOptions = useMemo(
+    () => ({ ...dynamicOptions, ...localDynamicOptions }),
+    [dynamicOptions, localDynamicOptions]
+  );
 
   const getSpecFields = (category: string | null) => {
     const specBlockId = categories.find((c) => c.value === category)?.specBlockId;
@@ -318,17 +326,6 @@ const GridTable: React.FC<GridTableProps> = ({
   const toNumber = (value: any) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
-  };
-
-  const convertDimensionByUnit = (value: any, fromUnitRaw: any, toUnitRaw: any) => {
-    const fromUnit = String(fromUnitRaw || '').trim();
-    const toUnit = String(toUnitRaw || '').trim();
-    const numericValue = toNumber(value);
-    if (!fromUnit || !toUnit || fromUnit === toUnit) return numericValue;
-    const probe = convertArea(1, fromUnit as any, toUnit as any);
-    if (!Number.isFinite(probe) || probe === 0) return numericValue;
-    const converted = convertArea(numericValue, fromUnit as any, toUnit as any);
-    return Number.isFinite(converted) ? converted : numericValue;
   };
 
   const focusSameColumnInSiblingRow = (target: EventTarget | null, direction: 'up' | 'down') => {
@@ -658,7 +655,6 @@ const GridTable: React.FC<GridTableProps> = ({
 
     try {
       const product = await fetchProductById(productId);
-      const currentUnits = getRowUnitsSummary(row);
       const productMainUnit = product?.main_unit ? String(product.main_unit) : null;
       const productSubUnit = product?.sub_unit ? String(product.sub_unit) : null;
 
@@ -683,16 +679,6 @@ const GridTable: React.FC<GridTableProps> = ({
 
       const pieces = (row.pieces || []).map((piece: any) => ({
         ...piece,
-        length: convertDimensionByUnit(
-          piece?.length,
-          piece?.main_unit || currentUnits.main || productMainUnit,
-          productMainUnit || piece?.main_unit || currentUnits.main
-        ),
-        width: convertDimensionByUnit(
-          piece?.width,
-          piece?.main_unit || currentUnits.main || productMainUnit,
-          productMainUnit || piece?.main_unit || currentUnits.main
-        ),
         waste_rate: product?.waste_rate ?? piece.waste_rate,
         main_unit: productMainUnit ?? piece.main_unit,
         sub_unit: productSubUnit ?? piece.sub_unit,
@@ -1022,6 +1008,23 @@ const GridTable: React.FC<GridTableProps> = ({
     }
   };
 
+  const sourceData = mode === 'db' ? (activeEditRowKey ? tempData : data) : tempData;
+
+  const requiredDynamicOptionCategories = useMemo(() => Array.from(
+    new Set(
+      sourceData.flatMap((row: any) =>
+        getSpecFields(row?.header?.category || null)
+          .map((field: any) => field?.dynamicOptionsCategory)
+          .filter((category): category is string => typeof category === 'string' && category.trim() !== '')
+      )
+    )
+  ), [sourceData, categories, specFieldsByBlock]);
+
+  useEffect(() => {
+    if (!requiredDynamicOptionCategories.length) return;
+    void ensureDynamicOptions(requiredDynamicOptionCategories);
+  }, [requiredDynamicOptionCategories, dynamicOptions, localDynamicOptions]);
+
   const fetchFilteredProducts = async (row: any) => {
     const specFields = getSpecFields(row.header?.category || null);
     const tableColumns = specFields.map((f: any) => ({
@@ -1034,7 +1037,7 @@ const GridTable: React.FC<GridTableProps> = ({
     }));
 
     const rowData = { ...(row.specs || {}) };
-    const filters = buildProductFilters(tableColumns, rowData, dynamicOptions, localDynamicOptions);
+    const filters = buildProductFilters(tableColumns, rowData, mergedDynamicOptions, {});
     const categoryValue = row?.header?.category || null;
     const baseFilters: Array<{ filterKey: string; value: any; colType: FieldType }> = [];
     if (categoryValue) {
@@ -1049,14 +1052,41 @@ const GridTable: React.FC<GridTableProps> = ({
         colType: FieldType.SELECT,
       });
     }
-    const result = await runProductsQuery(supabase as any, [...baseFilters, ...filters]);
+    const allFilters = [...baseFilters, ...filters];
+    const previewFields = Array.from(new Set([
+      'id',
+      'name',
+      'system_code',
+      'stock',
+      'buy_price',
+      'sell_price',
+      'category',
+      'product_type',
+      ...specFields.map((field: any) => String(field.key)),
+    ]));
+    const cacheKey = JSON.stringify({
+      filters: allFilters.map((filter: any) => ({
+        filterKey: filter.filterKey,
+        value: filter.value,
+        colType: filter.colType,
+      })),
+      select: previewFields,
+    });
+    const cached = productPreviewCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+
+    const result = await runProductsQuery(supabase as any, allFilters, previewFields.join(', '));
     if (result.error) throw result.error;
-    return result.data || [];
+    const payload = {
+      rows: result.data || [],
+      meta: result.meta,
+    };
+    productPreviewCacheRef.current.set(cacheKey, payload);
+    return payload;
   };
 
   if (loading) return <div className="p-6 text-center"><Spin /></div>;
 
-  const sourceData = mode === 'db' ? (activeEditRowKey ? tempData : data) : tempData;
   const rowHeaderBarStyle = { backgroundColor: '#8b5e3c' };
 
   return (
@@ -1209,13 +1239,6 @@ const GridTable: React.FC<GridTableProps> = ({
               </div>
             </div>
           );
-
-          const specCategories = specFields
-            .map((f: any) => f.dynamicOptionsCategory)
-            .filter(Boolean) as string[];
-          if (specCategories.length > 0) {
-            ensureDynamicOptions(specCategories);
-          }
 
           return (
             <div key={row.key || rowIndex} className="border border-[#8b5e3c] rounded-2xl overflow-hidden">
@@ -1493,7 +1516,7 @@ const GridTable: React.FC<GridTableProps> = ({
                       <ProductsPreview
                         row={row}
                         relationOptions={relationOptions}
-                        dynamicOptions={{ ...dynamicOptions, ...localDynamicOptions }}
+                        dynamicOptions={mergedDynamicOptions}
                         specFields={specFields}
                         fetchFilteredProducts={fetchFilteredProducts}
                         onSelect={(productId) => applySelectedProduct(rowIndex, productId)}
@@ -1865,30 +1888,65 @@ const ProductsPreview: React.FC<{
   relationOptions: Record<string, any[]>;
   dynamicOptions: Record<string, any[]>;
   specFields: any[];
-  fetchFilteredProducts: (row: any) => Promise<any[]>;
+  fetchFilteredProducts: (row: any) => Promise<{
+    rows: any[];
+    meta: { matchMode: 'all' | 'exact' | 'partial'; matchedFilterCount: number; totalFilterCount: number };
+  }>;
   onSelect: (productId: string) => void;
 }> = ({ row, fetchFilteredProducts, onSelect, specFields, dynamicOptions }) => {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
+  const [matchMeta, setMatchMeta] = useState<{
+    matchMode: 'all' | 'exact' | 'partial';
+    matchedFilterCount: number;
+    totalFilterCount: number;
+  }>({
+    matchMode: 'all',
+    matchedFilterCount: 0,
+    totalFilterCount: 0,
+  });
+  const criteriaSignature = useMemo(() => JSON.stringify({
+    category: row?.header?.category || null,
+    specs: row?.specs || {},
+    fields: (specFields || []).map((field: any) => field?.key),
+    dynamicOptionVersions: (specFields || [])
+      .map((field: any) => field?.dynamicOptionsCategory)
+      .filter((category: any) => typeof category === 'string' && category.trim() !== '')
+      .map((category: string) => `${category}:${dynamicOptions?.[category]?.length || 0}`),
+  }), [row?.header?.category, row?.specs, specFields, dynamicOptions]);
 
   useEffect(() => {
     let active = true;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const result = await fetchFilteredProducts(row);
-        if (!active) return;
-        setRows(result || []);
-      } catch {
-        if (!active) return;
-        setRows([]);
-      } finally {
-        if (active) setLoading(false);
-      }
+    const timer = setTimeout(() => {
+      void (async () => {
+        setLoading(true);
+        try {
+          const result = await fetchFilteredProducts(row);
+          if (!active) return;
+          setRows(result?.rows || []);
+          setMatchMeta(result?.meta || {
+            matchMode: 'all',
+            matchedFilterCount: 0,
+            totalFilterCount: 0,
+          });
+        } catch {
+          if (!active) return;
+          setRows([]);
+          setMatchMeta({
+            matchMode: 'all',
+            matchedFilterCount: 0,
+            totalFilterCount: 0,
+          });
+        } finally {
+          if (active) setLoading(false);
+        }
+      })();
+    }, 180);
+    return () => {
+      active = false;
+      clearTimeout(timer);
     };
-    load();
-    return () => { active = false; };
-  }, [row, dynamicOptions]);
+  }, [criteriaSignature]);
 
   if (loading) return <div className="py-4 text-center"><Spin size="small" /></div>;
 
@@ -1916,29 +1974,40 @@ const ProductsPreview: React.FC<{
     render: (val: any) => renderSpecValue(field, val)
   }));
 
+  const partialMessage = matchMeta.matchMode === 'partial' && matchMeta.totalFilterCount > 0
+    ? `نتیجه دقیق پیدا نشد؛ نزدیک‌ترین موارد با ${toPersianNumber(matchMeta.matchedFilterCount)} از ${toPersianNumber(matchMeta.totalFilterCount)} ویژگی منطبق نمایش داده شد.`
+    : null;
+
   return (
-    <Table
-      dataSource={rows}
-      rowKey="id"
-      pagination={{ pageSize: 5, size: 'small' }}
-      size="small"
-      rowSelection={{
-        type: 'radio',
-        onChange: (_keys, selectedRows) => {
-          const selected = selectedRows?.[0];
-          if (selected?.id) onSelect(selected.id);
-        }
-      }}
-      columns={[
-        { title: 'نام محصول', dataIndex: 'name', key: 'name', ellipsis: true },
-        { title: 'کد سیستمی', dataIndex: 'system_code', key: 'system_code', responsive: ['sm'] as ResponsiveBreakpoint[] },
-        ...specColumns,
-        { title: 'موجودی', dataIndex: 'stock', key: 'stock', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => toPersianNumber(val ?? 0) },
-        { title: 'قیمت خرید', dataIndex: 'buy_price', key: 'buy_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
-        { title: 'قیمت فروش', dataIndex: 'sell_price', key: 'sell_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
-      ]}
-      scroll={{ x: 'max-content' }}
-    />
+    <div className="space-y-2">
+      {partialMessage ? (
+        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          {partialMessage}
+        </div>
+      ) : null}
+      <Table
+        dataSource={rows}
+        rowKey="id"
+        pagination={{ pageSize: 5, size: 'small' }}
+        size="small"
+        rowSelection={{
+          type: 'radio',
+          onChange: (_keys, selectedRows) => {
+            const selected = selectedRows?.[0];
+            if (selected?.id) onSelect(selected.id);
+          }
+        }}
+        columns={[
+          { title: 'نام محصول', dataIndex: 'name', key: 'name', ellipsis: true },
+          { title: 'کد سیستمی', dataIndex: 'system_code', key: 'system_code', responsive: ['sm'] as ResponsiveBreakpoint[] },
+          ...specColumns,
+          { title: 'موجودی', dataIndex: 'stock', key: 'stock', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => toPersianNumber(val ?? 0) },
+          { title: 'قیمت خرید', dataIndex: 'buy_price', key: 'buy_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
+          { title: 'قیمت فروش', dataIndex: 'sell_price', key: 'sell_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
+        ]}
+        scroll={{ x: 'max-content' }}
+      />
+    </div>
   );
 };
 

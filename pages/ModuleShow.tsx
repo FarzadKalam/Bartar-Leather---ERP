@@ -43,6 +43,11 @@ import {
   getDefaultLevelingConfig,
   syncCustomerLevelsByInvoiceCustomers,
 } from '../utils/customerLeveling';
+import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
+import { checkFieldDuplicate, getUniqueFieldMessage, isUniqueField } from '../utils/fieldUniqueness';
+
+const MODULE_SHOW_OPTIONS_CACHE = new Map<string, { dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>();
+const MODULE_SHOW_OPTIONS_INFLIGHT = new Map<string, Promise<{ dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>>();
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -90,6 +95,8 @@ const ModuleShow: React.FC = () => {
   const [productionQuantityPreview, setProductionQuantityPreview] = useState<number | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [stockMovementQuickAddSignal, setStockMovementQuickAddSignal] = useState(0);
+  const optionsCacheRef = useRef<Map<string, { dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>>(new Map());
+  const lastOptionsCacheKeyRef = useRef<string | null>(null);
   const startDraftStorageKey = useMemo(() => (id ? `production-start-draft:${id}` : null), [id]);
     const fetchProductionQuantity = useCallback(async () => {
       if (moduleId !== 'production_orders' || !id) return null;
@@ -848,12 +855,7 @@ const ModuleShow: React.FC = () => {
       .in('product_id', productIds)
       .gt('stock', 0);
 
-    console.log('🔍 inventoryRows با bundle_id:', inventoryRows);
-    console.log('🔍 نمونه ردیف با bundle_id:', inventoryRows?.find(r => r.bundle_id));
-    console.log('🔍 تعداد ردیف‌ها:', inventoryRows?.length);
-
     const rows = (inventoryRows || []).filter((row: any) => row?.product_id && row?.shelf_id);
-    console.log('🔍 ردیف‌های فیلتر شده:', rows);
 
     const shelfIds = Array.from(new Set(rows.map((row: any) => String(row.shelf_id))));
     let shelfMap = new Map<string, { label: string; isProductionWarehouse: boolean }>();
@@ -909,7 +911,7 @@ const ModuleShow: React.FC = () => {
       .limit(500);
     const options = (products || []).map((row: any) => ({
       value: row.id,
-      label: row.system_code ? `${row.name} (${row.system_code})` : row.name,
+      label: formatRelationOptionLabel('products', row.name, row.system_code),
       product_type: row.product_type || null,
     }));
     setOutputProductOptions(options);
@@ -1192,120 +1194,186 @@ const ModuleShow: React.FC = () => {
 
   const fetchOptions = useCallback(async (recordData: any = null) => {
     if (!moduleConfig) return;
-    
-    const dynFields: any[] = [...moduleConfig.fields.filter(f => (f as any).dynamicOptionsCategory)];
-    moduleConfig.blocks?.forEach(b => {
-      if (b.tableColumns) {
-        b.tableColumns.forEach(c => {
-          if ((c.type === FieldType.SELECT || c.type === FieldType.MULTI_SELECT) && (c as any).dynamicOptionsCategory) {
-            dynFields.push(c);
-          }
-        });
-      }
-    });
-    
-    const dynOpts: Record<string, any[]> = {};
-    for (const field of dynFields) {
-      const cat = (field as any).dynamicOptionsCategory;
-      if (cat && !dynOpts[cat]) {
-        const { data } = await supabase.from('dynamic_options').select('label, value').eq('category', cat).eq('is_active', true);
-        if (data) dynOpts[cat] = data.filter(i => i.value !== null);
-      }
-    }
-    try {
-      const { data: formulas } = await supabase.from('calculation_formulas').select('id, name');
-      if (formulas) {
-        dynOpts['calculation_formulas'] = formulas.map((f: any) => ({ label: f.name, value: f.id }));
-      }
-    } catch (err) {
-      console.warn('Could not load calculation formulas', err);
-    }
-    setDynamicOptions(dynOpts);
 
-        const relFields: any[] = [...moduleConfig.fields.filter(f => f.type === FieldType.RELATION)];
-    moduleConfig.blocks?.forEach(b => {
-      if (b.tableColumns) {
-        b.tableColumns.forEach(c => {
-          if (c.type === FieldType.RELATION) relFields.push({ ...c, key: `${b.id}_${c.key}` }); 
-        });
-      }
-    });
+    const dependentKeys = Array.from(new Set(
+      [
+        ...moduleConfig.fields,
+        ...(moduleConfig.blocks || []).flatMap((block: any) => (block.tableColumns || [])),
+      ]
+        .map((field: any) => String(field?.relationConfig?.dependsOn || '').trim())
+        .filter(Boolean)
+    ));
+    const dependencySnapshot = dependentKeys.reduce((acc, key) => {
+      acc[key] = recordData?.[key] ?? null;
+      return acc;
+    }, {} as Record<string, any>);
+    const cacheKey = JSON.stringify({ moduleId, dependencySnapshot });
 
-    const relOpts: Record<string, any[]> = {};
-    for (const field of relFields) {
-        if (field.relationConfig) {
-          const targetModule = field.relationConfig.targetModule;
-          const rawTargetField = field.relationConfig.targetField;
-          const targetField = (targetModule === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
-            ? 'bundle_number'
-            : (rawTargetField || 'name');
-          if (field.relationConfig.dependsOn && recordData) {
-            const dependsOnValue = recordData[field.relationConfig.dependsOn];
-            const dependsOnTargetField = (dependsOnValue === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
-              ? 'bundle_number'
-              : targetField;
-            if (dependsOnValue) {
-              try {
-                const isShelvesTarget = dependsOnValue === 'shelves';
-                const extraSelect = isShelvesTarget ? ', shelf_number' : '';
-                const { data: relData } = await supabase
-                  .from(dependsOnValue)
-                  .select(`id, ${dependsOnTargetField}, system_code${extraSelect}`)
-                  .limit(200);
-                if (relData) {
-                  const options = relData.map((i: any) => {
-                    const baseLabel = i?.[dependsOnTargetField] || i?.shelf_number || i?.system_code || i?.bundle_number || i?.id;
-                    return {
-                      label: i.system_code ? `${baseLabel} (${i.system_code})` : baseLabel,
-                      value: i.id,
-                      module: dependsOnValue,
-                    name: baseLabel,
-                    system_code: i.system_code
-                  };
-                });
-                relOpts[field.key] = options;
-              }
-            } catch (err) {
-              console.warn(`Could not fetch options for ${field.key}:`, err);
-            }
-          }
-        } else {
-          const { targetModule, filter } = field.relationConfig;
-          try {
-            const isShelvesTarget = targetModule === 'shelves';
-            const extraSelect = isShelvesTarget ? ', shelf_number' : '';
-            const filterKeys = filter ? Object.keys(filter) : [];
-            const filterSelect = filterKeys.length > 0 ? `, ${filterKeys.join(', ')}` : '';
-            let query = supabase
-              .from(targetModule)
-              .select(`id, ${targetField}, system_code${extraSelect}${filterSelect}`)
-              .limit(200);
-            if (filter) query = query.match(filter);
-            const { data: relData } = await query;
-            if (relData) {
-              const options = relData.map((i: any) => {
-                const baseLabel = i?.[targetField] || i?.shelf_number || i?.system_code || i?.id;
-                return {
-                  label: i.system_code ? `${baseLabel} (${i.system_code})` : baseLabel,
-                  value: i.id,
-                  name: baseLabel,
-                  system_code: i.system_code
-                };
-              });
-              relOpts[field.key] = options;
-              if (field.key.includes('_')) relOpts[field.key.split('_').pop()!] = options;
-            }
-          } catch (err) {
-            console.log('🔍 relationOptions بعد از fetchOptions:', relOpts);
-            console.log('🔍 آیا bundle_id در relationOptions وجود دارد؟', 'bundle_id' in relOpts);
-            console.log('🔍 آیا product_bundles در relationOptions وجود دارد؟', 'product_bundles' in relOpts);
-            console.warn(`Could not fetch options for ${field.key}:`, err);
-          }
+    if (lastOptionsCacheKeyRef.current === cacheKey) return;
+
+    const cached = optionsCacheRef.current.get(cacheKey);
+    if (cached) {
+      setDynamicOptions(cached.dynamicOptions);
+      setRelationOptions(cached.relationOptions);
+      lastOptionsCacheKeyRef.current = cacheKey;
+      return;
+    }
+
+    const sharedCached = MODULE_SHOW_OPTIONS_CACHE.get(cacheKey);
+    if (sharedCached) {
+      optionsCacheRef.current.set(cacheKey, sharedCached);
+      setDynamicOptions(sharedCached.dynamicOptions);
+      setRelationOptions(sharedCached.relationOptions);
+      lastOptionsCacheKeyRef.current = cacheKey;
+      return;
+    }
+
+    const inflight = MODULE_SHOW_OPTIONS_INFLIGHT.get(cacheKey);
+    if (inflight) {
+      const sharedResult = await inflight;
+      optionsCacheRef.current.set(cacheKey, sharedResult);
+      setDynamicOptions(sharedResult.dynamicOptions);
+      setRelationOptions(sharedResult.relationOptions);
+      lastOptionsCacheKeyRef.current = cacheKey;
+      return;
+    }
+    const loadOptionsPromise = (async () => {
+      const dynamicCategories = Array.from(new Set([
+      ...moduleConfig.fields.map((field: any) => String(field?.dynamicOptionsCategory || '').trim()),
+      ...(moduleConfig.blocks || []).flatMap((block: any) =>
+        (block.tableColumns || []).map((column: any) => String(column?.dynamicOptionsCategory || '').trim())
+      ),
+      ].filter(Boolean)));
+
+      const dynOpts: Record<string, any[]> = {};
+      await Promise.all(dynamicCategories.map(async (category) => {
+        const { data } = await supabase
+          .from('dynamic_options')
+          .select('label, value')
+          .eq('category', category)
+          .eq('is_active', true);
+        if (data) {
+          dynOpts[category] = data.filter((item: any) => item.value !== null);
         }
+      }));
+
+      try {
+        const { data: formulas } = await supabase.from('calculation_formulas').select('id, name');
+        if (formulas) {
+          dynOpts['calculation_formulas'] = formulas.map((formula: any) => ({
+            label: formula.name,
+            value: formula.id,
+          }));
+        }
+      } catch (err) {
+        console.warn('Could not load calculation formulas', err);
       }
+
+      const relFields: any[] = [
+        ...moduleConfig.fields.filter((field: any) => field.type === FieldType.RELATION),
+        ...(moduleConfig.blocks || []).flatMap((block: any) =>
+          (block.tableColumns || [])
+            .filter((column: any) => column.type === FieldType.RELATION)
+            .map((column: any) => ({ ...column, key: `${block.id}_${column.key}` }))
+        ),
+      ];
+
+      const relationQueryCache = new Map<string, any[]>();
+      const relOpts: Record<string, any[]> = {};
+
+      const loadRelationOptions = async (
+      targetModule: string,
+      targetField: string,
+      filter?: Record<string, any> | null,
+      attachedModule?: string | null
+      ) => {
+      const normalizedTargetField = (targetModule === 'product_bundles' && (!targetField || targetField === 'name'))
+        ? 'bundle_number'
+        : (targetField || 'name');
+      const cacheToken = JSON.stringify({
+        targetModule,
+        targetField: normalizedTargetField,
+        filter: filter || null,
+        attachedModule: attachedModule || null,
+      });
+      if (relationQueryCache.has(cacheToken)) {
+        return relationQueryCache.get(cacheToken) || [];
+      }
+
+      const isShelvesTarget = targetModule === 'shelves';
+      const extraSelect = isShelvesTarget ? ', shelf_number' : '';
+      const filterKeys = filter ? Object.keys(filter) : [];
+      const filterSelect = filterKeys.length > 0 ? `, ${filterKeys.join(', ')}` : '';
+      let query = supabase
+        .from(targetModule)
+        .select(`id, ${normalizedTargetField}, system_code${extraSelect}${filterSelect}`)
+        .limit(200);
+
+      if (filter) {
+        query = query.match(filter);
+      }
+
+      const { data: relData } = await query;
+      const options = (relData || []).map((item: any) => {
+        const baseLabel = item?.[normalizedTargetField] || item?.shelf_number || item?.system_code || item?.id;
+        return {
+          label: formatRelationOptionLabel(targetModule, baseLabel, item.system_code),
+          value: item.id,
+          name: baseLabel,
+          system_code: item.system_code,
+          ...(attachedModule ? { module: attachedModule } : {}),
+        };
+      });
+
+      relationQueryCache.set(cacheToken, options);
+      return options;
+      };
+
+      await Promise.all(relFields.map(async (field: any) => {
+        if (!field?.relationConfig) return;
+
+      const rawTargetField = field.relationConfig.targetField;
+      const dependsOnKey = field.relationConfig.dependsOn;
+
+      try {
+        if (dependsOnKey && recordData) {
+          const dependsOnValue = String(recordData?.[dependsOnKey] || '').trim();
+          if (!dependsOnValue) return;
+          const options = await loadRelationOptions(dependsOnValue, rawTargetField || 'name', null, dependsOnValue);
+          relOpts[field.key] = options;
+          return;
+        }
+
+        const targetModule = String(field.relationConfig.targetModule || '').trim();
+        if (!targetModule) return;
+        const options = await loadRelationOptions(targetModule, rawTargetField || 'name', field.relationConfig.filter || null);
+        relOpts[field.key] = options;
+        if (field.key.includes('_')) {
+          relOpts[field.key.split('_').pop() || field.key] = options;
+        }
+        } catch (err) {
+          console.warn(`Could not fetch options for ${field.key}:`, err);
+        }
+      }));
+
+      return {
+        dynamicOptions: dynOpts,
+        relationOptions: relOpts,
+      };
+    })();
+
+    MODULE_SHOW_OPTIONS_INFLIGHT.set(cacheKey, loadOptionsPromise);
+    try {
+      const loaded = await loadOptionsPromise;
+      MODULE_SHOW_OPTIONS_CACHE.set(cacheKey, loaded);
+      optionsCacheRef.current.set(cacheKey, loaded);
+      lastOptionsCacheKeyRef.current = cacheKey;
+      setDynamicOptions(loaded.dynamicOptions);
+      setRelationOptions(loaded.relationOptions);
+    } finally {
+      MODULE_SHOW_OPTIONS_INFLIGHT.delete(cacheKey);
     }
-    setRelationOptions(relOpts);
-    }, [moduleConfig]);
+  }, [moduleConfig, moduleId]);
 
   useEffect(() => {
     if (data) {
@@ -1617,6 +1685,20 @@ const ModuleShow: React.FC = () => {
             return;
           }
           try {
+            const nameField = moduleConfig?.fields?.find((field) => field.key === 'name');
+            if (nameField && isUniqueField(nameField)) {
+              const duplicateCheck = await checkFieldDuplicate({
+                moduleId,
+                field: nameField,
+                value: nextName,
+                recordId: id,
+                allValues: { ...(data || {}), name: nextName, auto_name_enabled: enableAuto },
+              });
+              if (duplicateCheck.isDuplicate) {
+                msg.error(getUniqueFieldMessage(nameField));
+                return;
+              }
+            }
             const { error } = await supabase
               .from(moduleId)
               .update({ name: nextName, auto_name_enabled: enableAuto })
@@ -1743,6 +1825,19 @@ const ModuleShow: React.FC = () => {
 
   const handleCreateOrderFromBom = useCallback(async (values: any) => {
     try {
+      const orderNameField = MODULES['production_orders']?.fields?.find((field) => field.key === 'name');
+      if (orderNameField && isUniqueField(orderNameField)) {
+        const duplicateCheck = await checkFieldDuplicate({
+          moduleId: 'production_orders',
+          field: orderNameField,
+          value: values?.name,
+          allValues: values,
+        });
+        if (duplicateCheck.isDuplicate) {
+          msg.error(getUniqueFieldMessage(orderNameField));
+          return;
+        }
+      }
       const { data: inserted, error } = await supabase
         .from('production_orders')
         .insert(values)
@@ -1793,6 +1888,21 @@ const ModuleShow: React.FC = () => {
       newValue = 'new_lead';
     }
     try {
+      const fieldConfig = moduleConfig?.fields?.find((field) => field.key === key);
+      if (fieldConfig && isUniqueField(fieldConfig)) {
+        const duplicateCheck = await checkFieldDuplicate({
+          moduleId,
+          field: fieldConfig,
+          value: newValue,
+          recordId: id,
+          allValues: { ...(data || {}), ...tempValues, [key]: newValue },
+        });
+        if (duplicateCheck.isDuplicate) {
+          msg.error(getUniqueFieldMessage(fieldConfig));
+          return;
+        }
+      }
+
       const patch =
         moduleId === 'tasks' && key === 'status'
           ? buildTaskStatusUpdatePayload(newValue, {
@@ -1960,11 +2070,9 @@ const ModuleShow: React.FC = () => {
       for (const key in relationOptions) {
           const found = relationOptions[key]?.find((o: any) => o.value === value);
           if (found) {
-              console.log('🔍 لیبل پیدا شد:', { key, value, label: found.label });
               return found.label;
           }
       }
-    console.log('🔍 لیبل پیدا نشد برای value:', value);
 
       return value;
   };

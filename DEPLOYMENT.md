@@ -7,6 +7,47 @@ This project is a Vite-built SPA. Production deployment is copying the built `di
 - CI on every push/PR: install, typecheck, build
 - CD on `main`: upload `dist/`, create a timestamped release, switch `current` symlink (atomic deploy), keep rollback history
 
+## Direct Deploy From Laptop
+
+If GitHub Actions is not reachable, you can run the same deployment flow directly from your Windows laptop with PowerShell:
+
+```powershell
+npm run deploy:server -- `
+  -ServerHost 212.23.201.161 `
+  -ServerUser deploy `
+  -ServerPort 22 `
+  -DeployPath /var/www/erp-mehrbanoo `
+  -IdentityFile C:\Users\YourUser\.ssh\erp_deploy
+```
+
+The script is at `scripts/deploy.ps1` and it does the same core steps as the GitHub workflow:
+
+- `npm ci`
+- `npx tsc --noEmit`
+- `npm run build`
+- archive `dist/`
+- upload with `scp`
+- create a timestamped release on the server and switch `current`
+
+You can also pass the server settings through environment variables instead of command arguments:
+
+```powershell
+$env:SERVER_HOST = "212.23.201.161"
+$env:SERVER_USER = "deploy"
+$env:SERVER_PORT = "22"
+$env:DEPLOY_PATH = "/var/www/erp-mehrbanoo"
+$env:SERVER_SSH_KEY_PATH = "C:\Users\YourUser\.ssh\erp_deploy"
+npm run deploy:server
+```
+
+Optional switches:
+
+- `-SkipInstall` if `node_modules` is already up to date
+- `-SkipTypecheck` if you want faster deploys and accept skipping CI-equivalent validation
+- `-SkipBuild` if `dist/` is already built and you only want to upload it
+- `-SkipUpload` if the archive is already on the server and you only want to activate it
+- `-SkipHostKeyScan` if the server host key is already present in `~/.ssh/known_hosts`
+
 ## GitHub Secrets (Required)
 
 In your GitHub repo: Settings -> Secrets and variables -> Actions -> Repository secrets:

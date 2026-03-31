@@ -15,6 +15,7 @@ import ProductionStagesField from './ProductionStagesField';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
 import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
+import { findDuplicateUniqueFields } from '../utils/fieldUniqueness';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -628,6 +629,23 @@ const SmartForm: React.FC<SmartFormProps> = ({
           if (mapping.remaining && summaryData.remaining !== undefined) values[mapping.remaining] = summaryData.remaining;
         } else if (summaryData && (module.id === 'products' || module.id === 'production_boms' || module.id === 'production_orders')) {
           values['production_cost'] = summaryData.total;
+      }
+
+      const duplicateFields = await findDuplicateUniqueFields({
+        moduleId: module.id,
+        fields: module.fields,
+        values,
+        recordId,
+      });
+      if (duplicateFields.length > 0) {
+        form.setFields(
+          duplicateFields.map((item) => ({
+            name: item.fieldKey,
+            errors: [item.message],
+          }))
+        );
+        setLoading(false);
+        return;
       }
 
       if (onSave) {

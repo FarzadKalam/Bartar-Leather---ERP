@@ -868,3 +868,20 @@
     display: inline-block;
   }
 }
+
+@media (max-width: 768px) {
+  .ant-select-open .ant-select-selection-search-input,
+  .ant-select-focused .ant-select-selection-search-input {
+    font-size: 16px !important;
+  }
+
+  .ant-select-dropdown {
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  .ant-select-dropdown .ant-select-item-option-content {
+    white-space: normal !important;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+}
