@@ -1447,7 +1447,7 @@ const ModuleShow: React.FC = () => {
       try {
         const { data: bom, error } = await supabase
           .from('production_boms')
-          .select('name, grid_materials, production_stages_draft, product_category, image_url')
+          .select('name, grid_materials, production_stages_draft, product_category, model_name, image_url')
           .eq('id', data.bom_id)
           .single();
         if (error) throw error;
@@ -1456,6 +1456,7 @@ const ModuleShow: React.FC = () => {
           grid_materials: bom?.grid_materials || [],
           production_stages_draft: bom?.production_stages_draft || [],
           product_category: bom?.product_category ?? data?.product_category ?? null,
+          model_name: bom?.model_name ?? data?.model_name ?? null,
           name: bom?.name || data?.name || '',
           image_url: bom?.image_url ?? null,
         };
@@ -1574,6 +1575,7 @@ const ModuleShow: React.FC = () => {
             if (moduleId === 'production_orders') {
               updateData['bom_id'] = bomId;
               updateData['name'] = bom?.name || '';
+              updateData['model_name'] = bom?.model_name ?? null;
             } else {
               updateData['related_bom'] = bomId;
             }
@@ -2109,6 +2111,7 @@ const ModuleShow: React.FC = () => {
       specKeys.forEach(key => addPart(getFieldValueLabel(key, record?.[key])));
     } else {
       addPart(getFieldValueLabel('product_category', record?.product_category));
+      addPart(getFieldValueLabel('model_name', record?.model_name));
       if (record?.related_bom) {
         addPart(getFieldValueLabel('related_bom', record?.related_bom));
       }
@@ -2557,6 +2560,7 @@ const ModuleShow: React.FC = () => {
       name: data?.name || '',
       product_type: outputProductType || 'final',
       product_category: data?.product_category || null,
+      model_name: data?.model_name || null,
       related_bom: data?.bom_id || null,
       production_order_id: id || null,
       grid_materials: data?.grid_materials || [],
@@ -3001,6 +3005,7 @@ const ModuleShow: React.FC = () => {
             bom_id: id,
             name: data?.name || '',
             product_category: data?.product_category || null,
+            model_name: data?.model_name || null,
             image_url: data?.image_url || null,
             grid_materials: data?.grid_materials || [],
             production_stages_draft: data?.production_stages_draft || [],

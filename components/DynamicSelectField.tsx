@@ -44,6 +44,20 @@ const dedupeValues = (values: any[]) => {
   return next;
 };
 
+const dedupeOptions = (options: Array<{ label: string; value: string }>) => {
+  const seen = new Set<string>();
+  const next: Array<{ label: string; value: string }> = [];
+  options.forEach((option) => {
+    const valueKey = toComparableKey(option?.value);
+    const labelKey = toComparableKey(option?.label);
+    const key = valueKey || labelKey;
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    next.push(option);
+  });
+  return next;
+};
+
 const normalizeDynamicValueToLabel = (
   input: string | string[] | undefined,
   options: Array<{ label: string; value: string }>,
@@ -150,7 +164,12 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   };
 
   const normalizedOptions = useMemo(() => {
-    const next = Array.isArray(options) ? [...options] : [];
+    const next = dedupeOptions(
+      (Array.isArray(options) ? options : []).map((option) => ({
+        label: String(option?.label ?? option?.value ?? ''),
+        value: String(option?.value ?? option?.label ?? ''),
+      }))
+    );
     const currentValues = mode === 'multiple'
       ? (Array.isArray(value) ? value : [])
       : (value ? [value] : []);
@@ -472,6 +491,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         cancelText="انصراف"
         confirmLoading={loading}
         okButtonProps={{ disabled: !deleteReplacementValue }}
+        zIndex={15000}
         destroyOnHidden
       >
         <div className="flex flex-col gap-3">
@@ -501,6 +521,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         okText="ذخیره"
         cancelText="انصراف"
         confirmLoading={loading}
+        zIndex={15000}
         destroyOnHidden
       >
         <div className="flex flex-col gap-3">

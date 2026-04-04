@@ -114,6 +114,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
 
   const productTypeField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'product_type'), []);
   const rawCategoryField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'category'), []);
+  const modelNameField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'model_name'), []);
   const brandField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'brand_name'), []);
   const nameField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'name'), []);
   const manualCodeField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'manual_code'), []);
@@ -266,14 +267,20 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
     const rawLabel = rawCategoryField?.options?.find((o) => String(o.value) === rawCategory)?.label || rawCategory;
     const prodLabel = productCategoryOptions.find((o) => o.value === productCategory)?.label || productCategory;
     if (productType === 'raw' && rawLabel) parts.push(rawLabel);
-    if (productType !== 'raw' && prodLabel) parts.push(prodLabel);
-    rowFields.forEach((f) => { const label = resolveLabel(f, row[f.key]); if (label) parts.push(label); });
+    if (productType !== 'raw') {
+      if (prodLabel) parts.push(prodLabel);
+      const modelLabel = modelNameField ? resolveLabel(modelNameField, row.model_name) : '';
+      if (modelLabel) parts.push(modelLabel);
+    }
+    rowFields
+      .filter((f) => f.key !== 'model_name')
+      .forEach((f) => { const label = resolveLabel(f, row[f.key]); if (label) parts.push(label); });
     if (brandField) {
       const brandLabel = resolveLabel(brandField, sharedValues.brand_name);
       if (brandLabel) parts.push(brandLabel);
     }
     return parts.join(' ').replace(/\s+/g, ' ').trim() || `محصول جدید ${index + 1}`;
-  }, [brandField, productCategory, productCategoryOptions, productType, rawCategory, rawCategoryField?.options, resolveLabel, rowFields, sharedValues.brand_name]);
+  }, [brandField, modelNameField, productCategory, productCategoryOptions, productType, rawCategory, rawCategoryField?.options, resolveLabel, rowFields, sharedValues.brand_name]);
 
   const validate = useCallback(() => {
     if (!rows.length) return 'حداقل یک ردیف لازم است.';
