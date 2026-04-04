@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, Input, Button } from 'antd';
 import type { ButtonProps } from 'antd';
 import { QrcodeOutlined } from '@ant-design/icons';
-import { Html5Qrcode } from 'html5-qrcode';
+import type { Html5Qrcode } from 'html5-qrcode';
 
 interface QrScanResult {
   raw: string;
@@ -72,8 +72,21 @@ const QrScanPopover: React.FC<QrScanPopoverProps> = ({ onScan, label = 'اسکن
     let cancelled = false;
     const startScanner = async () => {
       try {
+        const hostname = window.location.hostname;
+        const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+        if (!window.isSecureContext && !isLocalhost) {
+          setCameraError('دسترسی به دوربین فقط روی HTTPS یا localhost فعال است. باز کردن برنامه با IP و HTTP روی موبایل معمولاً اجازه دوربین نمی‌دهد.');
+          return;
+        }
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+          setCameraError('مرورگر یا آدرس فعلی دسترسی به دوربین را پشتیبانی نمی‌کند.');
+          return;
+        }
+
         const element = document.getElementById(scannerId);
         if (!element) return;
+        const { Html5Qrcode } = await import('html5-qrcode');
         const scanner = new Html5Qrcode(scannerId);
         qrRef.current = scanner;
         await scanner.start(
