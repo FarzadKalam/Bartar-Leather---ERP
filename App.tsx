@@ -1,220 +1,46 @@
-import { useEffect } from "react";
-import { Refine, Authenticated } from "@refinedev/core";
-import { notificationProvider, ErrorComponent } from "@refinedev/antd";
-import { dataProvider } from "@refinedev/supabase";
-import { authProvider } from "./authProvider";
-import routerBindings, { UnsavedChangesNotifier, DocumentTitleHandler, CatchAllNavigate } from "@refinedev/react-router-v6";
-import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
-import { ConfigProvider, App as AntdApp } from "antd";
+import { lazy, Suspense, useEffect } from "react";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { ConfigProvider, App as AntdApp, Spin } from "antd";
 import faIR from "antd/locale/fa_IR";
-import ProfilePage from "./pages/ProfilePage";
-import SettingsPage from "./pages/Settings/SettingsPage";
 import { JalaliLocaleListener } from "antd-jalali";
-
-// ❌ تمام ایمپورت‌ها و تنظیمات dayjs را از اینجا حذف کردیم
-// چون الان در initDayjs.ts و index.tsx مدیریت می‌شوند.
-
-import { supabase } from "./supabaseClient";
-import { MODULES } from "./moduleRegistry";
-import Layout from "./components/Layout";
-import { ModuleListRefine } from "./pages/ModuleList_Refine";
-import ModuleShow from "./pages/ModuleShow";
 import "./App.css";
-import { ModuleCreate } from "./pages/ModuleCreate";
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import InquiryForm from "./pages/InquiryForm";
-import ProductionGroupOrdersList from "./pages/ProductionGroupOrdersList";
-import ProductionGroupOrderWizard from "./pages/ProductionGroupOrderWizard";
-import HRPage from "./pages/HRPage";
-import FilesGalleryPage from "./pages/FilesGalleryPage";
 
-const APP_TITLE = "\u0645\u0647\u0631\u0628\u0627\u0646\u0648 \u0627\u062a\u0648\u0645\u0627\u0633\u06cc\u0648\u0646";
-const SESSION_REFRESH_BUFFER_MS = 10 * 60 * 1000;
-const SESSION_REFRESH_INTERVAL_MS = 60 * 1000;
+const Login = lazy(() => import("./pages/Login"));
+const InquiryForm = lazy(() => import("./pages/InquiryForm"));
+const AuthenticatedApp = lazy(() => import("./AuthenticatedApp"));
+
+const FullScreenLoader = () => (
+  <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+    <Spin size="large" />
+  </div>
+);
 
 function App() {
   useEffect(() => {
-    document.body.style.fontFamily = 'Vazirmatn, sans-serif';
+    document.body.style.fontFamily = "Vazirmatn, sans-serif";
   }, []);
-
-  useEffect(() => {
-    const publicPaths = ["/inquiry"];
-
-    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
-      const eventName = String(event);
-      const pathname = window.location.pathname;
-      const isPublic = publicPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
-
-      if (eventName === "SIGNED_OUT" && !isPublic) {
-        window.location.replace("/login");
-      }
-    });
-
-    return () => {
-      subscription?.subscription?.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    const keepSessionFresh = async () => {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
-
-      if (error || !session?.expires_at) return;
-
-      const expiresAtMs = session.expires_at * 1000;
-      const remainingMs = expiresAtMs - Date.now();
-      if (remainingMs > SESSION_REFRESH_BUFFER_MS) return;
-
-      await supabase.auth.refreshSession();
-    };
-
-    void keepSessionFresh();
-
-    const intervalId = window.setInterval(() => {
-      void keepSessionFresh();
-    }, SESSION_REFRESH_INTERVAL_MS);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        void keepSessionFresh();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
-
-  const resources = Object.values(MODULES).map((mod) => ({
-    name: mod.id, 
-    list: `/${mod.id}`,
-    show: `/${mod.id}/:id`,
-    create: `/${mod.id}/create`,
-    edit: `/${mod.id}/:id`,
-    meta: {
-      label: mod.titles.fa,
-    },
-  }));
-
-  const getStandalonePageTitle = (pathname?: string) => {
-    if (!pathname) return null;
-    if (pathname === "/") return "\u062f\u0627\u0634\u0628\u0648\u0631\u062f";
-    if (pathname.startsWith("/login")) return "\u0648\u0631\u0648\u062f";
-    if (pathname.startsWith("/inquiry")) return "\u0641\u0631\u0645 \u0627\u0633\u062a\u0639\u0644\u0627\u0645";
-    if (pathname.startsWith("/settings")) return "\u062a\u0646\u0638\u06cc\u0645\u0627\u062a";
-    if (pathname.startsWith("/profile")) return "\u067e\u0631\u0648\u0641\u0627\u06cc\u0644";
-    if (pathname.startsWith("/hr")) return "\u0645\u0646\u0627\u0628\u0639 \u0627\u0646\u0633\u0627\u0646\u06cc";
-    if (pathname.startsWith("/gallery")) return "\u06af\u0627\u0644\u0631\u06cc \u0641\u0627\u06cc\u0644\u200c\u0647\u0627";
-    return null;
-  };
-
-  const getActionLabel = (action?: string) => {
-    if (action === "list") return "\u0644\u06cc\u0633\u062a";
-    if (action === "create") return "\u0627\u06cc\u062c\u0627\u062f";
-    if (action === "edit") return "\u0648\u06cc\u0631\u0627\u06cc\u0634";
-    if (action === "show") return "\u062c\u0632\u0626\u06cc\u0627\u062a";
-    return "";
-  };
-
-  const titleHandler = ({
-    resource,
-    action,
-    pathname,
-  }: {
-    resource?: any;
-    action?: string;
-    pathname?: string;
-    autoGeneratedTitle: string;
-  }) => {
-    const standalone = getStandalonePageTitle(pathname);
-    if (standalone) return `${standalone} | ${APP_TITLE}`;
-
-    const resourceLabel =
-      resource?.meta?.label || resource?.label || MODULES?.[resource?.name]?.titles?.fa || resource?.name || "";
-
-    if (resourceLabel) {
-      if (action === "show" || action === "edit") {
-        return `${resourceLabel} | ${APP_TITLE}`;
-      }
-      const actionLabel = getActionLabel(action);
-      return actionLabel ? `${actionLabel} ${resourceLabel} | ${APP_TITLE}` : `${resourceLabel} | ${APP_TITLE}`;
-    }
-
-    return APP_TITLE;
-  };
 
   return (
     <BrowserRouter>
-      <ConfigProvider 
-        direction="rtl" 
-        locale={faIR} 
+      <ConfigProvider
+        direction="rtl"
+        locale={faIR}
         theme={{
           token: {
-            colorPrimary: '#c58f60', 
-            fontFamily: 'Vazirmatn, sans-serif',
-          }
+            colorPrimary: "#c58f60",
+            fontFamily: "Vazirmatn, sans-serif",
+          },
         }}
       >
         <JalaliLocaleListener />
         <AntdApp>
-          <Refine
-            dataProvider={dataProvider(supabase)}
-            authProvider={authProvider}
-            notificationProvider={notificationProvider}
-            routerProvider={routerBindings}
-            resources={resources} 
-            options={{
-              syncWithLocation: true, 
-              warnWhenUnsavedChanges: true, 
-            }}
-          >
+          <Suspense fallback={<FullScreenLoader />}>
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/inquiry/*" element={<InquiryForm />} />
-
-              <Route
-                element={
-                  <Authenticated
-                    key="authenticated-inner"
-                    fallback={<CatchAllNavigate to="/login" />}
-                  >
-                    <Layout isDarkMode={false} toggleTheme={() => {}}>
-                      <Outlet />
-                    </Layout>
-                  </Authenticated>
-                }
-              >
-                <Route index element={<Dashboard />} />
-                <Route path="/profile" element={<ProfilePage />} />
-                <Route path="/production_group_orders" element={<ProductionGroupOrdersList />} />
-                <Route path="/production_group_orders/create" element={<ProductionGroupOrderWizard />} />
-                <Route path="/production_group_orders/:id" element={<ProductionGroupOrderWizard />} />
-                <Route path="/hr" element={<HRPage />} />
-                <Route path="/hr/:employeeId" element={<HRPage />} />
-                <Route path="/gallery" element={<FilesGalleryPage />} />
-                
-                <Route path="/:moduleId">
-                  <Route index element={<ModuleListRefine />} />
-                  <Route path="create" element={<ModuleCreate />} />
-                  <Route path=":id" element={<ModuleShow />} />
-                  <Route path=":id/edit" element={<ModuleShow />} />
-                </Route>
-
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="*" element={<ErrorComponent />} />
-              </Route>
+              <Route path="/*" element={<AuthenticatedApp />} />
             </Routes>
-            
-            <UnsavedChangesNotifier />
-            <DocumentTitleHandler handler={titleHandler} />
-          </Refine>
+          </Suspense>
         </AntdApp>
       </ConfigProvider>
     </BrowserRouter>
@@ -222,5 +48,3 @@ function App() {
 }
 
 export default App;
-
-
