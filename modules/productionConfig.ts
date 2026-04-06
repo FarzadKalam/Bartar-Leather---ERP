@@ -75,6 +75,16 @@ export const productionBomModule: ModuleDefinition = {
       validation: { required: false },
       isTableColumn: true,
     },  
+    {
+      key: 'model_name',
+      labels: { fa: 'نام مدل', en: 'Model Name' },
+      type: FieldType.SELECT,
+      location: FieldLocation.HEADER,
+      order: 2.6,
+      dynamicOptionsCategory: 'model_name',
+      nature: FieldNature.STANDARD,
+      validation: { required: false },
+    },
     { 
       key: 'production_stages', 
       labels: { fa: 'مراحل تولید', en: 'Stages' }, 
@@ -141,6 +151,16 @@ export const productionOrderModule: ModuleDefinition = {
       order: 2.5, 
       dynamicOptionsCategory: 'product_categories',
       nature: FieldNature.STANDARD, 
+      validation: { required: false },
+    },
+    {
+      key: 'model_name',
+      labels: { fa: 'نام مدل', en: 'Model Name' },
+      type: FieldType.SELECT,
+      location: FieldLocation.HEADER,
+      order: 2.52,
+      dynamicOptionsCategory: 'model_name',
+      nature: FieldNature.STANDARD,
       validation: { required: false },
     },
     {
@@ -356,4 +376,3 @@ export const productionOrderModule: ModuleDefinition = {
   relatedTabs: [],
   table: 'production_orders'
 };
-

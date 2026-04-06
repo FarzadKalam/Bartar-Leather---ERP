@@ -48,6 +48,17 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const [lastAppliedBomId, setLastAppliedBomId] = useState<string | null>(null);
   const bomConfirmOpenRef = useRef<string | null>(null);
 
+  const normalizeStateFieldValue = (input: any): any => {
+    if (input && typeof input === 'object' && 'target' in input) {
+      const target = (input as any).target;
+      if (target && typeof target === 'object') {
+        if ('checked' in target) return !!target.checked;
+        if ('value' in target) return target.value;
+      }
+    }
+    return input;
+  };
+
   const buildAssigneeCombo = (assigneeType?: string | null, assigneeId?: string | null) => {
     if (!assigneeType || !assigneeId) return null;
     return `${assigneeType}_${assigneeId}`;
@@ -317,6 +328,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       specKeys.forEach(key => addPart(getFieldValueLabel(key, values?.[key])));
     } else {
       addPart(getFieldValueLabel('product_category', values?.product_category));
+      addPart(getFieldValueLabel('model_name', values?.model_name));
       if (values?.related_bom) {
         addPart(getFieldValueLabel('related_bom', values?.related_bom));
       }
@@ -370,7 +382,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       try {
         const { data, error } = await supabase
           .from('production_boms')
-          .select('name, grid_materials, product_category, production_stages_draft')
+          .select('name, grid_materials, product_category, model_name, production_stages_draft')
           .eq('id', bomId)
           .single();
         if (error) throw error;
@@ -378,6 +390,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
         const payload = {
           grid_materials: data?.grid_materials || [],
           product_category: data?.product_category || null,
+          model_name: data?.model_name || null,
           production_stages_draft: data?.production_stages_draft || [],
           name: data?.name || undefined,
         };
@@ -989,15 +1002,17 @@ const SmartForm: React.FC<SmartFormProps> = ({
                        const resolvedField = normalizeFieldForBulkEdit(field as ModuleField);
                        return (
                           <div key={field.key} className={field.type === FieldType.IMAGE ? 'row-span-2' : ''}>
-                            <SmartFieldRenderer 
-                              field={resolvedField} 
-                              value={formData[field.key]} 
-                              onChange={(val) => {
-                                form.setFieldValue(field.key, val);
-                                setFormData({ ...form.getFieldsValue(), [field.key]: val });
-                              }}
-                            forceEditMode={true}
-                            options={options}
+                             <SmartFieldRenderer 
+                               field={resolvedField} 
+                               value={formData[field.key]} 
+                               onChange={(val) => {
+                                 setFormData((prev: any) => ({
+                                   ...prev,
+                                   [field.key]: normalizeStateFieldValue(val),
+                                 }));
+                               }}
+                             forceEditMode={true}
+                             options={options}
                             moduleId={module.id}
                             recordId={recordId}
                             allValues={formData}
@@ -1076,9 +1091,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                 key={field.key}
                                 field={resolvedField}
                                 value={fieldValue}
-                                recordId={recordId}
+                               recordId={recordId}
                                 onChange={(val) => {
-                                  if (!isReadOnly) { form.setFieldValue(field.key, val); setFormData({ ...form.getFieldsValue(), [field.key]: val }); }
+                                  if (!isReadOnly) {
+                                    setFormData((prev: any) => ({
+                                      ...prev,
+                                      [field.key]: normalizeStateFieldValue(val),
+                                    }));
+                                  }
                                 }}
                                forceEditMode={true} options={options}
                                moduleId={module.id}
@@ -1096,12 +1116,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                     ...block,
                                     tableColumns: (block.tableColumns || []).map((col: any) => {
                                       if (col.key === 'stock') return { ...col, readonly: false };
-                                      if (col.key === 'main_unit' || col.key === 'sub_unit') {
-                                        return {
-                                          ...col,
-                                          defaultValue: formData?.[col.key] ?? form.getFieldValue(col.key) ?? col.defaultValue,
-                                        };
-                                      }
+                                       if (col.key === 'main_unit' || col.key === 'sub_unit') {
+                                         return {
+                                           ...col,
+                                           defaultValue: formData?.[col.key] ?? col.defaultValue,
+                                         };
+                                       }
                                       return col;
                                     }),
                                   }

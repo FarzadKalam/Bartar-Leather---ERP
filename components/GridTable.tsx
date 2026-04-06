@@ -1580,7 +1580,7 @@ const GridTable: React.FC<GridTableProps> = ({
                   <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
                     <Table
                       dataSource={row.pieces || []}
-                      rowKey={(record: any, idx?: number) => record.key || idx}
+                      rowKey={(record: any) => String(record?.key || record?.id)}
                       pagination={false}
                       size="small"
                       className="custom-erp-table"

@@ -1149,6 +1149,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       okText="افزودن"
       cancelText="انصراف"
       confirmLoading={loading}
+      forceRender
       destroyOnHidden
       zIndex={resolvedPopupZIndex - 20}
       afterOpenChange={(visible) => {

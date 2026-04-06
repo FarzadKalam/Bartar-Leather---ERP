@@ -60,6 +60,18 @@ const fieldsArray: any[] = [
     logic: { visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' } } 
   },
   {
+    key: 'model_name',
+    labels: { fa: 'نام مدل', en: 'Model Name' },
+    type: FieldType.SELECT,
+    location: FieldLocation.BLOCK,
+    blockId: 'baseInfo',
+    order: 2.6,
+    dynamicOptionsCategory: 'model_name',
+    nature: FieldNature.STANDARD,
+    validation: { required: false },
+    logic: { visibleIf: { field: 'product_type', operator: LogicOperator.NOT_EQUALS, value: 'raw' } }
+  },
+  {
     key: 'brand_name',
     labels: { fa: 'نام برند', en: 'Brand Name' },
     type: FieldType.SELECT,
