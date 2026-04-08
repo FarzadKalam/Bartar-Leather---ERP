@@ -1636,7 +1636,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
                 title={typeValue === 'percent' ? 'درصد' : 'مبلغ'}
                 className="px-1"
               >
-                {typeValue === 'percent' ? '٪' : (isAnyInvoiceItems ? 'تومان' : 'ریال')}
+                {typeValue === 'percent' ? '٪' : 'تومان'}
               </Button>
             )}
           </div>

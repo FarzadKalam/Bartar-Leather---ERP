@@ -3,6 +3,18 @@ import { App as AntdApp, Button, Card, Input } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 
+const isNetworkError = (error: unknown): boolean => {
+  const message = String((error as any)?.message || '').toLowerCase();
+  return (
+    message.includes('failed to fetch') ||
+    message.includes('network') ||
+    message.includes('connection') ||
+    message.includes('err_connection_reset') ||
+    message.includes('err_internet_disconnected') ||
+    message.includes('err_network_changed')
+  );
+};
+
 const Login = () => {
   const { message } = AntdApp.useApp();
   const [email, setEmail] = useState('');
@@ -43,7 +55,11 @@ const Login = () => {
       message.success('خوش آمدید! در حال ورود...');
       navigate('/');
     } catch (error: any) {
-      message.error('خطا در ورود: ' + error.message);
+      if (isNetworkError(error)) {
+        message.error('Cannot reach auth server. Check internet/VPN and Supabase server.');
+      } else {
+        message.error('Login failed: ' + error.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -88,7 +104,11 @@ const Login = () => {
       window.history.replaceState({}, document.title, '/login');
       navigate('/');
     } catch (error: any) {
-      message.error('خطا در تغییر رمز: ' + error.message);
+      if (isNetworkError(error)) {
+        message.error('Cannot reach auth server. Check internet/VPN and Supabase server.');
+      } else {
+        message.error('Password update failed: ' + error.message);
+      }
     } finally {
       setLoading(false);
     }

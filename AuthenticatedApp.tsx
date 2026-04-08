@@ -30,8 +30,6 @@ const ModuleCreate = lazy(() =>
 );
 
 const APP_TITLE = "مهربانو اتوماسیون";
-const SESSION_REFRESH_BUFFER_MS = 10 * 60 * 1000;
-const SESSION_REFRESH_INTERVAL_MS = 60 * 1000;
 
 const FullScreenLoader = () => (
   <div className="min-h-screen bg-gray-100 flex items-center justify-center">
@@ -58,41 +56,6 @@ function AuthenticatedApp() {
     };
   }, []);
 
-  useEffect(() => {
-    const keepSessionFresh = async () => {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
-
-      if (error || !session?.expires_at) return;
-
-      const expiresAtMs = session.expires_at * 1000;
-      const remainingMs = expiresAtMs - Date.now();
-      if (remainingMs > SESSION_REFRESH_BUFFER_MS) return;
-
-      await supabase.auth.refreshSession();
-    };
-
-    void keepSessionFresh();
-
-    const intervalId = window.setInterval(() => {
-      void keepSessionFresh();
-    }, SESSION_REFRESH_INTERVAL_MS);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        void keepSessionFresh();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
 
   const resources = Object.values(MODULES).map((mod) => ({
     name: mod.id,

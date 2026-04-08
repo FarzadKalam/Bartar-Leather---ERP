@@ -409,6 +409,10 @@
   margin-top: 2px;
 }
 
+.print-table-wrap {
+  margin-top: 8px;
+}
+
 .print-table {
   width: 100%;
   border-collapse: collapse;
@@ -431,6 +435,80 @@
 
 .print-value {
   color: #111827;
+}
+
+.print-card--passport {
+  min-height: 148mm;
+  height: auto;
+  page-break-after: auto;
+  page-break-inside: auto;
+  overflow: visible;
+}
+
+.print-card--passport .print-table-wrap {
+  overflow: visible;
+}
+
+.print-card--passport .print-table-wrap--stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.print-card--passport .print-section {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-card--passport .print-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4b5563;
+  margin: 0 0 4px;
+}
+
+.print-card--passport .print-table {
+  margin-top: 0;
+  table-layout: fixed;
+}
+
+.print-card--passport .print-table td {
+  vertical-align: top;
+}
+
+.print-card--passport .print-label {
+  width: 32%;
+}
+
+.print-card--passport .print-table--two-col .print-label {
+  width: 16%;
+}
+
+.print-card--passport .print-table--two-col .print-value {
+  width: 34%;
+}
+
+.print-card--passport .print-label-empty,
+.print-card--passport .print-value-empty {
+  background: #fff !important;
+  border-style: dashed !important;
+  border-color: #f3f4f6 !important;
+}
+
+@media print {
+  #print-root .print-card.print-card--passport {
+    height: auto !important;
+    page-break-after: auto !important;
+    page-break-inside: auto !important;
+  }
+
+  #print-root[data-print-size="A4"] .print-card.print-card--passport {
+    padding: 10mm !important;
+  }
+
+  #print-root[data-print-size="A4"] .print-card.print-card--passport .print-table {
+    font-size: 10.5px !important;
+  }
 }
 
 /* =========================================

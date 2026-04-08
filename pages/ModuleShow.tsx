@@ -2176,7 +2176,7 @@ const ModuleShow: React.FC = () => {
     if (value === null || value === undefined) return '';
     if (Array.isArray(value)) return value.join('، ');
     if (field.type === FieldType.CHECKBOX) return value ? 'بله' : 'خیر';
-    if (field.type === FieldType.PRICE) return `${Number(value).toLocaleString()} ریال`;
+    if (field.type === FieldType.PRICE) return `${Number(value).toLocaleString()} تومان`;
     if (field.type === FieldType.PERCENTAGE) return `${value}%`;
     if (field.type === FieldType.DATE) {
       return formatPersian(value, 'DATE') || String(value);
@@ -3211,7 +3211,7 @@ const ModuleShow: React.FC = () => {
         onPrintSizeChange={printManager.setPrintSize}
         renderPrintCard={printManager.renderPrintCard}
         printMode={printManager.printMode}
-        printableFields={printableFields}
+        printableFields={printManager.printableFieldsForTemplate}
         selectedPrintFields={printManager.selectedPrintFields}
         onTogglePrintField={printManager.handleTogglePrintField}
       />

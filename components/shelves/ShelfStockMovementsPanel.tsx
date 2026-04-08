@@ -230,6 +230,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
     if (editingRow) {
       quickCreateForm.setFieldsValue({
         product_id: editingRow.product_id || null,
+        bundle_id: editingRow.bundle_id || null,
         voucher_type: editingRow.voucher_type || 'incoming',
         source: editingRow.source || 'opening_balance',
         main_unit: editingRow.main_unit || null,
@@ -243,6 +244,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
     }
     quickCreateForm.setFieldsValue({
       product_id: null,
+      bundle_id: null,
       voucher_type: 'incoming',
       source: 'opening_balance',
       main_unit: null,

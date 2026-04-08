@@ -587,6 +587,22 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         if (fieldType === FieldType.TIME) {
           return <span className="font-mono persian-number">{formatPersian(value, 'TIME')}</span>;
         }
+        if (fieldType === FieldType.LINK) {
+          const rawLink = String(value || '').trim();
+          if (!rawLink) return <span>{compactMode ? '' : '-'}</span>;
+          const href = /^(https?:\/\/|mailto:|tel:)/i.test(rawLink) ? rawLink : `https://${rawLink}`;
+          return (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-leather-600 hover:underline break-all"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {rawLink}
+            </a>
+          );
+        }
         if (fieldType === FieldType.SELECT || fieldType === FieldType.RELATION || fieldType === FieldType.STATUS) {
              const selectedOpt = fieldOptions.find((o: any) => o.value === value);
              if (fieldType === FieldType.STATUS && selectedOpt) {
@@ -640,6 +656,18 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             value={formatTextForInput(value)}
             onChange={e => onChange(normalizeDigitsToEnglish(e.target.value))}
             rows={compactMode ? 1 : 4}
+          />
+        );
+
+      case FieldType.LINK:
+        return (
+          <Input
+            {...commonProps}
+            type="url"
+            dir="ltr"
+            value={normalizeDigitsToEnglish(value)}
+            onChange={e => onChange(normalizeDigitsToEnglish(e.target.value))}
+            autoComplete="off"
           />
         );
       

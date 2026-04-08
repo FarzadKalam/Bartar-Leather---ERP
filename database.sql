@@ -64,6 +64,11 @@ CREATE TABLE public.products (
   manual_code text,
   product_type text, -- مواد اولیه، نیمه آماده، نهایی
   category text, -- چرم، آستر، یراق و...
+  sewing_type text,
+  warranty_months int4,
+  after_sales_service_months int4,
+  site_code text,
+  site_product_link text,
   main_unit text,
   sub_unit text,
   colors jsonb, -- آرایه‌ای از رنگ‌ها
@@ -325,6 +330,12 @@ ALTER TABLE public.products ADD COLUMN calculation_method text; -- روش محا
 ALTER TABLE public.products ALTER COLUMN status SET DEFAULT 'active';
 
 -- اضافه کردن فیلدهای جدید چرم و مواد اولیه
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS sewing_type text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS warranty_months int4;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS after_sales_service_months int4;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS site_code text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS site_product_link text;
+
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_type text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_color_1 text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_finish_1 text;
@@ -1749,4 +1760,3 @@ CREATE INDEX IF NOT EXISTS idx_stock_transfers_bundle
   WHERE bundle_id IS NOT NULL;
 
 ALTER TABLE public.bundle_items ADD CONSTRAINT bundle_items_bundle_product_unique UNIQUE (bundle_id, product_id);
-

@@ -298,6 +298,22 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
             const label = opt?.label || value;
             return <Tag color={opt?.color || 'default'} style={{fontSize: '10px', marginRight: 0}}>{label}</Tag>;
         }
+        if (field.type === FieldType.LINK) {
+            const rawLink = String(value || '').trim();
+            if (!rawLink) return '-';
+            const href = /^(https?:\/\/|mailto:|tel:)/i.test(rawLink) ? rawLink : `https://${rawLink}`;
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-leather-600 hover:underline"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {rawLink}
+              </a>
+            );
+        }
         if (field.type === FieldType.SELECT) {
             const label = getSingleOptionLabel(field, value, dynamicOptions, relationOptions, record, field.relationConfig);
             return <span className="text-xs text-gray-600 dark:text-gray-300">{label}</span>;

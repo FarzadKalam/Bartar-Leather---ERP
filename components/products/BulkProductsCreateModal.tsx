@@ -48,7 +48,6 @@ const UNSUPPORTED_TYPES = new Set<FieldType>([
   FieldType.JSON,
   FieldType.READONLY_LOOKUP,
   FieldType.CHECKLIST,
-  FieldType.LINK,
   FieldType.LOCATION,
 ]);
 
@@ -314,8 +313,9 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         actorProfileId = actorProfile?.id ? String(actorProfile.id) : null;
       }
       const productIds: string[] = [];
-      const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
+      const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null; bundleId?: string | null }> = [];
       const transfers: Record<string, unknown>[] = [];
+      const bundleItems: Record<string, unknown>[] = [];
       const changelogs: Record<string, unknown>[] = [];
 
       for (let i = 0; i < rows.length; i += 1) {
@@ -339,10 +339,11 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
 
         const q = toNum(row.opening_stock);
         const shelf = row.opening_shelf_id ? String(row.opening_shelf_id) : null;
+        const bundleId = row.bundle_id ? String(row.bundle_id) : null;
         if (q > 0 && shelf) {
           const mainUnit = inserted.main_unit ? String(inserted.main_unit).trim() : '';
           const subUnit = inserted.sub_unit ? String(inserted.sub_unit).trim() : '';
-          deltas.push({ productId: pid, shelfId: shelf, delta: q, unit: mainUnit || null });
+          deltas.push({ productId: pid, shelfId: shelf, delta: q, unit: mainUnit || null, bundleId });
           const subQty = !mainUnit || !subUnit
             ? 0
             : (mainUnit === subUnit
@@ -351,6 +352,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
           transfers.push({
             transfer_type: 'opening_balance',
             product_id: pid,
+            bundle_id: bundleId,
             delivered_qty: q,
             required_qty: Number.isFinite(subQty) ? subQty : 0,
             invoice_id: null,
@@ -360,12 +362,23 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
             sender_id: actorProfileId,
             receiver_id: actorProfileId,
           });
+          if (bundleId) {
+            bundleItems.push({
+              bundle_id: bundleId,
+              product_id: pid,
+              quantity: q,
+            });
+          }
         }
       }
 
       if (deltas.length) await applyInventoryDeltas(supabase as never, deltas);
       if (productIds.length) await syncMultipleProductsStock(supabase as never, productIds);
       if (transfers.length) { const { error: tErr } = await supabase.from('stock_transfers').insert(transfers); if (tErr) throw tErr; }
+      if (bundleItems.length) {
+        const { error: bundleErr } = await supabase.from('bundle_items').upsert(bundleItems, { onConflict: 'bundle_id,product_id' });
+        if (bundleErr) throw bundleErr;
+      }
       if (changelogs.length) await supabase.from('changelogs').insert(changelogs);
       msg.success(`${productIds.length} محصول با موفقیت ایجاد شد.`);
       onCreated?.(productIds.length);

@@ -259,7 +259,7 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                               color: isSelected ? '#c58f60' : '#374151',
                               fontWeight: isSelected ? 600 : 500
                             }}>
-                              {field.labels.fa}
+                              {field?.labels?.fa || field?.labels?.en || field?.key}
                             </span>
                           </div>
                         );
