@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Space, message, Empty, Typography, Spin, Select } from 'antd';
+import { App, Table, Button, Space, Empty, Typography, Spin, Select } from 'antd';
 import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined, CopyOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
@@ -85,6 +85,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   canViewField,
   readOnly,
 }) => {
+  const { message } = App.useApp();
   const isReadOnly = block?.readonly === true || readOnly === true || canEditModule === false;
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
   const isProductInventory = moduleId === 'products' && block?.id === 'product_inventory';
@@ -122,8 +123,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const [userToggledCollapse, setUserToggledCollapse] = useState(false);
 
   const resolveSelectPopupContainer = (trigger?: HTMLElement | null) => {
+    if (isMobileViewport) return document.body;
     const overlayParent = trigger?.closest(
-      '.ant-modal-root, .ant-modal-wrap, .ant-modal-content, .ant-drawer, .ant-drawer-root, .ant-drawer-content, .ant-drawer-content-wrapper',
+      '.ant-modal-root, .ant-modal-wrap, .ant-drawer-root, .ant-drawer-content-wrapper',
     );
     if (overlayParent instanceof HTMLElement) return overlayParent;
     return document.body;
@@ -134,6 +136,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
       ? { zIndex: 4000, width: `min(92vw, ${Math.max(desktopMinWidth, 420)}px)`, maxWidth: 'calc(100vw - 24px)' }
       : { zIndex: 4000, minWidth: desktopMinWidth, maxWidth: 'calc(100vw - 48px)' }
   );
+  const mobileDropdownAlign = isMobileViewport
+    ? { overflow: { adjustX: false, adjustY: false } }
+    : undefined;
 
   useEffect(() => {
     if (!isBundleContents || !recordId) return;
@@ -1414,11 +1419,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
                 <Select
                   placeholder="جستجو یا انتخاب محصول"
                   value={null}
-                  showSearch
+                  showSearch={!isMobileViewport}
                   options={productOptions}
                   optionFilterProp="label"
                   popupMatchSelectWidth={isMobileViewport}
-                  onDropdownVisibleChange={(open) => {
+                  placement={isMobileViewport ? 'bottomLeft' : undefined}
+                  dropdownAlign={mobileDropdownAlign}
+                  virtual={!isMobileViewport}
+                  listHeight={isMobileViewport ? 256 : undefined}
+                  onOpenChange={(open) => {
                     if (!open) return;
                     ensureRowExpanded(rowKey);
                     loadProductsForRow(rowKey, _record, { resetPage: true });
@@ -1468,11 +1477,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
                   loading={shelvesState?.loading}
                   options={shelvesState?.options || []}
                   popupMatchSelectWidth={isMobileViewport}
+                  placement={isMobileViewport ? 'bottomLeft' : undefined}
+                  dropdownAlign={mobileDropdownAlign}
+                  virtual={!isMobileViewport}
+                  listHeight={isMobileViewport ? 256 : undefined}
                   onChange={(val) => {
                     if (rowIndex < 0) return;
                     updateRow(rowIndex, 'selected_shelf_id', val || null);
                   }}
-                  onDropdownVisibleChange={(open) => {
+                  onOpenChange={(open) => {
                     if (!open || !hasProduct) return;
                     if (!shelvesState?.loading && !(shelvesState?.options || []).length) {
                       loadShelvesForRow(rowKey, record.selected_product_id);

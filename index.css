@@ -1115,8 +1115,23 @@
 
   .ant-select-dropdown {
     max-width: calc(100vw - 24px) !important;
+    overflow-anchor: none;
   }
 
+  .ant-select-dropdown .rc-virtual-list-holder {
+    overscroll-behavior: contain;
+  }
+
+  .ant-modal-wrap,
+  .ant-modal,
+  .ant-modal-content,
+  .ant-modal-body {
+    overflow-anchor: none;
+  }
+
+  .ant-modal .custom-scrollbar {
+    overscroll-behavior: contain;
+  }
   .ant-select-dropdown .ant-select-item-option-content {
     white-space: normal !important;
     word-break: break-word;
