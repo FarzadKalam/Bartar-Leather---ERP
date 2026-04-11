@@ -52,7 +52,11 @@ const PrintSection: React.FC<PrintSectionProps> = ({
     };
   }, [printMode]);
   
-  const isFieldSelectionAvailable = selectedTemplateId && (selectedTemplateId === 'product_label' || selectedTemplateId === 'production_passport') && printableFields.length > 0;
+  const isFieldSelectionAvailable = selectedTemplateId && (
+    selectedTemplateId === 'product_label'
+    || selectedTemplateId === 'product_passport'
+    || selectedTemplateId === 'production_passport'
+  ) && printableFields.length > 0;
   const previewScaleMap: Record<PrintPaperSize, number> = {
     A4: isMobile ? 0.35 : 0.46,
     A5: isMobile ? 0.5 : 0.68,
