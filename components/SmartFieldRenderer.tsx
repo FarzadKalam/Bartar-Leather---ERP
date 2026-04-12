@@ -110,11 +110,17 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
   const canShowFilesGallery = supportsFilesGallery && canViewFilesManager && !!recordId;
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  const shouldUseStableMobileSelect = isMobileViewport;
+  const shouldEnableSearch = !isMobileViewport;
+  const mobileDropdownAlign = shouldUseStableMobileSelect
+    ? { overflow: { adjustX: false, adjustY: false } }
+    : undefined;
   const resolvedPopupZIndex = popupZIndex ?? 13000;
   const resolvePopupContainer = (trigger?: HTMLElement | null) => {
     if (popupContainer) return popupContainer;
+    if (isMobileViewport) return document.body;
     const overlayParent = trigger?.closest(
-      '.ant-modal-root, .ant-modal-wrap, .ant-modal-content, .ant-drawer, .ant-drawer-root, .ant-drawer-content, .ant-drawer-content-wrapper',
+      '.ant-modal-root, .ant-modal-wrap, .ant-drawer-root, .ant-drawer-content-wrapper',
     );
     if (overlayParent instanceof HTMLElement) return overlayParent;
     return document.body;
@@ -703,6 +709,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     placeholder={compactMode ? '' : "انتخاب کنید"}
                     onOptionsUpdate={onOptionsUpdate}
                     disabled={!forceEditMode}
+                    showSearch={shouldEnableSearch}
                     getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
                     popupRootStyle={{ zIndex: resolvedPopupZIndex }}
                 />
@@ -711,10 +718,14 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
             <Select 
                 {...commonProps}
-                showSearch
+                showSearch={shouldEnableSearch}
                 options={fieldOptions}
                 allowClear
                 optionFilterProp="label"
+                placement={shouldUseStableMobileSelect ? 'bottomLeft' : undefined}
+                dropdownAlign={mobileDropdownAlign}
+                virtual={!shouldUseStableMobileSelect}
+                listHeight={shouldUseStableMobileSelect ? 256 : undefined}
                 getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
                 styles={{ popup: { root: { zIndex: resolvedPopupZIndex } } }}
             />
@@ -732,6 +743,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     mode="multiple"
                 onOptionsUpdate={onOptionsUpdate}
                 disabled={!forceEditMode}
+                showSearch={shouldEnableSearch}
                 getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
                 popupRootStyle={{ zIndex: resolvedPopupZIndex }}
                 />
@@ -741,10 +753,14 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             <Select 
                 {...commonProps}
                 mode="multiple"
-                showSearch
+                showSearch={shouldEnableSearch}
                 options={fieldOptions}
                 allowClear
                 optionFilterProp="label"
+                placement={shouldUseStableMobileSelect ? 'bottomLeft' : undefined}
+                dropdownAlign={mobileDropdownAlign}
+                virtual={!shouldUseStableMobileSelect}
+                listHeight={shouldUseStableMobileSelect ? 256 : undefined}
                 getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
                 styles={{ popup: { root: { zIndex: resolvedPopupZIndex } } }}
             />
@@ -761,7 +777,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         if (relConfigAny?.dependsOn && allValues) {
              const depVal = allValues[relConfigAny.dependsOn];
              if (!depVal) {
-                 return <Select disabled placeholder="ابتدا فیلد مرتبط را انتخاب کنید" style={{width:'100%'}} value={value} options={[]} getPopupContainer={(trigger) => resolvePopupContainer(trigger)} styles={{ popup: { root: { zIndex: resolvedPopupZIndex } } }} />;
+                 return <Select disabled placeholder="ابتدا فیلد مرتبط را انتخاب کنید" style={{width:'100%'}} value={value} options={[]} showSearch={false} placement={shouldUseStableMobileSelect ? 'bottomLeft' : undefined} dropdownAlign={mobileDropdownAlign} virtual={!shouldUseStableMobileSelect} listHeight={shouldUseStableMobileSelect ? 256 : undefined} getPopupContainer={(trigger) => resolvePopupContainer(trigger)} styles={{ popup: { root: { zIndex: resolvedPopupZIndex } } }} />;
              }
              filteredOptions = fieldOptions.filter((opt: any) => opt.module === depVal);
         }
@@ -773,11 +789,15 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     {...commonProps}
                     style={{ ...((commonProps as any)?.style || {}), width: 'auto', flex: 1, minWidth: 0 }}
                     className="min-w-0"
-                    showSearch
+                    showSearch={shouldEnableSearch}
                     options={filteredOptions}
                     optionFilterProp="label"
                     getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
                     popupMatchSelectWidth={isMobileViewport}
+                    placement={shouldUseStableMobileSelect ? 'bottomLeft' : undefined}
+                    dropdownAlign={mobileDropdownAlign}
+                    virtual={!shouldUseStableMobileSelect}
+                    listHeight={shouldUseStableMobileSelect ? 256 : undefined}
                     styles={{ popup: { root: relationPopupRootStyle } }}
                     filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                     popupRender={(menu) => (

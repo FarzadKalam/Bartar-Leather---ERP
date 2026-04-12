@@ -140,11 +140,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   disabled = false,
   mode = undefined,
   onOptionsUpdate,
-  getPopupContainer = (trigger) => {
-    const modalParent = trigger?.closest('.ant-modal-wrap, .ant-modal-content, .ant-drawer-content');
-    if (modalParent instanceof HTMLElement) return modalParent;
-    return document.body;
-  },
+  getPopupContainer,
   popupRootStyle,
   dropdownStyle,
   manageMode = 'remote',
@@ -160,6 +156,16 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   const [editOptionValue, setEditOptionValue] = useState('');
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
   const isLocalMode = manageMode === 'local';
+  const mobileDropdownAlign = isMobileViewport
+    ? { overflow: { adjustX: false, adjustY: false } }
+    : undefined;
+  const resolvedPopupContainer = (trigger: HTMLElement) => {
+    if (typeof getPopupContainer === 'function') return getPopupContainer(trigger);
+    if (isMobileViewport) return document.body;
+    const modalParent = trigger?.closest('.ant-modal-root, .ant-modal-wrap, .ant-drawer-root, .ant-drawer-content-wrapper');
+    if (modalParent instanceof HTMLElement) return modalParent;
+    return document.body;
+  };
 
   const mergedDropdownStyle: React.CSSProperties = {
     minWidth: isMobileViewport ? undefined : 280,
@@ -446,14 +452,18 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         onChange={handleSelectChange as any}
         placeholder={placeholder}
         className={className}
-        showSearch={showSearch}
+        showSearch={isMobileViewport ? false : showSearch}
         allowClear={allowClear}
         disabled={disabled || loading}
         loading={loading}
         optionFilterProp="label"
-        getPopupContainer={getPopupContainer}
+        getPopupContainer={resolvedPopupContainer}
         options={normalizedOptions}
-        popupMatchSelectWidth
+        popupMatchSelectWidth={isMobileViewport}
+        placement={isMobileViewport ? 'bottomLeft' : undefined}
+        dropdownAlign={mobileDropdownAlign}
+        virtual={!isMobileViewport}
+        listHeight={isMobileViewport ? 256 : undefined}
         notFoundContent={loading ? 'در حال بارگذاری...' : 'موردی یافت نشد'}
         styles={{ popup: { root: mergedDropdownStyle } }}
         optionRender={(option) => {
@@ -561,9 +571,10 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
               onChange={setDeleteReplacementValue}
               options={deleteReplacementOptions}
               placeholder="مقدار جایگزین را انتخاب کنید"
-              showSearch
+              showSearch={!isMobileViewport}
               optionFilterProp="label"
-              getPopupContainer={getPopupContainer}
+              dropdownAlign={mobileDropdownAlign}
+              getPopupContainer={resolvedPopupContainer}
               styles={{ popup: { root: { zIndex: 14000 } } }}
             />
           )}

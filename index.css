@@ -437,6 +437,144 @@
   color: #111827;
 }
 
+.print-card--product-passport {
+  min-height: 148mm;
+  height: auto;
+  overflow: visible;
+  position: relative;
+  border: 1px solid #d4b08a;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at top right, rgba(197, 143, 96, 0.12), transparent 52%),
+    linear-gradient(180deg, #fffefb 0%, #fffaf4 100%);
+}
+
+.print-card--product-passport::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 5mm;
+  background: linear-gradient(90deg, #b77948 0%, #d8ae86 52%, #f2d9bd 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.product-passport-topline {
+  margin-top: 2mm;
+  margin-bottom: 3mm;
+  text-align: center;
+  font-size: 9.5px;
+  color: #7c5530;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.product-passport-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.product-passport-head-text {
+  min-width: 0;
+}
+
+.product-passport-subtitle {
+  font-size: 9px;
+  color: #8b6a4f;
+  margin-bottom: 2px;
+}
+
+.product-passport-name {
+  font-size: 14px;
+  font-weight: 800;
+  color: #3f2a1a;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.product-passport-code {
+  margin-top: 3px;
+  font-size: 9.5px;
+  color: #5b3b23;
+  font-weight: 700;
+}
+
+.product-passport-qr {
+  border: 1px solid #eed8c2;
+  border-radius: 10px;
+  background: #fff;
+  padding: 4px;
+}
+
+.product-passport-chips {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.product-passport-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  background: #fff;
+  border: 1px solid #ecd8c6;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.product-passport-chip-label {
+  font-size: 8.5px;
+  color: #8b6a4f;
+  white-space: nowrap;
+}
+
+.product-passport-chip-value {
+  font-size: 9px;
+  color: #3f2a1a;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.product-passport-grid {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+  align-items: start;
+}
+
+.product-passport-item {
+  border: 1px solid #ead8c8;
+  border-radius: 8px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.86);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.product-passport-item-label {
+  font-size: 9px;
+  color: #8b6a4f;
+  margin-bottom: 2px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.product-passport-item-value {
+  font-size: 10px;
+  color: #1f2937;
+  font-weight: 700;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
 .print-card--passport {
   min-height: 148mm;
   height: auto;
@@ -496,6 +634,28 @@
 }
 
 @media print {
+  #print-root .print-card.print-card--product-passport {
+    height: auto !important;
+    page-break-after: auto !important;
+    page-break-inside: auto !important;
+    border: 0.35mm solid #d4b08a !important;
+    border-radius: 4mm !important;
+    padding: 7mm !important;
+    background:
+      radial-gradient(circle at top right, rgba(197, 143, 96, 0.12), transparent 52%),
+      linear-gradient(180deg, #fffefb 0%, #fffaf4 100%) !important;
+  }
+
+  #print-root .print-card.print-card--product-passport .product-passport-item {
+    border-color: #d7beaa !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  #print-root[data-print-size="A4"] .print-card.print-card--product-passport .product-passport-grid {
+    gap: 4mm;
+  }
+
   #print-root .print-card.print-card--passport {
     height: auto !important;
     page-break-after: auto !important;
@@ -955,8 +1115,23 @@
 
   .ant-select-dropdown {
     max-width: calc(100vw - 24px) !important;
+    overflow-anchor: none;
   }
 
+  .ant-select-dropdown .rc-virtual-list-holder {
+    overscroll-behavior: contain;
+  }
+
+  .ant-modal-wrap,
+  .ant-modal,
+  .ant-modal-content,
+  .ant-modal-body {
+    overflow-anchor: none;
+  }
+
+  .ant-modal .custom-scrollbar {
+    overscroll-behavior: contain;
+  }
   .ant-select-dropdown .ant-select-item-option-content {
     white-space: normal !important;
     word-break: break-word;

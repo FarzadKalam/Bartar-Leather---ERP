@@ -1017,7 +1017,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-[1300] flex items-center justify-center p-3 md:p-4 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-white dark:bg-[#1e1e1e] w-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-white dark:bg-[#1e1e1e] w-full max-w-5xl max-h-[90dvh] md:max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
         
         {/* Header */}
         <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-white/5">
@@ -1044,7 +1044,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
           <Button shape="circle" icon={<CloseOutlined />} onClick={onCancel} className="border-none hover:bg-red-50 hover:text-red-500" />
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar scrollbar-wide" style={{ position: 'relative', zIndex: 0 }}>
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4 md:p-6 custom-scrollbar scrollbar-wide" style={{ position: 'relative', zIndex: 0 }}>
           {loading && !isBulkEdit ? (
             <div className="h-full flex items-center justify-center"><Spin size="large" /></div>
           ) : (

@@ -110,6 +110,15 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, DynamicOption[]>>({});
   const [productCategoryOptions, setProductCategoryOptions] = useState<DynamicOption[]>([]);
   const initializedRef = useRef(false);
+  const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  const mobileDropdownAlign = isMobileViewport
+    ? { overflow: { adjustX: false, adjustY: false } }
+    : undefined;
+  const popupRootStyle = useMemo<React.CSSProperties>(() => (
+    isMobileViewport
+      ? { zIndex: 3000, width: 'min(92vw, 420px)', maxWidth: 'calc(100vw - 24px)' }
+      : { zIndex: 3000, minWidth: 200 }
+  ), [isMobileViewport]);
 
   const productTypeField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'product_type'), []);
   const rawCategoryField = useMemo(() => PRODUCTS_MODULE.fields.find((f) => f.key === 'category'), []);
@@ -423,7 +432,7 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       width={1320}
       zIndex={2600}
       destroyOnHidden
-      styles={{ body: { maxHeight: '74vh', overflowY: 'auto', paddingTop: 12 } }}
+      styles={{ body: { maxHeight: '74dvh', overflowY: 'auto', overscrollBehavior: 'contain', paddingTop: 12 } }}
     >
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -434,8 +443,14 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
               options={typeOptions}
               onChange={(v) => setProductType(String(v))}
               className="w-full"
+              showSearch={!isMobileViewport}
+              popupMatchSelectWidth={isMobileViewport}
+              placement={isMobileViewport ? 'bottomLeft' : undefined}
+              dropdownAlign={mobileDropdownAlign}
+              virtual={!isMobileViewport}
+              listHeight={isMobileViewport ? 256 : undefined}
               getPopupContainer={() => document.body}
-              styles={{ popup: { root: { zIndex: 3000 } } }}
+              styles={{ popup: { root: popupRootStyle } }}
             />
           </div>
           {productType === 'raw' ? (
@@ -446,8 +461,14 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
                 options={rawOptions}
                 onChange={(v) => setRawCategory(String(v))}
                 className="w-full"
+                showSearch={!isMobileViewport}
+                popupMatchSelectWidth={isMobileViewport}
+                placement={isMobileViewport ? 'bottomLeft' : undefined}
+                dropdownAlign={mobileDropdownAlign}
+                virtual={!isMobileViewport}
+                listHeight={isMobileViewport ? 256 : undefined}
                 getPopupContainer={() => document.body}
-                styles={{ popup: { root: { zIndex: 3000 } } }}
+                styles={{ popup: { root: popupRootStyle } }}
               />
             </div>
           ) : (
@@ -458,10 +479,15 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
                 options={productCategoryOptions}
                 onChange={(v) => setProductCategory(String(v))}
                 className="w-full"
-                showSearch
+                showSearch={!isMobileViewport}
                 optionFilterProp="label"
+                popupMatchSelectWidth={isMobileViewport}
+                placement={isMobileViewport ? 'bottomLeft' : undefined}
+                dropdownAlign={mobileDropdownAlign}
+                virtual={!isMobileViewport}
+                listHeight={isMobileViewport ? 256 : undefined}
                 getPopupContainer={() => document.body}
-                styles={{ popup: { root: { zIndex: 3000 } } }}
+                styles={{ popup: { root: popupRootStyle } }}
               />
             </div>
           )}

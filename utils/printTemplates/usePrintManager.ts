@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { PrintTemplate } from './index';
 import { InvoiceCard } from './templates/invoice-card';
 import { ProductLabel } from './templates/product-label';
+import { ProductPassport } from './templates/product-passport';
 import { ProductionPassport } from './templates/production-passport';
 import { PRINT_PAPER_DIMENSIONS, PrintPaperSize } from './printSizing';
 import { toPersianNumber, formatPersianPrice, safeJalaliFormat } from '../../utils/persianNumberFormatter';
@@ -43,6 +44,11 @@ export const usePrintManager = ({
           id: 'product_label',
           title: '\u0645\u0634\u062e\u0635\u0627\u062a \u06a9\u0627\u0644\u0627',
           description: '\u0628\u0631\u0686\u0633\u0628 A6 \u0628\u0631\u0627\u06cc \u0645\u062d\u0635\u0648\u0644',
+        },
+        {
+          id: 'product_passport',
+          title: '\u0634\u0646\u0627\u0633\u0646\u0627\u0645\u0647 \u06a9\u0627\u0644\u0627',
+          description: '\u0637\u0631\u062d \u06af\u0631\u0627\u0641\u06cc\u06a9\u06cc \u0645\u0646\u0627\u0633\u0628 \u0628\u0631\u0686\u0633\u0628 \u0645\u062d\u0635\u0648\u0644',
         },
       ];
     } else if (moduleId === 'invoices') {
@@ -328,7 +334,8 @@ export const usePrintManager = ({
 
     const activePrintSize = printSizeRef.current;
     const { widthMm, heightMm } = PRINT_PAPER_DIMENSIONS[activePrintSize];
-    const shouldExpandCardHeight = selectedTemplateId === 'production_passport';
+    const shouldExpandCardHeight =
+      selectedTemplateId === 'production_passport' || selectedTemplateId === 'product_passport';
 
     const sizeStyle = document.createElement('style');
     sizeStyle.setAttribute('data-print-size', activePrintSize);
@@ -434,6 +441,16 @@ export const usePrintManager = ({
 
       case 'product_label':
         return React.createElement(ProductLabel, {
+          title: activeTemplate?.title || '',
+          subtitle: moduleConfig?.titles.fa || '',
+          qrValue: printQrValue,
+          fields: fieldsToDisplay,
+          formatPrintValue,
+          printSize,
+        });
+
+      case 'product_passport':
+        return React.createElement(ProductPassport, {
           title: activeTemplate?.title || '',
           subtitle: moduleConfig?.titles.fa || '',
           qrValue: printQrValue,
