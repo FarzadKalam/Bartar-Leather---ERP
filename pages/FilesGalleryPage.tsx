@@ -285,7 +285,7 @@ const FilesGalleryPage: React.FC = () => {
       ) : (
         <>
       {!recordFilesEnabled && (
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex items-center justify-between gap-2">
+        <div className="mb-3 rounded-md border border-leather-200 bg-leather-50 px-3 py-2 text-xs text-leather-700 flex items-center justify-between gap-2">
           <span>جدول `record_files` هنوز ایجاد نشده. فعلا فقط تصاویر محصول (legacy) نمایش داده می‌شود.</span>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadFiles(true)}>بررسی مجدد</Button>
         </div>

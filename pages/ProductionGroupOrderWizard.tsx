@@ -2208,9 +2208,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
   const renderMaterialsStep = () => (
     <div className="space-y-4">
-      <div className="rounded-xl border border-[#d8c8b8] bg-[#fcf7f1] px-4 py-3 text-sm text-[#6f4a2d]">
+      <div className="rounded-xl border border-[#d6e5db] bg-[#f7fbf8] px-4 py-3 text-sm text-[#17372a]">
         انتخاب کنید که برای هر دسته بندی، از چه محصولی استفاده شود؟
-        <div className="text-xs text-[#8b5e3c] mt-1">برای ثبت تغییرات ردیف باز، از میانبر Ctrl+Enter استفاده کنید.</div>
+        <div className="text-xs text-[#1f4534] mt-1">برای ثبت تغییرات ردیف باز، از میانبر Ctrl+Enter استفاده کنید.</div>
       </div>
       <div className="flex items-center gap-2">
         <Button

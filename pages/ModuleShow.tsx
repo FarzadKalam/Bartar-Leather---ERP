@@ -2228,7 +2228,7 @@ const ModuleShow: React.FC = () => {
       if (Array.isArray(val)) return val.length > 0;
       return true;
     };
-    return moduleConfig.fields
+    const fields = moduleConfig.fields
       .filter(f => f.type !== FieldType.IMAGE && f.type !== FieldType.JSON && f.type !== FieldType.READONLY_LOOKUP)
       .filter(f => !f.logic || checkVisibility(f.logic))
       .filter(f => canViewField(f.key))
@@ -2237,7 +2237,15 @@ const ModuleShow: React.FC = () => {
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(f => ({ ...f, value: data[f.key] }))
       .filter(f => hasValue(f.value));
-  }, [moduleConfig, data, dynamicOptions, relationOptions]);
+    const qrFields: any[] = [];
+    if (typeof window !== 'undefined' && window.location.href) {
+      qrFields.push({ key: '__qr_system', type: FieldType.TEXT, labels: { fa: 'QR سیستمی', en: 'System QR' }, value: window.location.href, order: 100000 });
+    }
+    if (moduleId === 'products' && String(data?.site_product_link || '').trim()) {
+      qrFields.push({ key: '__qr_site', type: FieldType.TEXT, labels: { fa: 'QR لینک سایت', en: 'Site QR' }, value: String(data?.site_product_link || '').trim(), order: 100001 });
+    }
+    return [...fields, ...qrFields];
+  }, [moduleConfig, data, dynamicOptions, relationOptions, moduleId]);
 
   // ✅ استفاده از custom hook برای مدیریت print
   const printManager = usePrintManager({

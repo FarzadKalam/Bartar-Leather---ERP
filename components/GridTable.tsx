@@ -1087,7 +1087,7 @@ const GridTable: React.FC<GridTableProps> = ({
 
   if (loading) return <div className="p-6 text-center"><Spin /></div>;
 
-  const rowHeaderBarStyle = { backgroundColor: '#8b5e3c' };
+  const rowHeaderBarStyle = { backgroundColor: '#1f4534' };
 
   return (
     <div className="bg-white dark:bg-[#1a1a1a] p-6 rounded-[2rem] shadow-sm border border-gray-200 dark:border-gray-800 transition-all">
@@ -1241,7 +1241,7 @@ const GridTable: React.FC<GridTableProps> = ({
           );
 
           return (
-            <div key={row.key || rowIndex} className="border border-[#8b5e3c] rounded-2xl overflow-hidden">
+            <div key={row.key || rowIndex} className="border border-[#1f4534] rounded-2xl overflow-hidden">
               <div
                 id={`grid-row-${row.key || rowIndex}`}
                 className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-white"
@@ -1473,7 +1473,7 @@ const GridTable: React.FC<GridTableProps> = ({
                   {shouldShowSpecs && specFields.length > 0 && (
                     <>
                       {isSpecsLocked && (
-                        <div className="flex items-center gap-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2 text-[11px] text-leather-800 bg-leather-50 border border-leather-200 rounded-lg px-3 py-2">
                           <LockOutlined />
                           <span>مشخصات از روی محصول انتخاب‌شده قفل شده‌اند. برای ویرایش، محصول را حذف کنید.</span>
                         </div>
@@ -1981,7 +1981,7 @@ const ProductsPreview: React.FC<{
   return (
     <div className="space-y-2">
       {partialMessage ? (
-        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        <div className="text-[11px] text-leather-700 bg-leather-50 border border-leather-200 rounded-lg px-3 py-2">
           {partialMessage}
         </div>
       ) : null}

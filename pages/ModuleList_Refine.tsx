@@ -21,6 +21,13 @@ import WorkflowsManager from "../components/workflows/WorkflowsManager";
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from "../utils/recordCopy";
 import { attachTaskCompletionIfNeeded } from "../utils/taskCompletion";
 import ExcelImportWizard from "../components/moduleList/ExcelImportWizard";
+import PrintSection from "../components/moduleShow/PrintSection";
+import { BulkListSheet } from "../utils/printTemplates/templates/bulk-list-sheet";
+import { BulkGridSheet } from "../utils/printTemplates/templates/bulk-grid-sheet";
+import { ProductLabel } from "../utils/printTemplates/templates/product-label";
+import { ProductPassport } from "../utils/printTemplates/templates/product-passport";
+import { getOptionLabel } from "../utils/optionHelpers";
+import type { PrintPaperSize } from "../utils/printTemplates/printSizing";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -110,6 +117,10 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [isCreateSingleOpen, setIsCreateSingleOpen] = useState(false);
   const [createSingleInitialValues, setCreateSingleInitialValues] = useState<Record<string, any>>({});
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [selectedPrintTemplateId, setSelectedPrintTemplateId] = useState("");
+  const [printMode, setPrintMode] = useState(false);
+  const [selectedPrintFields, setSelectedPrintFields] = useState<Record<string, string[]>>({});
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: resolvedModuleId,
@@ -180,6 +191,10 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     setCanOpenWorkflows(true);
     setIsCreateSingleOpen(false);
     setCreateSingleInitialValues({});
+    setIsPrintModalOpen(false);
+    setSelectedPrintTemplateId("");
+    setPrintMode(false);
+    setSelectedPrintFields({});
   }, [resolvedModuleId, moduleConfig?.defaultViewMode]);
 
   const openSingleCreateForm = useCallback((initialValues?: Record<string, any>) => {
@@ -290,6 +305,41 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const gridData = useMemo(() => {
     return enrichedData.slice(0, gridPageSize);
   }, [enrichedData, gridPageSize]);
+
+  const bulkPrintTemplates = useMemo(() => {
+    const templates = [
+      {
+        id: "bulk_list",
+        title: "پرینت لیستی",
+        description: "جدول A4 با فیلدهای قابل انتخاب برای رکوردهای انتخاب‌شده",
+      },
+      {
+        id: "bulk_summary_6up",
+        title: "۸تایی A4 مشخصات",
+        description: "چاپ خلاصه رکوردها در چیدمان ۸تایی روی برگه A4",
+      },
+    ];
+
+    if (resolvedModuleId === "products") {
+      templates.push({
+        id: "bulk_product_passport_6up",
+        title: "۸تایی شناسنامه کالا",
+        description: "چاپ چندتایی شناسنامه کالا با QR لینک محصول در سایت",
+      });
+    }
+
+    return templates;
+  }, [resolvedModuleId]);
+
+  useEffect(() => {
+    if (!bulkPrintTemplates.length) {
+      if (selectedPrintTemplateId) setSelectedPrintTemplateId("");
+      return;
+    }
+    if (!bulkPrintTemplates.some((template) => template.id === selectedPrintTemplateId)) {
+      setSelectedPrintTemplateId(bulkPrintTemplates[0].id);
+    }
+  }, [bulkPrintTemplates, selectedPrintTemplateId]);
 
   // ✅ اضافه شد: Fetch dynamic و relation options
   useEffect(() => {
@@ -683,6 +733,240 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
       document.body.removeChild(link);
   };
 
+  const printableFields = useMemo(() => {
+    if (!moduleConfig) return [];
+    const fields = moduleConfig.fields
+      .filter((field) => field.type !== FieldType.IMAGE && field.type !== FieldType.JSON && field.type !== FieldType.READONLY_LOOKUP)
+      .filter((field) => canViewField(String(field.key)))
+      .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+    const qrFields: any[] = [];
+    if (typeof window !== "undefined" && window.location.origin) {
+      qrFields.push({ key: "__qr_system", type: FieldType.TEXT, labels: { fa: "QR سیستمی", en: "System QR" }, order: 100000 });
+    }
+    if (resolvedModuleId === "products") {
+      qrFields.push({ key: "__qr_site", type: FieldType.TEXT, labels: { fa: "QR لینک سایت", en: "Site QR" }, order: 100001 });
+    }
+    return [...fields, ...qrFields];
+  }, [canViewField, moduleConfig, resolvedModuleId]);
+
+  const hasPrintableValue = useCallback((value: any) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim() !== "";
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.keys(value).length > 0;
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPrintTemplateId || printableFields.length === 0) return;
+    setSelectedPrintFields((prev: Record<string, string[]>) => ({
+      ...prev,
+      [selectedPrintTemplateId]: printableFields
+        .filter((field) => (
+          field.key === "__qr_system"
+            ? selectedRows.length > 0
+            : field.key === "__qr_site"
+              ? selectedRows.some((record: any) => hasPrintableValue(record?.site_product_link))
+              : selectedRows.some((record: any) => hasPrintableValue(record?.[field.key]))
+        ))
+        .map((field) => String(field.key)),
+    }));
+  }, [hasPrintableValue, printableFields, selectedPrintTemplateId, selectedRows]);
+
+  const formatPersianDate = useCallback((value: any, withTime = false) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat("fa-IR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+    }).format(date);
+  }, []);
+
+  const formatPrintValue = useCallback((field: any, value: any, record: any) => {
+    if (value === null || value === undefined || value === "") return "";
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => getOptionLabel(field, item, dynamicOptions, relationOptions, record, (field as any)?.relationConfig))
+        .join("، ");
+    }
+    if (field.type === FieldType.CHECKBOX) return value ? "بله" : "خیر";
+    if (field.type === FieldType.PRICE) return `${Number(value).toLocaleString()} تومان`;
+    if (field.type === FieldType.PERCENTAGE) return `${value}%`;
+    if (field.type === FieldType.DATE) return formatPersianDate(value);
+    if (field.type === FieldType.TIME) return String(value);
+    if (field.type === FieldType.DATETIME) return formatPersianDate(value, true);
+    if (
+      field.type === FieldType.STATUS
+      || field.type === FieldType.SELECT
+      || field.type === FieldType.MULTI_SELECT
+      || field.type === FieldType.RELATION
+    ) {
+      return String(getOptionLabel(field, value, dynamicOptions, relationOptions, record, (field as any)?.relationConfig));
+    }
+    return typeof value === "object" ? JSON.stringify(value) : String(value);
+  }, [dynamicOptions, formatPersianDate, relationOptions]);
+
+  const selectedFieldsForPrint = useMemo(() => {
+    const selectedKeys = selectedPrintFields[selectedPrintTemplateId] || [];
+    return printableFields.filter((field) => selectedKeys.length === 0 || selectedKeys.includes(String(field.key)));
+  }, [printableFields, selectedPrintFields, selectedPrintTemplateId]);
+
+  const bulkCardFields = useMemo(() => {
+    const limit = selectedPrintTemplateId === "bulk_product_passport_6up" ? 5 : 6;
+    return selectedFieldsForPrint.slice(0, limit);
+  }, [selectedFieldsForPrint, selectedPrintTemplateId]);
+
+  const buildRecordUrl = useCallback((record: any) => {
+    if (!record?.id || !resolvedModuleId || typeof window === "undefined") return "";
+    return `${window.location.origin}/${resolvedModuleId}/${record.id}`;
+  }, [resolvedModuleId]);
+
+  const handleTogglePrintField = useCallback((templateId: string, fieldName: string) => {
+    setSelectedPrintFields((prev: Record<string, string[]>) => {
+      const current = prev[templateId] || [];
+      if (current.includes(fieldName)) {
+        return {
+          ...prev,
+          [templateId]: current.filter((item: string) => item !== fieldName),
+        };
+      }
+      if (fieldName === "__qr_system" || fieldName === "__qr_site") {
+        const otherQrKey = fieldName === "__qr_system" ? "__qr_site" : "__qr_system";
+        return {
+          ...prev,
+          [templateId]: [...current.filter((item: string) => item !== otherQrKey), fieldName],
+        };
+      }
+      return {
+        ...prev,
+        [templateId]: [...current, fieldName],
+      };
+    });
+  }, []);
+
+  const renderBulkPrintCard = useCallback(() => {
+    const activeTemplate = bulkPrintTemplates.find((template: { id: string }) => template.id === selectedPrintTemplateId);
+    const rows = selectedRows;
+    const fields = selectedFieldsForPrint.filter((field) => field.key !== "__qr_system" && field.key !== "__qr_site");
+    const compactFields = bulkCardFields.filter((field) => field.key !== "__qr_system" && field.key !== "__qr_site");
+
+    if (!activeTemplate || rows.length === 0) return null;
+
+    if (selectedPrintTemplateId === "bulk_list") {
+      return (
+        <BulkListSheet
+          title={activeTemplate.title}
+          subtitle={moduleConfig?.titles?.fa || resolvedModuleId || ""}
+          rows={rows}
+          fields={fields}
+          formatPrintValue={formatPrintValue}
+        />
+      );
+    }
+
+    if (selectedPrintTemplateId === "bulk_summary_6up") {
+      return (
+        <BulkGridSheet
+          title={activeTemplate.title}
+          subtitle={moduleConfig?.titles?.fa || resolvedModuleId || ""}
+          records={rows}
+          rotateCards
+          renderCard={(record: any) => (
+            <ProductLabel
+              title={moduleConfig?.titles?.fa || activeTemplate.title}
+              subtitle={String(record?.name || record?.title || record?.system_code || "")}
+              qrValue={buildRecordUrl(record)}
+              fields={compactFields.map((field) => ({ ...field, value: record?.[field.key] }))}
+              formatPrintValue={(field: any, value: any) => formatPrintValue(field, value, record)}
+              printSize="A7"
+              qrSize={34}
+              containerStyle={{ padding: "3mm", minHeight: "100%", height: "100%", borderRadius: "2.5mm" }}
+              className="print-card--size-a7"
+            />
+          )}
+        />
+      );
+    }
+
+    if (selectedPrintTemplateId === "bulk_product_passport_6up") {
+      return (
+        <BulkGridSheet
+          title={activeTemplate.title}
+          subtitle={moduleConfig?.titles?.fa || resolvedModuleId || ""}
+          records={rows}
+          rotateCards
+          renderCard={(record: any) => (
+            <ProductPassport
+              title="شناسنامه کالا"
+              subtitle={String(record?.name || moduleConfig?.titles?.fa || "")}
+              qrValue={String(record?.site_product_link || buildRecordUrl(record) || "")}
+              fields={compactFields.map((field) => ({ ...field, value: record?.[field.key] }))}
+              formatPrintValue={(field: any, value: any) => formatPrintValue(field, value, record)}
+              printSize="A7"
+              qrSize={30}
+              containerStyle={{ padding: "3mm", minHeight: "100%", height: "100%", borderRadius: "2.5mm" }}
+              className="print-card--size-a7"
+            />
+          )}
+        />
+      );
+    }
+
+    return null;
+  }, [
+    bulkPrintTemplates,
+    buildRecordUrl,
+    formatPrintValue,
+    moduleConfig?.titles?.fa,
+    resolvedModuleId,
+    bulkCardFields,
+    selectedFieldsForPrint,
+    selectedPrintTemplateId,
+    selectedRows,
+  ]);
+
+  const handleBulkPrint = useCallback(() => {
+    if (!selectedPrintTemplateId || typeof window === "undefined") return;
+
+    const sizeStyle = document.createElement("style");
+    sizeStyle.setAttribute("data-bulk-print-size", "A4");
+    sizeStyle.textContent = `
+      @media print {
+        @page { size: A4 portrait; margin: 0; }
+        #print-root {
+          width: 210mm !important;
+          max-width: 210mm !important;
+          margin: 0 auto !important;
+        }
+      }
+    `;
+    document.head.appendChild(sizeStyle);
+
+    setIsPrintModalOpen(false);
+    setPrintMode(true);
+
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      setPrintMode(false);
+      sizeStyle.remove();
+      window.removeEventListener("afterprint", cleanup);
+    };
+
+    window.addEventListener("afterprint", cleanup);
+
+    try {
+      window.print();
+    } catch (error) {
+      console.error("Bulk print failed:", error);
+      cleanup();
+    }
+  }, [selectedPrintTemplateId]);
+
   if (!resolvedModuleId || !moduleConfig) return null;
   if (!canViewModule && !loading && accessibleData.length === 0) {
     return (
@@ -795,6 +1079,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
           onCopy={selectedRowKeys.length && canEditModule ? handleBulkCopy : undefined}
           onDelete={selectedRowKeys.length && canDeleteModule ? handleBulkDelete : undefined}
           onExport={selectedRowKeys.length ? handleExport : undefined}
+          onPrint={selectedRowKeys.length ? () => setIsPrintModalOpen(true) : undefined}
           primaryActionLabel={
             selectedRowKeys.length > 0 && resolvedModuleId === 'production_orders'
               ? 'ایجاد سفارش گروهی جدید'
@@ -817,6 +1102,24 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
               ? 'فقط سفارش‌های تولید با وضعیت «در انتظار» قابل تبدیل به سفارش گروهی هستند.'
               : undefined
           }
+        />
+        <PrintSection
+          title="پرینت گروهی"
+          isPrintModalOpen={isPrintModalOpen}
+          onClose={() => setIsPrintModalOpen(false)}
+          onPrint={handleBulkPrint}
+          printTemplates={bulkPrintTemplates}
+          selectedTemplateId={selectedPrintTemplateId}
+          onSelectTemplate={setSelectedPrintTemplateId}
+          printSize={"A4" as PrintPaperSize}
+          onPrintSizeChange={() => {}}
+          renderPrintCard={renderBulkPrintCard}
+          printMode={printMode}
+          printableFields={printableFields}
+          selectedPrintFields={selectedPrintFields}
+          onTogglePrintField={handleTogglePrintField}
+          showPrintSizeSelector={false}
+          fieldSelectionTemplateIds={bulkPrintTemplates.map((template) => template.id)}
         />
         </div>
 

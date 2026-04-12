@@ -478,7 +478,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   return (
     <Modal title="مدیریت فایل‌ها" open={open} onCancel={onClose} footer={null} destroyOnHidden zIndex={1600} width={950}>
       {!recordFilesEnabled && (
-        <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 flex items-center justify-between gap-2">
+        <div className="mb-3 rounded-md border border-leather-200 bg-leather-50 px-3 py-2 text-xs text-leather-700 flex items-center justify-between gap-2">
           <span>حالت سازگاری فعال است: جدول `record_files` روی دیتابیس ایجاد نشده. فعلا فقط عکس‌های محصول از `product_images` خوانده می‌شود.</span>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => void loadFiles(true)}>بررسی مجدد</Button>
         </div>

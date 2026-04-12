@@ -1,12 +1,13 @@
 import React from 'react';
 import { Button, Space, Tag, Tooltip } from 'antd';
-import { CopyOutlined, DeleteOutlined, EditOutlined, ExportOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, EditOutlined, ExportOutlined, PrinterOutlined } from '@ant-design/icons';
 
 interface BulkActionsBarProps {
   selectedCount: number;
   onClear: () => void;
   onDelete?: () => void;
   onExport?: () => void;
+  onPrint?: () => void;
   onEdit?: () => void;
   onCopy?: () => void;
   primaryActionLabel?: string;
@@ -20,6 +21,7 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
   onClear,
   onDelete,
   onExport,
+  onPrint,
   onEdit,
   onCopy,
   primaryActionLabel,
@@ -71,6 +73,11 @@ const BulkActionsBar: React.FC<BulkActionsBarProps> = ({
         {onExport && (
           <Tooltip title="خروجی">
             <Button type="text" icon={<ExportOutlined />} size="small" onClick={onExport} aria-label="خروجی" />
+          </Tooltip>
+        )}
+        {onPrint && (
+          <Tooltip title="پرینت">
+            <Button type="text" icon={<PrinterOutlined />} size="small" onClick={onPrint} aria-label="پرینت" />
           </Tooltip>
         )}
         {onDelete && (

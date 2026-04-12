@@ -488,15 +488,15 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             ]) || consumptionUnitLabel;
             const hasDeliveryRows = Array.isArray(group.deliveryRows) && group.deliveryRows.length > 0;
             const headerToneClass = hasDeliveryRows
-              ? 'bg-[#8b5e3c] text-white shadow-sm'
-              : 'bg-white text-[#6f4a2d] border-b border-dashed border-[#b8895a]';
+              ? 'bg-[#1f4534] text-white shadow-sm'
+              : 'bg-white text-[#17372a] border-b border-dashed border-[#8bb49a]';
             const headerButtonClass = hasDeliveryRows
               ? '!text-white hover:!text-white/90'
-              : '!text-[#6f4a2d] hover:!text-[#8b5e3c]';
+              : '!text-[#17372a] hover:!text-[#1f4534]';
             const containerClass = hasDeliveryRows
               ? 'rounded-xl border border-gray-200'
-              : 'rounded-xl border-2 border-dashed border-[#b8895a] bg-white';
-            const headerMetaClass = hasDeliveryRows ? 'text-white/90' : 'text-[#8b5e3c]';
+              : 'rounded-xl border-2 border-dashed border-[#8bb49a] bg-white';
+            const headerMetaClass = hasDeliveryRows ? 'text-white/90' : 'text-[#1f4534]';
 
             return (
               <div key={group.key} className={containerClass}>
@@ -540,7 +540,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                 {!group.collapsed && (
                   <div className="p-3">
                     <div className="mt-3 rounded-lg border border-[#c9b29a] bg-[#f7f1ea] p-3 space-y-3">
-                      <div className="text-xs font-medium text-[#6f4a2d]">
+                      <div className="text-xs font-medium text-[#17372a]">
                         {trafficType === 'incoming'
                           ? `از مرحله "${sourceStageName}" به مرحله "${taskName}" چه مقدار تحویل می‌دهید؟`
                           : `از مرحله "${taskName}" به مرحله "${destinationStageOption?.label || nextStageName || 'مرحله مقصد'}" چه مقدار تحویل می‌دهید؟`}
@@ -606,7 +606,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 key: 'deliveredQty',
                                 width: 140,
                                 render: (_value: number, record: StageHandoverDeliveryRow) => (
-                                  <span className="font-semibold text-[#6f4a2d]">{toQty(calcDeliveredQty(record))}</span>
+                                  <span className="font-semibold text-[#17372a]">{toQty(calcDeliveredQty(record))}</span>
                                 ),
                               },
                             ]}
@@ -767,7 +767,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             key: 'deliveredQty',
                             width: isMobile ? 230 : 170,
                             render: (_value: number, record: StageHandoverDeliveryRow) => (
-                              <span className="font-semibold text-[#6f4a2d]">
+                              <span className="font-semibold text-[#17372a]">
                                 {toQty(calcDeliveredQty(record))}
                               </span>
                             ),
@@ -843,7 +843,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
 
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
           <div className="text-xs text-gray-500">
-            قفسه مرحله <span className="font-black text-[#8b5e3c]">"{taskName}"</span>
+            قفسه مرحله <span className="font-black text-[#1f4534]">"{taskName}"</span>
           </div>
           <div className="flex items-center gap-2">
             <Select

@@ -330,7 +330,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
           {Array.isArray(record?.pieceDetails) && record.pieceDetails.length > 0 ? (
             <button
               type="button"
-              className="mt-1 text-[11px] text-[#8b5e3c] flex items-center gap-1 w-fit"
+              className="mt-1 text-[11px] text-[#1f4534] flex items-center gap-1 w-fit"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -552,7 +552,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
     >
       <div className="space-y-4 font-['Vazirmatn']" dir="rtl">
         <div className="rounded-2xl border border-[#c9b29a] bg-[#f7f1ea] p-4">
-          <div className="text-lg font-black text-[#6f4a2d]">
+          <div className="text-lg font-black text-[#17372a]">
             مدیریت تحویل‌های مرحله "{taskName}"
           </div>
         </div>
@@ -633,7 +633,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
               dataSource={forms}
               scroll={{ x: true }}
               rowClassName={(record: StageHandoverFormListRow) =>
-                String(record.id) === String(selectedFormId) ? 'bg-amber-50 cursor-pointer' : 'cursor-pointer'
+                String(record.id) === String(selectedFormId) ? 'bg-leather-50 cursor-pointer' : 'cursor-pointer'
               }
               onRow={(record) => ({
                 onClick: () => {

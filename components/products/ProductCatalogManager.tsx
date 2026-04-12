@@ -97,6 +97,22 @@ const DEFAULT_GLOBAL_ATTRIBUTE_DEFINITIONS = [
   { key: 'global_size', label: 'سایز', dynamicCategory: 'fitting_size', valueType: 'select' as const },
 ];
 
+const SMART_GLOBAL_FIELD_MAPPINGS: Record<string, { key: string; label: string }> = {
+  leather_type: { key: 'global_leather_type', label: 'نوع چرم' },
+  leather_colors: { key: 'global_color', label: 'رنگ' },
+  leather_finish_1: { key: 'global_leather_finish', label: 'صفحه چرم' },
+  leather_effect: { key: 'global_leather_effect', label: 'افکت چرم' },
+  leather_sort: { key: 'global_leather_sort', label: 'سورت چرم' },
+  lining_material: { key: 'global_lining_material', label: 'جنس آستر' },
+  lining_color: { key: 'global_color', label: 'رنگ' },
+  lining_width: { key: 'global_lining_width', label: 'عرض آستر' },
+  acc_material: { key: 'global_accessory_material', label: 'جنس خرجکار' },
+  fitting_type: { key: 'global_fitting_type', label: 'نوع یراق' },
+  fitting_material: { key: 'global_fitting_material', label: 'جنس یراق' },
+  fitting_colors: { key: 'global_color', label: 'رنگ' },
+  fitting_size: { key: 'global_size', label: 'سایز' },
+};
+
 const MAX_GENERATED_VARIATIONS = 200;
 
 const matchOptionByValue = (options: Array<{ label: string; value: string }>, rawValue: string) =>
@@ -256,15 +272,48 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
       .filter((attribute) => (attribute.options || []).length > 0)
   ), [dynamicOptions]);
 
+  const smartMappedGlobalTemplates = useMemo<ProductAttributeRecord[]>(() => {
+    const templateMap = new Map<string, ProductAttributeRecord>();
+
+    productFields
+      .filter((field) => isEligibleProductAttributeField(field))
+      .forEach((field) => {
+        const mapping = SMART_GLOBAL_FIELD_MAPPINGS[String(field.key)];
+        if (!mapping) return;
+
+        const resolvedOptions = resolveFieldAttributeOptions(field, dynamicOptions);
+        const existing = templateMap.get(mapping.key);
+        const mergedOptions = existing?.options || resolvedOptions;
+
+        templateMap.set(mapping.key, {
+          id: existing?.id,
+          key: mapping.key,
+          label: mapping.label,
+          scope_type: 'global',
+          parent_product_id: null,
+          value_type: mapFieldTypeToAttributeValueType(field.type),
+          option_source_type: 'field',
+          source_field_key: field.key,
+          is_variation: existing?.is_variation ?? true,
+          is_visible_on_site: existing?.is_visible_on_site ?? true,
+          sort_order: existing?.sort_order ?? templateMap.size,
+          is_active: existing?.is_active ?? true,
+          options: mergedOptions,
+        });
+      });
+
+    return Array.from(templateMap.values());
+  }, [dynamicOptions, productFields]);
+
   const allGlobalTemplates = useMemo(() => {
     const templateMap = new Map<string, ProductAttributeRecord>();
-    [...defaultGlobalTemplates, ...globalLibrary, ...pendingGlobalAttributes].forEach((attribute) => {
+    [...defaultGlobalTemplates, ...smartMappedGlobalTemplates, ...globalLibrary, ...pendingGlobalAttributes].forEach((attribute) => {
       if (!attribute?.key) return;
       if (attributes.some((item) => item.key === attribute.key)) return;
       templateMap.set(attribute.key, attribute);
     });
     return Array.from(templateMap.values());
-  }, [attributes, defaultGlobalTemplates, globalLibrary, pendingGlobalAttributes]);
+  }, [attributes, defaultGlobalTemplates, globalLibrary, pendingGlobalAttributes, smartMappedGlobalTemplates]);
 
   const availableGlobalTemplates = allGlobalTemplates;
 
@@ -287,11 +336,25 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   );
 
   const selectedGlobalAvailableOptions = useMemo(
-    () => ((selectedGlobalTemplate?.options || []).map((option) => ({
-      label: option.label,
-      value: option.value,
-    }))),
-    [selectedGlobalTemplate],
+    () => {
+      if (!selectedGlobalTemplate) return [];
+      if ((selectedGlobalTemplate.options || []).length > 0) {
+        return (selectedGlobalTemplate.options || []).map((option) => ({
+          label: option.label,
+          value: option.value,
+        }));
+      }
+      if (selectedGlobalTemplate.option_source_type === 'field' && selectedGlobalTemplate.source_field_key) {
+        const sourceField = fieldMap.get(selectedGlobalTemplate.source_field_key);
+        if (!sourceField) return [];
+        return resolveFieldAttributeOptions(sourceField, dynamicOptions).map((option) => ({
+          label: option.label,
+          value: option.value,
+        }));
+      }
+      return [];
+    },
+    [dynamicOptions, fieldMap, selectedGlobalTemplate],
   );
 
   const customAttributeDraftOptions = useMemo(
@@ -402,9 +465,16 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
       message.warning('این ویژگی قبلاً روی محصول فعال شده است.');
       return;
     }
+    const templateAvailableOptions = template.option_source_type === 'field' && template.source_field_key
+      ? (() => {
+          const sourceField = fieldMap.get(template.source_field_key);
+          return sourceField ? resolveFieldAttributeOptions(sourceField, dynamicOptions) : [];
+        })()
+      : (template.options || []);
+
     const selectedOptions = selectedGlobalOptionValues.length > 0
       ? selectedGlobalOptionValues.map((rawValue, index) => {
-          const matched = (template.options || []).find((option) =>
+          const matched = templateAvailableOptions.find((option) =>
             String(option.value) === String(rawValue) || String(option.label) === String(rawValue)
           );
           return {
@@ -413,7 +483,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
             is_active: true,
           };
         })
-      : (template.options || []);
+      : templateAvailableOptions;
     setAttributes((prev) => [
       ...prev,
       {
@@ -714,18 +784,21 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                     value={selectedGlobalOptionValues}
                     onChange={(value) => setSelectedGlobalOptionValues(Array.isArray(value) ? value.map(String) : (value ? [String(value)] : []))}
                     options={selectedGlobalAvailableOptions}
-                    category={
+                    category={(
                       DEFAULT_GLOBAL_ATTRIBUTE_DEFINITIONS.find((item) => item.key === selectedGlobalKey)?.dynamicCategory
-                    }
+                      || (selectedGlobalTemplate?.source_field_key
+                        ? fieldMap.get(selectedGlobalTemplate.source_field_key)?.dynamicOptionsCategory
+                        : undefined)
+                    )}
                     placeholder="مقادیر موردنظر برای ساخت ترکیب را انتخاب کنید"
                     className="w-full"
                     allowClear
                     mode="multiple"
-                    manageMode={
+                    manageMode={(
                       DEFAULT_GLOBAL_ATTRIBUTE_DEFINITIONS.some((item) => item.key === selectedGlobalKey)
-                        ? 'remote'
-                        : 'local'
-                    }
+                      || !!(selectedGlobalTemplate?.source_field_key
+                        && fieldMap.get(selectedGlobalTemplate.source_field_key)?.dynamicOptionsCategory)
+                    ) ? 'remote' : 'local'}
                     localOptions={selectedGlobalAvailableOptions}
                     getPopupContainer={(trigger) => trigger.parentElement || document.body}
                   />

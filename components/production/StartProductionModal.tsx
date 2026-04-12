@@ -322,15 +322,15 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
             const totalDeliveredWithHistory = previousDeliveredQty + Math.max(0, parseNumberInput(group.totalDeliveredQty));
 
             const headerToneClass = hasDeliveryRows
-              ? 'bg-[#8b5e3c] text-white shadow-sm'
-              : 'bg-white text-[#6f4a2d] border-b border-dashed border-[#b8895a]';
+              ? 'bg-[#1f4534] text-white shadow-sm'
+              : 'bg-white text-[#17372a] border-b border-dashed border-[#8bb49a]';
             const headerButtonClass = hasDeliveryRows
               ? '!text-white hover:!text-white/90'
-              : '!text-[#6f4a2d] hover:!text-[#8b5e3c]';
+              : '!text-[#17372a] hover:!text-[#1f4534]';
             const containerClass = hasDeliveryRows
               ? 'rounded-xl border border-gray-200'
-              : 'rounded-xl border-2 border-dashed border-[#b8895a] bg-white';
-            const headerMetaClass = hasDeliveryRows ? 'text-white/90' : 'text-[#8b5e3c]';
+              : 'rounded-xl border-2 border-dashed border-[#8bb49a] bg-white';
+            const headerMetaClass = hasDeliveryRows ? 'text-white/90' : 'text-[#1f4534]';
 
             return (
               <div key={group.key} className={containerClass}>
@@ -374,14 +374,14 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                   <div className="p-3">
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                       <div className="space-y-3">
-                    <div className="text-xs font-semibold text-[#6f4a2d]">قطعات سفارش تولید:</div>
+                    <div className="text-xs font-semibold text-[#17372a]">قطعات سفارش تولید:</div>
                     {Array.isArray(group.orderRequirements) && group.orderRequirements.length > 0 && (
                       <div className="mb-4 space-y-3">
                         {group.orderRequirements.map((requirement, reqIndex) => {
                           const reqUnitLabel = getUnitSummaryLabel((requirement.pieces || []).map((piece) => piece.mainUnit));
                           return (
-                            <div key={`${group.key}_req_${reqIndex}`} className="rounded-lg border border-[#d8c8b8] bg-[#fcf7f1] p-2">
-                              <div className="text-xs font-medium text-[#6f4a2d] mb-2">
+                            <div key={`${group.key}_req_${reqIndex}`} className="rounded-lg border border-[#d6e5db] bg-[#f7fbf8] p-2">
+                              <div className="text-xs font-medium text-[#17372a] mb-2">
                                 قطعات مواد اولیه برای سفارش تولید "{requirement.orderName || '-'}{requirement.orderCode ? ` (${requirement.orderCode})` : ''}"
                               </div>
                               <Table
@@ -562,20 +562,20 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                       </div>
 
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
-                      <div className="text-xs font-semibold text-[#6f4a2d]">قطعات تحویل شده</div>
+                      <div className="text-xs font-semibold text-[#17372a]">قطعات تحویل شده</div>
                       <div className="text-xs text-gray-600 flex flex-col sm:flex-row gap-4">
                         <span>
                           جمع مصرف مورد نیاز هر تولید: <span className="font-medium">{formatQty(group.totalPerItemUsage)}</span>
                           {consumptionUnitLabel ? <span className="font-medium mr-1">{consumptionUnitLabel}</span> : null}
                         </span>
-                        <span className="text-[#8b5e3c] font-semibold">
+                        <span className="text-[#1f4534] font-semibold">
                           جمع مصرف مورد نیاز کل: <span className="font-bold">{formatQty(group.totalUsage)}</span>
                           {consumptionUnitLabel ? <span className="font-bold mr-1">{consumptionUnitLabel}</span> : null}
                         </span>
                       </div>
 
-                      <div className={`rounded-lg p-3 space-y-3 ${hasDeliveryRows ? 'border border-[#c9b29a] bg-[#f7f1ea]' : 'border border-dashed border-[#b8895a] bg-white'}`}>
-                        <div className="text-xs font-medium text-[#6f4a2d]">
+                      <div className={`rounded-lg p-3 space-y-3 ${hasDeliveryRows ? 'border border-[#c9b29a] bg-[#f7f1ea]' : 'border border-dashed border-[#8bb49a] bg-white'}`}>
+                        <div className="text-xs font-medium text-[#17372a]">
                           از محصول "{group.selectedProductName || '-'}" برای سفارش تولید "{orderName || '-'}" چه مقدار تحویل می دهید؟
                         </div>
 
@@ -639,7 +639,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   key: 'deliveredQty',
                                   width: 140,
                                   render: (_value: number, record: StartMaterialDeliveryRow) => (
-                                    <span className="font-semibold text-[#6f4a2d]">{formatQty(calcDeliveredQty(record))}</span>
+                                    <span className="font-semibold text-[#17372a]">{formatQty(calcDeliveredQty(record))}</span>
                                   ),
                                 },
                               ]}
@@ -763,7 +763,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               width: isMobile ? 190 : 110,
                               render: (value: string, record: StartMaterialDeliveryRow) => (
                                 readonlyUnitFields ? (
-                                  <span className="font-semibold text-[#6f4a2d]">{value || '-'}</span>
+                                  <span className="font-semibold text-[#17372a]">{value || '-'}</span>
                                 ) : (
                                   <Select
                                     value={value || null}
@@ -782,7 +782,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               width: isMobile ? 190 : 110,
                               render: (value: string, record: StartMaterialDeliveryRow) => (
                                 readonlyUnitFields ? (
-                                  <span className="font-semibold text-[#6f4a2d]">{value || '-'}</span>
+                                  <span className="font-semibold text-[#17372a]">{value || '-'}</span>
                                 ) : (
                                   <Select
                                     value={value || null}
@@ -800,7 +800,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               key: 'deliveredQty',
                               width: isMobile ? 230 : 170,
                               render: (_value: number, record: StartMaterialDeliveryRow) => (
-                                <span className="font-semibold text-[#6f4a2d]">
+                                <span className="font-semibold text-[#17372a]">
                                   {formatQty(calcDeliveredQty(record))}
                                 </span>
                               ),

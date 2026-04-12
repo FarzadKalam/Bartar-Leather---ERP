@@ -2565,28 +2565,28 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
         <div className="bg-gray-50 p-2 rounded-lg border border-gray-100 space-y-2 text-xs text-gray-600">
           <div className="flex items-center gap-2">
-            <OrderedListOutlined className="text-amber-700" />
+            <OrderedListOutlined className="text-leather-700" />
             <span>ترتیب: {toPersianNumber(task.sort_order || '-')}</span>
           </div>
           <div className="flex items-center gap-2">
-            {task.assignee_type === 'role' ? <TeamOutlined className="text-amber-700" /> : <UserOutlined className="text-amber-700" />}
+            {task.assignee_type === 'role' ? <TeamOutlined className="text-leather-700" /> : <UserOutlined className="text-leather-700" />}
             <span>مسئول: {getAssigneeLabel(task)}</span>
           </div>
           {task.production_shelf_id && (
             <div className="flex items-center gap-2">
-              <span className="text-amber-700">قفسه:</span>
+              <span className="text-leather-700">قفسه:</span>
               <span>{getShelfLabel(task.production_shelf_id)}</span>
             </div>
           )}
           {task.wage !== undefined && task.wage !== null && (
             <div className="flex items-center gap-2">
-              <span className="text-amber-700">💰</span>
+              <span className="text-leather-700">💰</span>
               <span>دستمزد: {toPersianNumber(Number(task.wage || 0).toLocaleString('en-US'))} تومان</span>
             </div>
           )}
           {task.due_date && (
             <div className="flex items-center gap-2">
-              <ClockCircleOutlined className="text-amber-700" />
+              <ClockCircleOutlined className="text-leather-700" />
               <span>موعد: {renderDate(task.due_date)}</span>
             </div>
           )}
@@ -2606,7 +2606,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           فرم‌های تحویل کالا
         </Button>
         <Link to={`/tasks/${task.id}`} target="_blank">
-          <Button size="small" type="link" icon={<ArrowRightOutlined />} className="text-xs text-amber-700 hover:text-amber-600">
+          <Button size="small" type="link" icon={<ArrowRightOutlined />} className="text-xs text-leather-700 hover:text-leather-600">
             جزئیات کامل
           </Button>
         </Link>
@@ -2832,7 +2832,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                   icon={<PlusOutlined />}
                   size={compact ? 'small' : 'middle'}
                   onClick={() => { setEditingDraft(null); setIsDraftModalOpen(true); }}
-                  className="border-amber-300 text-amber-700 hover:!border-amber-600 hover:!text-amber-600 hover:!bg-amber-50"
+                  className="border-leather-300 text-leather-700 hover:!border-leather-600 hover:!text-leather-600 hover:!bg-leather-50"
                 >
                   افزودن مرحله
                 </Button>
@@ -2889,7 +2889,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                     ) : (
                       <button
                         type="button"
-                        className={`group flex items-center gap-1 rounded px-1 py-0.5 ${canEditQuantity ? 'hover:bg-amber-50 cursor-pointer' : 'cursor-default'}`}
+                        className={`group flex items-center gap-1 rounded px-1 py-0.5 ${canEditQuantity ? 'hover:bg-leather-50 cursor-pointer' : 'cursor-default'}`}
                         onClick={() => canEditQuantity && startLineQuantityEdit(lineId, line.quantity)}
                         disabled={!canEditQuantity}
                       >
@@ -2905,7 +2905,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                     size="small"
                     icon={<CopyOutlined />}
                     onClick={() => handleCopyLine(line)}
-                    className="text-amber-700 hover:!text-amber-600"
+                    className="text-leather-700 hover:!text-leather-600"
                     disabled={isLineCreationLocked}
                   >
                     کپی خط
@@ -2924,7 +2924,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                     onClick={() => {
                       openTaskModal(line.id);
                     }}
-                    className="flex-shrink-0 border-amber-300 text-amber-700 hover:!border-amber-600 hover:!text-amber-600 hover:!bg-amber-50"
+                    className="flex-shrink-0 border-leather-300 text-leather-700 hover:!border-leather-600 hover:!text-leather-600 hover:!bg-leather-50"
                   />
                 </Tooltip>
               )}
@@ -3046,7 +3046,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 setIsLineModalOpen(true);
               }}
               disabled={isLineCreationLocked}
-              className="border-amber-300 text-amber-700 hover:!border-amber-600 hover:!text-amber-600 hover:!bg-amber-50"
+              className="border-leather-300 text-leather-700 hover:!border-leather-600 hover:!text-leather-600 hover:!bg-leather-50"
             >
               افزودن خط
             </Button>
@@ -3084,7 +3084,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
           <div className="flex justify-end gap-2 mt-4 border-t pt-4">
             <Button onClick={() => setIsLineModalOpen(false)} className="rounded-lg">انصراف</Button>
-            <Button type="primary" htmlType="submit" className="rounded-lg bg-amber-700 hover:!bg-amber-600 border-none">
+            <Button type="primary" htmlType="submit" className="rounded-lg bg-leather-700 hover:!bg-leather-600 border-none">
               ثبت خط
             </Button>
           </div>
@@ -3092,7 +3092,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       </Modal>
 
       <Modal
-        title={<div className="flex items-center gap-2 text-amber-800"><div className="bg-amber-50 p-1 rounded text-amber-600"><PlusOutlined /></div> افزودن مرحله تولید</div>}
+        title={<div className="flex items-center gap-2 text-leather-800"><div className="bg-leather-50 p-1 rounded text-leather-600"><PlusOutlined /></div> افزودن مرحله تولید</div>}
         open={isTaskModalOpen}
         onCancel={() => setIsTaskModalOpen(false)}
         footer={null}
@@ -3168,7 +3168,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
           <div className="flex justify-end gap-2 mt-4 border-t pt-4">
             <Button onClick={() => setIsTaskModalOpen(false)} className="rounded-lg">انصراف</Button>
-            <Button type="primary" htmlType="submit" loading={loading} className="rounded-lg bg-amber-700 hover:!bg-amber-600 border-none shadow-md">
+            <Button type="primary" htmlType="submit" loading={loading} className="rounded-lg bg-leather-700 hover:!bg-leather-600 border-none shadow-md">
               ثبت مرحله
             </Button>
           </div>
@@ -3176,7 +3176,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       </Modal>
 
       <Modal
-        title={<div className="flex items-center gap-2 text-amber-800"><div className="bg-amber-50 p-1 rounded text-amber-600"><PlusOutlined /></div> افزودن مرحله پیش‌نویس</div>}
+        title={<div className="flex items-center gap-2 text-leather-800"><div className="bg-leather-50 p-1 rounded text-leather-600"><PlusOutlined /></div> افزودن مرحله پیش‌نویس</div>}
         open={isDraftModalOpen}
         onCancel={() => setIsDraftModalOpen(false)}
         footer={null}
@@ -3201,7 +3201,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
           <div className="flex justify-end gap-2 mt-4 border-t pt-4">
             <Button onClick={() => setIsDraftModalOpen(false)} className="rounded-lg">انصراف</Button>
-            <Button type="primary" htmlType="submit" className="rounded-lg bg-amber-700 hover:!bg-amber-600 border-none shadow-md">
+            <Button type="primary" htmlType="submit" className="rounded-lg bg-leather-700 hover:!bg-leather-600 border-none shadow-md">
               ثبت مرحله
             </Button>
           </div>

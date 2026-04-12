@@ -109,7 +109,7 @@ const PersianDatePicker: React.FC<PersianDatePickerProps> = ({
       if (date?.weekDay?.index === 6) {
         return {
           style: {
-            backgroundColor: '#c58f60',
+            backgroundColor: '#356d52',
             color: 'white',
             borderRadius: '6px',
           },

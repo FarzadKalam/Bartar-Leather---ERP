@@ -1122,7 +1122,7 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
 
   return (
     <>
-      <Badge count={formatBadgeCount(totalCount)} size="small" color="#c58f60">
+      <Badge count={formatBadgeCount(totalCount)} size="small" color="#356d52">
         <Button
           type="text"
           shape="circle"
@@ -1150,7 +1150,7 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
           onClose={handleClose}
           styles={{
             body: { padding: 16, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
-            header: { background: '#8b5a2b' },
+            header: { background: '#1f4534' },
           }}
           closeIcon={<CloseOutlined className="text-white" />}
         >
@@ -1175,7 +1175,7 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
           onClose={handleClose}
           styles={{
             body: { padding: 0 },
-            header: { background: '#8b5a2b' },
+            header: { background: '#1f4534' },
           }}
           closeIcon={<CloseOutlined className="text-white" />}
         >

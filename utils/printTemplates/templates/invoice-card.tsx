@@ -286,8 +286,8 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
         fontSize: isMobilePrint ? '6px' : '7px',
       }}
     >
-      <div style={{ textAlign: 'right', paddingBottom: isMobilePrint ? '6px' : '8px', borderBottom: '2px solid #c58f60', marginBottom: isMobilePrint ? '6px' : '8px', lineHeight: '1.3' }}>
-        <div style={{ fontSize: isMobilePrint ? '12px' : '15px', fontWeight: 'bold', color: '#c58f60', marginBottom: '2px' }}>
+      <div style={{ textAlign: 'right', paddingBottom: isMobilePrint ? '6px' : '8px', borderBottom: '2px solid #356d52', marginBottom: isMobilePrint ? '6px' : '8px', lineHeight: '1.3' }}>
+        <div style={{ fontSize: isMobilePrint ? '12px' : '15px', fontWeight: 'bold', color: '#356d52', marginBottom: '2px' }}>
           {L.invoiceTitle}
         </div>
         <div style={{ fontSize: isMobilePrint ? '7px' : '8px', color: '#666' }}>{data.system_code || data.name || '-'}</div>
@@ -335,7 +335,7 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
         <div style={{ fontWeight: 'bold', marginBottom: '3px', textAlign: 'right' }}>{L.items}</div>
         <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #ddd', fontSize: isMobilePrint ? '5.5px' : '6.5px' }}>
           <thead>
-            <tr style={{ background: '#f5f5f5', borderBottom: '1px solid #c58f60' }}>
+            <tr style={{ background: '#f5f5f5', borderBottom: '1px solid #356d52' }}>
               <th style={{ padding: '3px', width: '5%', borderRight: '1px solid #ddd' }}>{L.row}</th>
               <th style={{ padding: '3px', width: showTaxColumn ? '28%' : '31%', borderRight: '1px solid #ddd' }}>{L.product}</th>
               <th style={{ padding: '3px', width: '8%', borderRight: '1px solid #ddd' }}>{L.unit}</th>
@@ -373,7 +373,7 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
               </tr>
             )}
             {visibleItems.length > 0 && (
-              <tr style={{ borderTop: '1px solid #c58f60', background: '#fafaf5' }}>
+              <tr style={{ borderTop: '1px solid #356d52', background: '#fafaf5' }}>
                 <td colSpan={5} style={{ padding: '3px 4px', textAlign: 'left', borderRight: '1px solid #eee', fontWeight: 'bold' }}>{L.itemsSummary}</td>
                 <td style={{ padding: '3px 4px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid #eee' }}>{formatPersianPrice(discountTotalFromItems)}</td>
                 {showTaxColumn && <td style={{ padding: '3px 4px', textAlign: 'center', fontWeight: 'bold', borderRight: '1px solid #eee' }}>{formatPersianPrice(taxTotalFromItems)}</td>}

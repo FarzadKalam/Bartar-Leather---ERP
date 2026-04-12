@@ -118,7 +118,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
             taskShelfId ? (
               <div className="space-y-2">
                 <div className="text-xs text-gray-600">
-                  قفسه مرحله: <span className="font-semibold text-[#8b5e3c]">{taskShelfLabel || '-'}</span>
+                  قفسه مرحله: <span className="font-semibold text-[#1f4534]">{taskShelfLabel || '-'}</span>
                 </div>
                 <ShelfInventoryPanel
                   block={block}

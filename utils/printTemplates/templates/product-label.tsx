@@ -9,6 +9,9 @@ interface ProductLabelProps {
   fields: any[];
   formatPrintValue: (field: any, value: any) => string;
   printSize?: PrintPaperSize;
+  qrSize?: number;
+  containerStyle?: React.CSSProperties;
+  className?: string;
 }
 
 export const ProductLabel: React.FC<ProductLabelProps> = ({
@@ -18,12 +21,16 @@ export const ProductLabel: React.FC<ProductLabelProps> = ({
   fields,
   formatPrintValue,
   printSize = 'A6',
+  qrSize,
+  containerStyle,
+  className,
 }) => {
   const pageSize = PRINT_PAPER_DIMENSIONS[printSize];
+  const resolvedQrSize = qrSize ?? (printSize === 'A7' ? 48 : 92);
   return (
     <div
-      className="print-card"
-      style={{ width: `${pageSize.widthMm}mm`, minHeight: `${pageSize.heightMm}mm` }}
+      className={`print-card print-card--size-${String(printSize).toLowerCase()} ${className || ''}`.trim()}
+      style={{ width: `${pageSize.widthMm}mm`, minHeight: `${pageSize.heightMm}mm`, ...containerStyle }}
     >
       <div className="print-header">
         <div className="print-head-text">
@@ -31,7 +38,7 @@ export const ProductLabel: React.FC<ProductLabelProps> = ({
           <div className="print-subtitle">{subtitle}</div>
         </div>
         <div className="print-qr">
-          <QRCode value={qrValue} bordered={false} size={92} />
+          <QRCode value={qrValue} bordered={false} size={resolvedQrSize} />
         </div>
       </div>
       <div className="print-table-wrap">

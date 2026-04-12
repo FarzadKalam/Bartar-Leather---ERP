@@ -349,7 +349,11 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
         className="bg-gray-100 dark:bg-[#141414] transition-all duration-300 min-h-screen flex flex-col"
         style={{ 
           paddingRight: isMobile ? 0 : (collapsed ? 80 : 260), 
-          width: '100%' 
+          width: '100%',
+          height: '100vh',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          direction: 'rtl',
         }}
       >
         <Header 
@@ -499,4 +503,3 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
 };
 
 export default Layout;
-

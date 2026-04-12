@@ -9,28 +9,28 @@
 }
 
 .rmdp-leather .rmdp-day.rmdp-selected .sd {
-    background-color: #a9713d !important;
+    background-color: #2f614a !important;
     color: #fff !important;
 }
 .rmdp-leather .rmdp-day.rmdp-today .sd {
-    background-color: #eabb92 !important;
-    color: #fff !important;
+    background-color: #b9d2c1 !important;
+    color: #17372a !important;
 }
 .rmdp-leather .rmdp-day.rmdp-range .sd {
-	background-color: #c58f60 !important;
+	background-color: #356d52 !important;
 	color: #fff !important;
 }
 
 .rmdp-leather .rmdp-header-values,
 .rmdp-leather .rmdp-week-day {
-	color: #a9713d;
+	color: #2f614a;
 }
 
 .rmdp-leather .rmdp-arrow {
-	border: solid #8b5a2b;
+	border: solid #1f4534;
 	border-width: 0 2px 2px 0;
 }
 
 .rmdp-leather .rmdp-arrow-container:hover {
-	background-color: rgba(197, 143, 96, 0.1);
+	background-color: rgba(53, 109, 82, 0.12);
 }

@@ -7,6 +7,7 @@ interface PrintSectionProps {
   isPrintModalOpen: boolean;
   onClose: () => void;
   onPrint: () => void;
+  title?: string;
   printTemplates: { id: string; title: string; description: string }[];
   selectedTemplateId: string;
   onSelectTemplate: (id: string) => void;
@@ -17,12 +18,16 @@ interface PrintSectionProps {
   printableFields?: any[];
   selectedPrintFields?: Record<string, string[]>;
   onTogglePrintField?: (templateId: string, fieldName: string) => void;
+  showPrintSizeSelector?: boolean;
+  fieldSelectionTemplateIds?: string[];
+  printRootId?: string;
 }
 
 const PrintSection: React.FC<PrintSectionProps> = ({
   isPrintModalOpen,
   onClose,
   onPrint,
+  title = "انتخاب قالب چاپ",
   printTemplates,
   selectedTemplateId,
   onSelectTemplate,
@@ -33,6 +38,9 @@ const PrintSection: React.FC<PrintSectionProps> = ({
   printableFields = [],
   selectedPrintFields = {},
   onTogglePrintField = () => {},
+  showPrintSizeSelector = true,
+  fieldSelectionTemplateIds,
+  printRootId = 'print-root',
 }) => {
   const [activeTab, setActiveTab] = useState('preview');
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -52,15 +60,18 @@ const PrintSection: React.FC<PrintSectionProps> = ({
     };
   }, [printMode]);
   
-  const isFieldSelectionAvailable = selectedTemplateId && (
-    selectedTemplateId === 'product_label'
-    || selectedTemplateId === 'product_passport'
-    || selectedTemplateId === 'production_passport'
-  ) && printableFields.length > 0;
+  const defaultFieldSelectionTemplateIds = ['product_label', 'product_passport', 'production_passport'];
+  const eligibleFieldSelectionTemplateIds = fieldSelectionTemplateIds?.length
+    ? fieldSelectionTemplateIds
+    : defaultFieldSelectionTemplateIds;
+  const isFieldSelectionAvailable = !!selectedTemplateId
+    && eligibleFieldSelectionTemplateIds.includes(selectedTemplateId)
+    && printableFields.length > 0;
   const previewScaleMap: Record<PrintPaperSize, number> = {
-    A4: isMobile ? 0.35 : 0.46,
-    A5: isMobile ? 0.5 : 0.68,
-    A6: isMobile ? 0.7 : 0.88,
+    A4: isMobile ? 0.24 : 0.34,
+    A5: isMobile ? 0.38 : 0.56,
+    A6: isMobile ? 0.56 : 0.8,
+    A7: isMobile ? 0.76 : 1,
   };
   const previewScale = previewScaleMap[printSize];
 
@@ -69,7 +80,7 @@ const PrintSection: React.FC<PrintSectionProps> = ({
   return (
     <>
       <Modal
-        title="انتخاب قالب چاپ"
+        title={title}
         open={isPrintModalOpen}
         onCancel={onClose}
         onOk={onPrint}
@@ -112,7 +123,7 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                   setActiveTab('preview');
                 }}
                 style={{
-                  border: selectedTemplateId === t.id ? '2px solid #c58f60' : '1px solid #e5e7eb',
+                  border: selectedTemplateId === t.id ? '2px solid #356d52' : '1px solid #e5e7eb',
                   borderRadius: '8px',
                   padding: '10px 10px',
                   background: selectedTemplateId === t.id ? '#fff8f3' : '#fff',
@@ -133,45 +144,47 @@ const PrintSection: React.FC<PrintSectionProps> = ({
               </button>
             ))}
 
-            <div
-              style={{
-                marginTop: '8px',
-                paddingTop: '8px',
-                borderTop: '1px solid #e5e7eb',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px',
-              }}
-            >
-              <div style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', textAlign: 'right' }}>
-                سایز چاپ
+            {showPrintSizeSelector && (
+              <div
+                style={{
+                  marginTop: '8px',
+                  paddingTop: '8px',
+                  borderTop: '1px solid #e5e7eb',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#4b5563', textAlign: 'right' }}>
+                  سایز چاپ
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {(['A4', 'A5', 'A6', 'A7'] as PrintPaperSize[]).map((size) => {
+                    const selected = printSize === size;
+                    return (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => onPrintSizeChange(size)}
+                        style={{
+                          flex: 1,
+                          border: selected ? '2px solid #356d52' : '1px solid #d1d5db',
+                          borderRadius: '8px',
+                          background: selected ? '#fff8f3' : '#fff',
+                          color: selected ? '#92400e' : '#374151',
+                          fontWeight: 700,
+                          fontSize: '12px',
+                          padding: '8px 0',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {size}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {(['A4', 'A5', 'A6'] as PrintPaperSize[]).map((size) => {
-                  const selected = printSize === size;
-                  return (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => onPrintSizeChange(size)}
-                      style={{
-                        flex: 1,
-                        border: selected ? '2px solid #c58f60' : '1px solid #d1d5db',
-                        borderRadius: '8px',
-                        background: selected ? '#fff8f3' : '#fff',
-                        color: selected ? '#92400e' : '#374151',
-                        fontWeight: 700,
-                        fontSize: '12px',
-                        padding: '8px 0',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {size}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* ستون سمت راست: Tabs برای پیش‌نمایش و فیلدها */}
@@ -198,11 +211,12 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                       alignItems: 'flex-start',
                       flex: 1
                     }}>
-                      <div 
+                      <div
                         style={{ 
                           transform: `scale(${previewScale})`,
                           transformOrigin: 'top center',
-                          transformBox: 'border-box'
+                          transformBox: 'border-box',
+                          margin: '0 auto',
                         }}
                       >
                         {renderPrintCard()}
@@ -235,7 +249,7 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                               cursor: 'pointer',
                               padding: '12px',
                               borderRadius: '8px',
-                              border: isSelected ? '2px solid #c58f60' : '1px solid #e5e7eb',
+                              border: isSelected ? '2px solid #356d52' : '1px solid #e5e7eb',
                               background: isSelected ? '#fff8f3' : '#fff',
                               transition: 'all 0.2s ease',
                               userSelect: 'none',
@@ -245,9 +259,9 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                             <div style={{
                               width: '20px',
                               height: '20px',
-                              border: `2px solid ${isSelected ? '#c58f60' : '#d1d5db'}`,
+                              border: `2px solid ${isSelected ? '#356d52' : '#d1d5db'}`,
                               borderRadius: '4px',
-                              background: isSelected ? '#c58f60' : '#fff',
+                              background: isSelected ? '#356d52' : '#fff',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
@@ -260,7 +274,7 @@ const PrintSection: React.FC<PrintSectionProps> = ({
                             </div>
                             <span style={{
                               fontSize: '13px',
-                              color: isSelected ? '#c58f60' : '#374151',
+                              color: isSelected ? '#356d52' : '#374151',
                               fontWeight: isSelected ? 600 : 500
                             }}>
                               {field?.labels?.fa || field?.labels?.en || field?.key}
@@ -280,7 +294,7 @@ const PrintSection: React.FC<PrintSectionProps> = ({
       {/* print-root - کاملاً پنهان */}
       {typeof document !== 'undefined'
         ? createPortal(
-            <div id="print-root" aria-hidden={!printMode} data-print-size={printSize}>
+            <div id={printRootId} aria-hidden={!printMode} data-print-size={printSize}>
               {renderPrintCard()}
             </div>,
             document.body

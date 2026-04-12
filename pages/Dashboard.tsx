@@ -227,7 +227,7 @@ const Dashboard: React.FC = () => {
           time: task.created_at,
           type: 'change',
           description,
-          color: '#fa8c16',
+          color: '#5f9075',
         };
       });
 
@@ -237,13 +237,13 @@ const Dashboard: React.FC = () => {
           time: inv.created_at,
           type: 'invoice',
           description: `فاکتور ${inv.name} ایجاد شد`,
-          color: '#c58f60',
+          color: '#356d52',
         })),
         ...(productionOrders || []).slice(0, 3).filter(po => po.created_at).map(po => ({
           time: po.created_at,
           type: 'production',
           description: `سفارش تولید ${po.name} ایجاد شد`,
-          color: '#a67c52',
+          color: '#285641',
         })),
       ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
 
@@ -456,10 +456,10 @@ const Dashboard: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-dark-bg p-4 md:p-6">
+    <div className="min-h-screen bg-[linear-gradient(180deg,#f6faf7_0%,#eef5f0_100%)] dark:bg-dark-bg p-4 md:p-6">
       {/* Header Section */}
       <div className="mb-6">
-        <div className="bg-white dark:bg-dark-surface rounded-lg shadow-sm p-6 border border-gray-200 dark:border-dark-border">
+        <div className="bg-white/95 dark:bg-dark-surface rounded-[2rem] shadow-[0_22px_50px_rgba(17,41,31,0.08)] p-6 border border-leather-100 dark:border-dark-border">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
               <h1 className="text-3xl font-black text-leather-500 mb-2">
@@ -574,7 +574,7 @@ const Dashboard: React.FC = () => {
               value={stats.totalSales}
               formatter={(value) => formatPersianPrice(value as number)}
               suffix="تومان"
-              valueStyle={{ color: '#c58f60', fontSize: '1.5rem', fontWeight: 'bold' }}
+              valueStyle={{ color: '#356d52', fontSize: '1.5rem', fontWeight: 'bold' }}
             />
             <div className="mt-2 text-green-600 text-sm flex items-center gap-1">
               <ArrowUpOutlined />
@@ -603,7 +603,7 @@ const Dashboard: React.FC = () => {
               title="سفارشات در حال تولید"
               value={stats.inProductionOrders}
               formatter={(value) => toPersianNumber(value as number)}
-              valueStyle={{ color: '#1890ff', fontSize: '1.5rem', fontWeight: 'bold' }}
+              valueStyle={{ color: '#1f4534', fontSize: '1.5rem', fontWeight: 'bold' }}
             />
             <div className="mt-2 text-gray-600 text-sm flex items-center gap-1">
               <ClockCircleOutlined />
@@ -629,7 +629,7 @@ const Dashboard: React.FC = () => {
               title="تعداد محصولات"
               value={stats.totalProductsCount || 0}
               formatter={(value) => toPersianNumber(value as number)}
-              valueStyle={{ color: '#52c41a', fontSize: '1.5rem', fontWeight: 'bold' }}
+              valueStyle={{ color: '#356d52', fontSize: '1.5rem', fontWeight: 'bold' }}
             />
           </Card>
         </Col>
@@ -653,7 +653,7 @@ const Dashboard: React.FC = () => {
               formatter={(value) => toPersianNumber(value as number)}
               suffix="%"
               prefix={stats.monthlyGrowth && stats.monthlyGrowth > 0 ? <ArrowUpOutlined /> : undefined}
-              valueStyle={{ color: stats.monthlyGrowth && stats.monthlyGrowth > 0 ? '#52c41a' : '#ff4d4f', fontSize: '1.5rem', fontWeight: 'bold' }}
+              valueStyle={{ color: stats.monthlyGrowth && stats.monthlyGrowth > 0 ? '#356d52' : '#ff4d4f', fontSize: '1.5rem', fontWeight: 'bold' }}
             />
           </Card>
         </Col>

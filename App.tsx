@@ -27,8 +27,30 @@ function App() {
         locale={faIR}
         theme={{
           token: {
-            colorPrimary: "#c58f60",
+            colorPrimary: "#356d52",
+            colorInfo: "#356d52",
+            colorSuccess: "#2f614a",
+            colorLink: "#285641",
+            colorTextBase: "#163126",
+            colorBgLayout: "#f4f8f5",
+            colorBorderSecondary: "#d6e2da",
+            borderRadius: 14,
             fontFamily: "Vazirmatn, sans-serif",
+          },
+          components: {
+            Button: {
+              primaryShadow: "0 10px 24px rgba(53, 109, 82, 0.24)",
+              defaultBorderColor: "#b9d2c1",
+              defaultColor: "#1f4534",
+            },
+            Menu: {
+              itemSelectedBg: "#e8f1eb",
+              itemSelectedColor: "#1f4534",
+              itemHoverColor: "#285641",
+            },
+            Card: {
+              borderRadiusLG: 24,
+            },
           },
         }}
       >

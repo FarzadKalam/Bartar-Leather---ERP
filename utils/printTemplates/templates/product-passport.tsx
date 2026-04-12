@@ -9,6 +9,9 @@ interface ProductPassportProps {
   fields: any[];
   formatPrintValue: (field: any, value: any) => string;
   printSize?: PrintPaperSize;
+  qrSize?: number;
+  containerStyle?: React.CSSProperties;
+  className?: string;
 }
 
 export const ProductPassport: React.FC<ProductPassportProps> = ({
@@ -18,8 +21,12 @@ export const ProductPassport: React.FC<ProductPassportProps> = ({
   fields,
   formatPrintValue,
   printSize = 'A6',
+  qrSize,
+  containerStyle,
+  className,
 }) => {
   const pageSize = PRINT_PAPER_DIMENSIONS[printSize];
+  const resolvedQrSize = qrSize ?? (printSize === 'A7' ? 42 : 82);
   const safeFields = Array.isArray(fields) ? fields.filter(Boolean) : [];
   const columnCount = printSize === 'A4' ? 3 : printSize === 'A5' ? 2 : 1;
 
@@ -49,8 +56,8 @@ export const ProductPassport: React.FC<ProductPassportProps> = ({
 
   return (
     <div
-      className="print-card print-card--product-passport"
-      style={{ width: `${pageSize.widthMm}mm`, minHeight: `${pageSize.heightMm}mm` }}
+      className={`print-card print-card--product-passport print-card--size-${String(printSize).toLowerCase()} ${className || ''}`.trim()}
+      style={{ width: `${pageSize.widthMm}mm`, minHeight: `${pageSize.heightMm}mm`, ...containerStyle }}
     >
       <div className="product-passport-topline">
         <span>{title || 'شناسنامه کالا'}</span>
@@ -65,7 +72,7 @@ export const ProductPassport: React.FC<ProductPassportProps> = ({
           ) : null}
         </div>
         <div className="product-passport-qr">
-          <QRCode value={qrValue} bordered={false} size={82} />
+          <QRCode value={qrValue} bordered={false} size={resolvedQrSize} />
         </div>
       </div>
 

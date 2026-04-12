@@ -18,6 +18,9 @@ interface UsePrintManagerProps {
   relationOptions?: Record<string, any[]>;
 }
 
+const SYSTEM_QR_FIELD_KEY = '__qr_system';
+const SITE_QR_FIELD_KEY = '__qr_site';
+
 export const usePrintManager = ({
   moduleId,
   data,
@@ -108,6 +111,7 @@ export const usePrintManager = ({
   const activeTemplate = printTemplates.find((t) => t.id === selectedTemplateId) || printTemplates[0];
   const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
   const printQrValue = pageUrl;
+  const siteQrValue = String(data?.site_product_link || '').trim();
 
   const productionGridSpecFields = useMemo(() => {
     if (!(moduleId === 'production_boms' || moduleId === 'production_orders')) return [];
@@ -312,14 +316,32 @@ export const usePrintManager = ({
     });
   }, [selectedTemplateId, productionGridSpecFields, printableFields]);
 
+  const hasPrintableValue = useCallback((value: any) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'string') return value.trim() !== '';
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  }, []);
+
   useEffect(() => {
     if (selectedTemplateId && printableFieldsForTemplate.length > 0) {
+      const selectedKeys = printableFieldsForTemplate
+        .filter((field: any) => hasPrintableValue(field?.value))
+        .map((field) => field.key);
+      const defaultQrKey = selectedTemplateId === 'product_passport' && siteQrValue
+        ? SITE_QR_FIELD_KEY
+        : printQrValue
+          ? SYSTEM_QR_FIELD_KEY
+          : null;
       setSelectedPrintFields((prev) => ({
         ...prev,
-        [selectedTemplateId]: printableFieldsForTemplate.map((field) => field.key),
+        [selectedTemplateId]: defaultQrKey && !selectedKeys.includes(defaultQrKey)
+          ? [...selectedKeys, defaultQrKey]
+          : selectedKeys,
       }));
     }
-  }, [selectedTemplateId, printableFieldsForTemplate]);
+  }, [hasPrintableValue, printQrValue, selectedTemplateId, printableFieldsForTemplate, siteQrValue]);
 
   const openPrintModal = useCallback(() => {
     setIsPrintModalOpen(true);
@@ -398,6 +420,13 @@ export const usePrintManager = ({
           [templateId]: current.filter((f) => f !== fieldName),
         };
       }
+      if (fieldName === SYSTEM_QR_FIELD_KEY || fieldName === SITE_QR_FIELD_KEY) {
+        const otherQrKey = fieldName === SYSTEM_QR_FIELD_KEY ? SITE_QR_FIELD_KEY : SYSTEM_QR_FIELD_KEY;
+        return {
+          ...prev,
+          [templateId]: [...current.filter((f) => f !== otherQrKey), fieldName],
+        };
+      }
       return {
         ...prev,
         [templateId]: [...current, fieldName],
@@ -407,8 +436,13 @@ export const usePrintManager = ({
 
   const renderPrintCard = useCallback(() => {
     const selected = selectedPrintFields[selectedTemplateId] || [];
+    const selectedQrValue = selected.includes(SITE_QR_FIELD_KEY) && siteQrValue
+      ? siteQrValue
+      : printQrValue;
     let fieldsToDisplay = printableFieldsForTemplate.filter(
-      (field) => selected.length === 0 || selected.includes(field.key)
+      (field) => (selected.length === 0 || selected.includes(field.key))
+        && field.key !== SYSTEM_QR_FIELD_KEY
+        && field.key !== SITE_QR_FIELD_KEY
     );
 
     if (selectedTemplateId === 'production_passport') {
@@ -443,7 +477,7 @@ export const usePrintManager = ({
         return React.createElement(ProductLabel, {
           title: activeTemplate?.title || '',
           subtitle: moduleConfig?.titles.fa || '',
-          qrValue: printQrValue,
+          qrValue: selectedQrValue,
           fields: fieldsToDisplay,
           formatPrintValue,
           printSize,
@@ -453,7 +487,7 @@ export const usePrintManager = ({
         return React.createElement(ProductPassport, {
           title: activeTemplate?.title || '',
           subtitle: moduleConfig?.titles.fa || '',
-          qrValue: printQrValue,
+          qrValue: selectedQrValue,
           fields: fieldsToDisplay,
           formatPrintValue,
           printSize,
@@ -479,6 +513,7 @@ export const usePrintManager = ({
     activeTemplate,
     moduleConfig,
     printQrValue,
+    siteQrValue,
     formatPrintValue,
     sellerInfo,
     customerInfo,
@@ -547,4 +582,3 @@ export const usePrintManager = ({
     renderPrintCard,
   };
 };
-

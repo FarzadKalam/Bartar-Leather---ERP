@@ -115,16 +115,16 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_right,rgba(95,144,117,0.22),transparent_24%),radial-gradient(circle_at_bottom_left,rgba(31,69,52,0.16),transparent_24%),linear-gradient(180deg,#f8fbf9_0%,#edf5ef_100%)] flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="mb-6 text-center">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 px-6 py-4">
+          <div className="bg-white/90 rounded-[2rem] shadow-[0_22px_50px_rgba(17,41,31,0.1)] border border-leather-100 px-6 py-5 backdrop-blur">
             <div className="text-lg font-black text-leather-600">تولیدی چرم مهربانو</div>
-            <div className="text-xs text-gray-400 mt-1">Mehrbanoo Leather ERP</div>
+            <div className="text-xs text-leather-700/70 mt-1">Mehrbanoo Leather ERP</div>
           </div>
         </div>
 
-        <Card title="ورود به سیستم" className="w-full shadow-xl rounded-2xl">
+        <Card title="ورود به سیستم" className="w-full rounded-[2rem] border border-leather-100 shadow-[0_24px_60px_rgba(17,41,31,0.1)]" styles={{ header: { borderBottom: '1px solid #e4eee7' }, body: { padding: 24 } }}>
           <div className="flex flex-col gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">ایمیل</label>
@@ -137,7 +137,7 @@ const Login = () => {
                   <label className="block text-sm font-medium mb-1">رمز عبور</label>
                   <Input.Password value={password} onChange={(e) => setPassword(e.target.value)} placeholder="رمز عبور" />
                 </div>
-                <Button type="primary" onClick={handleLogin} loading={loading} className="w-full bg-leather-600 h-10 text-lg">
+                <Button type="primary" onClick={handleLogin} loading={loading} className="w-full bg-leather-600 h-11 text-lg rounded-xl shadow-lg shadow-leather-500/20">
                   ورود
                 </Button>
                 <Button type="link" onClick={handleResetPassword} className="text-xs">
@@ -168,7 +168,7 @@ const Login = () => {
                   type="primary"
                   onClick={handleSetNewPassword}
                   loading={loading}
-                  className="w-full bg-leather-600 h-10 text-lg"
+                  className="w-full bg-leather-600 h-11 text-lg rounded-xl shadow-lg shadow-leather-500/20"
                 >
                   ثبت رمز جدید
                 </Button>

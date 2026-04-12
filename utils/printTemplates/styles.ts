@@ -13,8 +13,8 @@ export const printStyles = `
     transition: border-color 0.2s ease, box-shadow 0.2s ease; 
     cursor: pointer;
   }
-  .print-template-item:hover { border-color: #c58f60; box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
-  .print-template-item.active { border-color: #c58f60; box-shadow: 0 6px 16px rgba(197,143,96,0.25); }
+  .print-template-item:hover { border-color: #356d52; box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
+  .print-template-item.active { border-color: #356d52; box-shadow: 0 6px 16px rgba(53,109,82,0.18); }
   .print-template-title { font-weight: 700; color: #111827; font-size: 13px; }
   .print-template-desc { color: #6b7280; font-size: 11px; margin-top: 4px; }
   
