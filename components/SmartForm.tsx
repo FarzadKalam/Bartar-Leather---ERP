@@ -16,6 +16,9 @@ import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWork
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
 import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
 import { findDuplicateUniqueFields } from '../utils/fieldUniqueness';
+import ProductCatalogManager from './products/ProductCatalogManager';
+import { persistProductCatalogData } from '../utils/productCatalogPersistence';
+import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -46,6 +49,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
   const [lastAppliedBomId, setLastAppliedBomId] = useState<string | null>(null);
+  const [lastAppliedParentProductId, setLastAppliedParentProductId] = useState<string | null>(null);
   const bomConfirmOpenRef = useRef<string | null>(null);
 
   const normalizeStateFieldValue = (input: any): any => {
@@ -91,6 +95,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
         form.resetFields();
         setFormData({}); // اول خالی کن
         setLastAppliedBomId(null);
+        setLastAppliedParentProductId(null);
 
         // 1. استخراج مقادیر پیش‌فرض از کانفیگ
         const defaults: Record<string, any> = {};
@@ -177,15 +182,19 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
         try {
             const isShelvesTarget = targetModule === 'shelves';
+            const isProductsTarget = targetModule === 'products';
             const extraSelect = isShelvesTarget ? ', shelf_number' : '';
             // تلاش برای گرفتن نام + کد سیستمی
-            const { data, error } = await supabase
+            let relationQuery = supabase
                 .from(targetModule)
-                .select(`id, ${resolvedTargetField}, system_code${extraSelect}`)
+                .select(`id, ${resolvedTargetField}, system_code${extraSelect}${isProductsTarget ? ', catalog_role' : ''}`)
                 .limit(100);
+            relationQuery = applyRelationTargetFilters(relationQuery, targetModule, key);
+            const { data, error } = await relationQuery;
             
             if (!error && data) {
-                options[key] = data.map((item: any) => ({
+                const filteredRows = filterRelationRows(data as any[], targetModule, key);
+                options[key] = filteredRows.map((item: any) => ({
                     label: item.system_code
                       ? `${item[resolvedTargetField] || item.shelf_number || item.system_code || item.id} (${item.system_code})`
                       : (item[resolvedTargetField] || item.shelf_number || item.system_code || item.id),
@@ -197,13 +206,16 @@ const SmartForm: React.FC<SmartFormProps> = ({
 
         try {
             // تلاش دوم: فقط نام
-            const { data } = await supabase
+            let relationQuery = supabase
                 .from(targetModule)
-                .select(`id, ${resolvedTargetField}`)
+                .select(`id, ${resolvedTargetField}${targetModule === 'products' ? ', catalog_role' : ''}`)
                 .limit(100);
+            relationQuery = applyRelationTargetFilters(relationQuery, targetModule, key);
+            const { data } = await relationQuery;
             
             if (data) {
-                options[key] = data.map((item: any) => ({
+                const filteredRows = filterRelationRows(data as any[], targetModule, key);
+                options[key] = filteredRows.map((item: any) => ({
                     label: item[resolvedTargetField],
                     value: item.id
                 }));
@@ -364,6 +376,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
         form.setFieldsValue(nextValues);
         setFormData(nextValues);
         setInitialRecord(data);
+        setLastAppliedParentProductId(String(data?.parent_product_id || '').trim() || null);
       }
     } catch (err: any) {
       message.error('خطا: ' + err.message);
@@ -440,6 +453,52 @@ const SmartForm: React.FC<SmartFormProps> = ({
     form.setFieldValue('name', nextName);
     setFormData((prev: any) => ({ ...prev, name: nextName }));
   }, [module.id, watchedValues, relationOptions, dynamicOptions]);
+
+  useEffect(() => {
+    if (module.id !== 'products') return;
+    const catalogRole = String(watchedValues?.catalog_role || formData?.catalog_role || '').trim();
+    const parentProductId = String(watchedValues?.parent_product_id || formData?.parent_product_id || '').trim();
+    if (catalogRole !== 'variant' || !parentProductId || parentProductId === lastAppliedParentProductId) return;
+
+    const applyParentProduct = async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('product_type, category, product_category, model_name, sewing_type, warranty_months, after_sales_service_months, brand_name, main_unit, sub_unit, buy_price, sell_price, related_bom, image_url')
+          .eq('id', parentProductId)
+          .single();
+        if (error) throw error;
+
+        const payload = {
+          product_type: data?.product_type || null,
+          category: data?.category || null,
+          product_category: data?.product_category || null,
+          model_name: data?.model_name || null,
+          sewing_type: data?.sewing_type || null,
+          warranty_months: data?.warranty_months ?? null,
+          after_sales_service_months: data?.after_sales_service_months ?? null,
+          brand_name: data?.brand_name || null,
+          main_unit: data?.main_unit || null,
+          sub_unit: data?.sub_unit || null,
+          buy_price: data?.buy_price ?? null,
+          sell_price: data?.sell_price ?? null,
+          related_bom: data?.related_bom || null,
+          image_url: data?.image_url || null,
+        };
+
+        form.setFieldsValue(payload);
+        setFormData((prev: any) => ({ ...prev, ...payload, parent_product_id: parentProductId }));
+        setLastAppliedParentProductId(parentProductId);
+      } catch (error) {
+        console.warn('Could not apply parent product values', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void applyParentProduct();
+  }, [form, formData?.catalog_role, formData?.parent_product_id, lastAppliedParentProductId, module.id, watchedValues?.catalog_role, watchedValues?.parent_product_id]);
 
   useEffect(() => {
     if (module.id !== 'production_orders') return;
@@ -540,6 +599,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
     try {
       if (module.id === 'production_orders' && !recordId) {
         values = { ...formData, ...values };
+      }
+      if (module.id === 'products') {
+        values = {
+          ...values,
+          __product_attributes: formData?.__product_attributes ?? values?.__product_attributes ?? [],
+          __product_global_attributes: formData?.__product_global_attributes ?? values?.__product_global_attributes ?? [],
+          __product_variations: formData?.__product_variations ?? values?.__product_variations ?? [],
+        };
       }
       if (module.id === 'products') {
         const mainUnit = values?.main_unit ?? formData?.main_unit;
@@ -668,7 +735,16 @@ const SmartForm: React.FC<SmartFormProps> = ({
         const userId = authData?.user?.id || null;
 
         if (recordId) {
-          await supabase.from(module.table).update(values).eq('id', recordId);
+          if (module.id === 'products') {
+            await persistProductCatalogData({
+              supabase: supabase as any,
+              recordId,
+              previousRecord: initialRecord,
+              values,
+            });
+          } else {
+            await supabase.from(module.table).update(values).eq('id', recordId);
+          }
 
           if (module.id === 'invoices' || module.id === 'purchase_invoices') {
             await applyInvoiceFinalizationInventory({
@@ -689,7 +765,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
           }
 
           const changes: any[] = [];
-          const compareKeys = new Set<string>([...Object.keys(values || {}), ...Object.keys(initialRecord || {})]);
+          const compareKeys = new Set<string>(
+            [...Object.keys(values || {}), ...Object.keys(initialRecord || {})]
+              .filter((key) => !String(key).startsWith('__'))
+          );
           compareKeys.forEach((key) => {
             const before = initialRecord?.[key];
             const after = values?.[key];
@@ -720,12 +799,28 @@ const SmartForm: React.FC<SmartFormProps> = ({
             }
           }
         } else {
-          const { data: inserted, error } = await supabase
-            .from(module.table)
-            .insert(values)
-            .select('id, main_unit, sub_unit')
-            .single();
-          if (error) throw error;
+          let inserted: any = null;
+          if (module.id === 'products') {
+            const persisted = await persistProductCatalogData({
+              supabase: supabase as any,
+              values,
+            });
+            const { data: insertedProduct, error: insertedError } = await supabase
+              .from(module.table)
+              .select('id, main_unit, sub_unit')
+              .eq('id', persisted.id)
+              .single();
+            if (insertedError) throw insertedError;
+            inserted = insertedProduct;
+          } else {
+            const { data: insertedRow, error } = await supabase
+              .from(module.table)
+              .insert(values)
+              .select('id, main_unit, sub_unit')
+              .single();
+            if (error) throw error;
+            inserted = insertedRow;
+          }
 
           if (inserted?.id) {
             if (module.id === 'products') {
@@ -854,7 +949,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       .filter(f => f.nature !== 'system') // 👈 این خط را اینجا هم اضافه کنید
       .sort((a, b) => (a.order || 0) - (b.order || 0));
   // محاسبه دیتا برای نمایش در لحظه (رندر)
-  const currentValues = watchedValues || formData;
+  const currentValues = { ...(watchedValues || {}), ...(formData || {}) };
   const currentSummaryData = getSummaryData(currentValues);
   const summaryConfigObj = module.blocks?.find(b => b.summaryConfig)?.summaryConfig;
 
@@ -1002,17 +1097,19 @@ const SmartForm: React.FC<SmartFormProps> = ({
                        const resolvedField = normalizeFieldForBulkEdit(field as ModuleField);
                        return (
                           <div key={field.key} className={field.type === FieldType.IMAGE ? 'row-span-2' : ''}>
-                             <SmartFieldRenderer 
-                               field={resolvedField} 
-                               value={formData[field.key]} 
-                               onChange={(val) => {
-                                 setFormData((prev: any) => ({
-                                   ...prev,
-                                   [field.key]: normalizeStateFieldValue(val),
-                                 }));
-                               }}
-                             forceEditMode={true}
-                             options={options}
+                              <SmartFieldRenderer 
+                                field={resolvedField} 
+                                value={formData[field.key]} 
+                                onChange={(val) => {
+                                  const normalizedValue = normalizeStateFieldValue(val);
+                                  form.setFieldValue(field.key, normalizedValue);
+                                  setFormData((prev: any) => ({
+                                    ...prev,
+                                    [field.key]: normalizedValue,
+                                  }));
+                                }}
+                              forceEditMode={true}
+                              options={options}
                             moduleId={module.id}
                             recordId={recordId}
                             allValues={formData}
@@ -1050,8 +1147,42 @@ const SmartForm: React.FC<SmartFormProps> = ({
               {sortedBlocks.map(block => {
                 if (block.visibleIf && !checkVisibility(block.visibleIf, currentValues)) return null;
                 if (canViewField(String(block.id)) === false) return null;
+                if (module.id === 'products' && block.id === 'product_catalog_manager') {
+                  if (String((currentValues as any)?.catalog_role || '') !== 'parent') return null;
+                  return (
+                    <ProductCatalogManager
+                      key={block.id}
+                      productId={recordId}
+                      product={currentValues || {}}
+                      productFields={module.fields}
+                      dynamicOptions={dynamicOptions}
+                      relationOptions={relationOptions}
+                      mode="edit"
+                      canEdit={canEditModule}
+                      checkVisibility={checkVisibility}
+                      onProductPatch={(patch) => {
+                        form.setFieldsValue(patch);
+                        setFormData((prev: any) => ({ ...prev, ...patch }));
+                      }}
+                      onChange={(payload) => {
+                        const nextFormData = {
+                          ...formData,
+                          __product_attributes: payload.attributes,
+                          __product_global_attributes: payload.globalAttributes,
+                          __product_variations: payload.variations,
+                        };
+                        setFormData(nextFormData);
+                        form.setFieldValue('__product_attributes', payload.attributes);
+                        form.setFieldValue('__product_global_attributes', payload.globalAttributes);
+                        form.setFieldValue('__product_variations', payload.variations);
+                      }}
+                    />
+                  );
+                }
                 if (module.id === 'products' && block.id === 'product_stock_movements') return null;
                 if (module.id === 'products' && block.id === 'product_inventory' && !!recordId) return null;
+                if (module.id === 'products' && block.id === 'product_inventory' && (currentValues as any)?.catalog_role === 'parent') return null;
+                if (module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && ['leatherSpec', 'liningSpec', 'kharjkarSpec', 'yaraghSpec'].includes(String(block.id))) return null;
                 if (module.id === 'product_bundles' && block.id === 'bundle_stock_movements') return null;
                 if (module.id === 'shelves' && block.id === 'shelf_stock_movements') return null;
                 if (module.id === 'tasks' && block.id === 'task_shelf_stock_movements') return null;
@@ -1066,6 +1197,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     .filter(f => f.nature !== 'system') // 👈 این خط اضافه شد: حذف کامل فیلدهای سیستمی از گرید
                     .filter(f => canViewField(f.key))
                     .filter(f => f.key !== 'assignee_id' && f.key !== 'assignee_type')
+                    .filter(f => !(module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && f.key === 'category'))
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
                   return (
@@ -1091,12 +1223,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                 key={field.key}
                                 field={resolvedField}
                                 value={fieldValue}
-                               recordId={recordId}
+                                recordId={recordId}
                                 onChange={(val) => {
                                   if (!isReadOnly) {
+                                    const normalizedValue = normalizeStateFieldValue(val);
+                                    form.setFieldValue(field.key, normalizedValue);
                                     setFormData((prev: any) => ({
                                       ...prev,
-                                      [field.key]: normalizeStateFieldValue(val),
+                                      [field.key]: normalizedValue,
                                     }));
                                   }
                                 }}

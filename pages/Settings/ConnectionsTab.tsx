@@ -54,6 +54,14 @@ type FormValues = {
     api_key?: string;
     webhook_secret?: string;
     is_active?: boolean;
+    woocommerce?: {
+      base_url?: string;
+      consumer_key?: string;
+      consumer_secret?: string;
+      default_status?: string;
+      auto_sync_enabled?: boolean;
+      sync_interval_minutes?: number;
+    };
   };
 };
 
@@ -87,6 +95,14 @@ const DEFAULT_VALUES: FormValues = {
     api_key: '',
     webhook_secret: '',
     is_active: true,
+    woocommerce: {
+      base_url: '',
+      consumer_key: '',
+      consumer_secret: '',
+      default_status: 'draft',
+      auto_sync_enabled: false,
+      sync_interval_minutes: 30,
+    },
   },
 };
 
@@ -109,6 +125,7 @@ const ConnectionsTab: React.FC = () => {
   const [smsTesting, setSmsTesting] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
   const [rowIds, setRowIds] = useState<Partial<Record<ConnectionType, string>>>({});
+  const [connectionRows, setConnectionRows] = useState<Partial<Record<ConnectionType, ConnectionRecord>>>({});
 
   const [testMobile, setTestMobile] = useState('');
   const [testText, setTestText] = useState('این یک پیامک تست از سامانه ERP است.');
@@ -143,6 +160,7 @@ const ConnectionsTab: React.FC = () => {
       if (error) {
         if (isMissingTableError(error)) {
           setTableMissing(true);
+          setConnectionRows({});
           form.setFieldsValue(DEFAULT_VALUES);
           return;
         }
@@ -162,6 +180,7 @@ const ConnectionsTab: React.FC = () => {
         email: byType.email?.id,
         site: byType.site?.id,
       });
+      setConnectionRows(byType);
 
       const nextValues: FormValues = {
         sms: {
@@ -180,6 +199,10 @@ const ConnectionsTab: React.FC = () => {
           ...DEFAULT_VALUES.site,
           provider: String(byType.site?.provider || DEFAULT_VALUES.site.provider),
           ...(byType.site?.settings || {}),
+          woocommerce: {
+            ...DEFAULT_VALUES.site.woocommerce,
+            ...(((byType.site?.settings || {}) as any)?.woocommerce || {}),
+          },
           is_active: byType.site?.is_active ?? true,
         },
       };
@@ -188,6 +211,7 @@ const ConnectionsTab: React.FC = () => {
       setTableMissing(false);
     } catch (err: any) {
       message.error(`خطا در دریافت تنظیمات اتصالات: ${err?.message || 'نامشخص'}`);
+      setConnectionRows({});
       form.setFieldsValue(DEFAULT_VALUES);
     } finally {
       setLoading(false);
@@ -241,9 +265,19 @@ const ConnectionsTab: React.FC = () => {
           connection_type: 'site',
           provider: values.site?.provider || 'rest_api',
           settings: {
+            ...((connectionRows.site?.settings && typeof connectionRows.site.settings === 'object') ? connectionRows.site.settings : {}),
             base_url: values.site?.base_url || '',
             api_key: values.site?.api_key || '',
             webhook_secret: values.site?.webhook_secret || '',
+            woocommerce: {
+              ...((((connectionRows.site?.settings || {}) as any)?.woocommerce) || {}),
+              base_url: values.site?.woocommerce?.base_url || '',
+              consumer_key: values.site?.woocommerce?.consumer_key || '',
+              consumer_secret: values.site?.woocommerce?.consumer_secret || '',
+              default_status: values.site?.woocommerce?.default_status || 'draft',
+              auto_sync_enabled: values.site?.woocommerce?.auto_sync_enabled === true,
+              sync_interval_minutes: values.site?.woocommerce?.sync_interval_minutes || 30,
+            },
           },
           is_active: values.site?.is_active !== false,
           updated_by: userId,
@@ -600,6 +634,36 @@ const ConnectionsTab: React.FC = () => {
                   <Form.Item label="فعال" name={['site', 'is_active']} valuePropName="checked">
                     <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
                   </Form.Item>
+
+                  <div className="md:col-span-3 mt-2 rounded-2xl border border-gray-200 p-4">
+                    <div className="font-bold text-sm text-gray-700 mb-3">تنظیمات WooCommerce</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <Form.Item label="آدرس پایه ووکامرس" name={['site', 'woocommerce', 'base_url']} className="md:col-span-2">
+                        <Input placeholder="https://example.com" />
+                      </Form.Item>
+                      <Form.Item label="وضعیت پیش‌فرض" name={['site', 'woocommerce', 'default_status']}>
+                        <Select
+                          options={[
+                            { label: 'پیش‌نویس', value: 'draft' },
+                            { label: 'منتشر شده', value: 'publish' },
+                            { label: 'خصوصی', value: 'private' },
+                          ]}
+                        />
+                      </Form.Item>
+                      <Form.Item label="Consumer Key" name={['site', 'woocommerce', 'consumer_key']}>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="Consumer Secret" name={['site', 'woocommerce', 'consumer_secret']}>
+                        <Input.Password />
+                      </Form.Item>
+                      <Form.Item label="فاصله sync خودکار (دقیقه)" name={['site', 'woocommerce', 'sync_interval_minutes']}>
+                        <InputNumber className="w-full persian-number" min={1} />
+                      </Form.Item>
+                      <Form.Item label="فعال بودن sync خودکار" name={['site', 'woocommerce', 'auto_sync_enabled']} valuePropName="checked">
+                        <Switch checkedChildren="فعال" unCheckedChildren="غیرفعال" />
+                      </Form.Item>
+                    </div>
+                  </div>
                 </div>
               ),
             },

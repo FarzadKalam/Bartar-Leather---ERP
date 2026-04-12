@@ -11,6 +11,21 @@ const fieldsArray: any[] = [
   { key: 'status', labels: { fa: 'وضعیت', en: 'Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4, options: [{label:'فعال', value:'active', color:'green'}, {label:'پیش‌نویس', value:'draft', color:'orange'}], isTableColumn: true },
   { key: 'tags', labels: { fa: 'برچسب‌ها', en: 'Tags' }, type: FieldType.TAGS, location: FieldLocation.HEADER, order: 5, nature: FieldNature.STANDARD, isTableColumn: true },
   //{ key: 'assignee_id', labels: { fa: 'مسئول', en: 'Assignee' }, type: FieldType.USER, location: FieldLocation.HEADER, order: 6, nature: FieldNature.STANDARD, isTableColumn: true },
+  {
+    key: 'catalog_role',
+    labels: { fa: 'نقش کاتالوگی', en: 'Catalog Role' },
+    type: FieldType.STATUS,
+    location: FieldLocation.HEADER,
+    order: 5.5,
+    defaultValue: 'standalone',
+    options: [
+      { label: 'محصول عادی', value: 'standalone', color: 'green' },
+      { label: 'محصول مادر', value: 'parent', color: 'blue' },
+      { label: 'متغیر', value: 'variant', color: 'gold' },
+    ],
+    nature: FieldNature.STANDARD,
+    isTableColumn: true,
+  },
   
   // --- اطلاعات پایه ---
   { key: 'product_type', labels: { fa: 'نوع محصول', en: 'Product Type' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 6, defaultValue: 'raw', options: [{ label: 'مواد اولیه', value: 'raw', color: 'red' }, { label: 'بسته نیمه آماده', value: 'semi', color: 'blue' }, { label: 'محصول نهایی', value: 'final', color: 'green' }], validation: { required: true }, nature: FieldNature.PREDEFINED, isTableColumn: true },
@@ -135,6 +150,46 @@ const fieldsArray: any[] = [
     dynamicOptionsCategory: 'brand_name',
     nature: FieldNature.STANDARD,
     validation: { required: false },
+  },
+  {
+    key: 'parent_product_id',
+    labels: { fa: 'محصول مادر', en: 'Parent Product' },
+    type: FieldType.RELATION,
+    location: FieldLocation.BLOCK,
+    blockId: 'baseInfo',
+    order: 2.8,
+    relationConfig: { targetModule: 'products', targetField: 'name' },
+    nature: FieldNature.STANDARD,
+    logic: { visibleIf: { field: 'catalog_role', operator: LogicOperator.EQUALS, value: 'variant' } }
+  },
+  {
+    key: 'site_sync_enabled',
+    labels: { fa: 'همگام‌سازی خودکار سایت', en: 'Auto Site Sync' },
+    type: FieldType.CHECKBOX,
+    location: FieldLocation.BLOCK,
+    blockId: 'baseInfo',
+    order: 2.81,
+    nature: FieldNature.STANDARD,
+  },
+  {
+    key: 'site_sync_status',
+    labels: { fa: 'وضعیت sync سایت', en: 'Site Sync Status' },
+    type: FieldType.TEXT,
+    location: FieldLocation.BLOCK,
+    blockId: 'baseInfo',
+    order: 2.82,
+    nature: FieldNature.SYSTEM,
+    readonly: true,
+  },
+  {
+    key: 'site_remote_id',
+    labels: { fa: 'شناسه محصول در سایت', en: 'Site Remote Id' },
+    type: FieldType.TEXT,
+    location: FieldLocation.BLOCK,
+    blockId: 'baseInfo',
+    order: 2.83,
+    nature: FieldNature.SYSTEM,
+    readonly: true,
   },
 
   // --- فیلد رابطه BOM برای محصول نهایی و نیمه آماده ---
@@ -577,6 +632,18 @@ const BLOCKS = {
     rowCalculationType: RowCalculationType.SIMPLE_MULTIPLY,
     tableColumns: createProductStockMovementsTableColumns()
   },
+  product_catalog_manager: {
+    id: 'product_catalog_manager',
+    titles: { fa: 'ویژگی‌ها و متغیرها', en: 'Catalog Variations' },
+    icon: 'AppstoreOutlined',
+    order: 8.8,
+    type: BlockType.FIELD_GROUP,
+    visibleIf: {
+      field: 'catalog_role',
+      operator: LogicOperator.EQUALS,
+      value: 'parent',
+    },
+  },
 };
 
 export const BOM_TABLE_BLOCKS = {
@@ -613,6 +680,7 @@ export const productsConfig: ModuleDefinition = {
         ...BLOCKS.yaraghSpec, 
         visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } 
       },
+      BLOCKS.product_catalog_manager,
       
       BLOCKS.product_inventory,
       BLOCKS.product_stock_movements,
@@ -651,6 +719,7 @@ export const productsConfig: ModuleDefinition = {
       }
     ],
     actionButtons: [
-      { id: 'auto_name', label: 'نامگذاری خودکار', placement: 'form', variant: 'primary' }
+      { id: 'auto_name', label: 'نامگذاری خودکار', placement: 'form', variant: 'primary' },
+      { id: 'sync_site', label: 'همگام‌سازی سایت', placement: 'header', variant: 'default' }
     ]
 };

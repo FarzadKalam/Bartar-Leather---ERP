@@ -19,6 +19,7 @@ import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { checkFieldDuplicate, findDuplicateUniqueFields, getUniqueFieldMessage, isUniqueField } from '../utils/fieldUniqueness';
 import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
+import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
 
 const normalizeDigitsToEnglish = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
@@ -438,12 +439,15 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
           if (!options) {
             const isShelvesTarget = targetModule === 'shelves';
             const extraSelect = isShelvesTarget ? ', shelf_number' : '';
-            const { data, error } = await supabase
+            let relationQuery = supabase
               .from(targetModule)
-              .select(`id, ${targetField}, system_code${extraSelect}`)
+              .select(`id, ${targetField}, system_code${extraSelect}${targetModule === 'products' ? ', catalog_role' : ''}`)
               .limit(200);
+            relationQuery = applyRelationTargetFilters(relationQuery, targetModule, quickField.key);
+            const { data, error } = await relationQuery;
             if (error) throw error;
-            options = (data || []).map((item: any) => ({
+            const filteredRows = filterRelationRows(data as any[] || [], targetModule, quickField.key);
+            options = filteredRows.map((item: any) => ({
               label: formatRelationOptionLabel(
                 targetModule,
                 item[targetField] || item.shelf_number || item.bundle_number || item.system_code || item.id,

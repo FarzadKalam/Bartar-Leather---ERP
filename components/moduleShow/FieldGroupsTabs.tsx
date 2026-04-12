@@ -57,7 +57,9 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
     return String(matched?.label || directLabel || taskShelfId);
   }, [data?.production_shelf, data?.production_shelf_id, data?.production_shelf_label, data?.production_shelf_name, relationOptions, taskShelfId]);
   const visibleFieldGroups = (fieldGroups || []).filter((block: any) =>
-    canViewField ? canViewField(String(block.id)) !== false : true
+    (canViewField ? canViewField(String(block.id)) !== false : true)
+    && !(moduleId === 'products' && data?.catalog_role === 'parent' && String(block.id) === 'product_inventory')
+    && !(moduleId === 'products' && data?.catalog_role === 'parent' && ['leatherSpec', 'liningSpec', 'kharjkarSpec', 'yaraghSpec'].includes(String(block.id)))
   );
   const quickAddTargetBlockId = useMemo(() => {
     if (moduleId === 'products') return 'product_inventory';
@@ -95,6 +97,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
           .filter((f: any) => f.blockId === block.id)
           .filter((f: any) => f.type !== FieldType.PROGRESS_STAGES)
           .filter((f: any) => (canViewField ? canViewField(f.key) !== false : true))
+          .filter((f: any) => !(moduleId === 'products' && data?.catalog_role === 'parent' && String(f.key) === 'category'))
           .map((f: any) => (!f.logic || checkVisibility(f.logic)) && (
             <div key={f.key} className="flex flex-col gap-1">
               <span className="text-xs text-gray-400">{f.labels.fa}</span>
@@ -149,6 +152,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
         </div>
       )}
       {moduleId === 'products' && block.id === 'product_inventory' && (() => {
+        if (data?.catalog_role === 'parent') return null;
         const stockMovementsBlock = moduleConfig?.blocks?.find((b: any) => b.id === 'product_stock_movements');
         if (!stockMovementsBlock) return null;
         if (stockMovementsBlock.visibleIf && !checkVisibility(stockMovementsBlock.visibleIf)) return null;

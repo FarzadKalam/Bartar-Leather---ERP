@@ -45,6 +45,10 @@ import {
 } from '../utils/customerLeveling';
 import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
 import { checkFieldDuplicate, getUniqueFieldMessage, isUniqueField } from '../utils/fieldUniqueness';
+import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
+import ProductCatalogManager from '../components/products/ProductCatalogManager';
+import ProductSiteSyncModal from '../components/products/ProductSiteSyncModal';
+import { persistProductCatalogData } from '../utils/productCatalogPersistence';
 
 const MODULE_SHOW_OPTIONS_CACHE = new Map<string, { dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>();
 const MODULE_SHOW_OPTIONS_INFLIGHT = new Map<string, Promise<{ dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>>();
@@ -62,6 +66,7 @@ const ModuleShow: React.FC = () => {
   const [currentTags, setCurrentTags] = useState<any[]>([]); // استیت تگ‌ها
 
   const [isEditDrawerOpen, setIsEditDrawerOpen] = useState(false);
+  const [isSiteSyncOpen, setIsSiteSyncOpen] = useState(false);
   const [editingFields, setEditingFields] = useState<Record<string, boolean>>({});
   const [tempValues, setTempValues] = useState<Record<string, any>>({});
   const [, setSavingField] = useState<string | null>(null);
@@ -905,11 +910,14 @@ const ModuleShow: React.FC = () => {
   }, []);
 
   const loadOutputProducts = useCallback(async () => {
-    const { data: products } = await supabase
+    let query = supabase
       .from('products')
-      .select('id, name, system_code, product_type')
+      .select('id, name, system_code, product_type, catalog_role')
       .limit(500);
-    const options = (products || []).map((row: any) => ({
+    query = applyRelationTargetFilters(query, 'products', 'output_product_id');
+    const { data: products } = await query;
+    const filteredRows = filterRelationRows((products || []) as any[], 'products', 'output_product_id');
+    const options = filteredRows.map((row: any) => ({
       value: row.id,
       label: formatRelationOptionLabel('products', row.name, row.system_code),
       product_type: row.product_type || null,
@@ -1285,7 +1293,8 @@ const ModuleShow: React.FC = () => {
       targetModule: string,
       targetField: string,
       filter?: Record<string, any> | null,
-      attachedModule?: string | null
+      attachedModule?: string | null,
+      fieldKey?: string | null,
       ) => {
       const normalizedTargetField = (targetModule === 'product_bundles' && (!targetField || targetField === 'name'))
         ? 'bundle_number'
@@ -1295,26 +1304,30 @@ const ModuleShow: React.FC = () => {
         targetField: normalizedTargetField,
         filter: filter || null,
         attachedModule: attachedModule || null,
+        fieldKey: fieldKey || null,
       });
       if (relationQueryCache.has(cacheToken)) {
         return relationQueryCache.get(cacheToken) || [];
       }
 
       const isShelvesTarget = targetModule === 'shelves';
+      const isProductsTarget = targetModule === 'products';
       const extraSelect = isShelvesTarget ? ', shelf_number' : '';
       const filterKeys = filter ? Object.keys(filter) : [];
       const filterSelect = filterKeys.length > 0 ? `, ${filterKeys.join(', ')}` : '';
       let query = supabase
         .from(targetModule)
-        .select(`id, ${normalizedTargetField}, system_code${extraSelect}${filterSelect}`)
+        .select(`id, ${normalizedTargetField}, system_code${extraSelect}${filterSelect}${isProductsTarget ? ', catalog_role' : ''}`)
         .limit(200);
+      query = applyRelationTargetFilters(query, targetModule, fieldKey);
 
       if (filter) {
         query = query.match(filter);
       }
 
       const { data: relData } = await query;
-      const options = (relData || []).map((item: any) => {
+      const filteredRows = filterRelationRows((relData || []) as any[], targetModule, fieldKey);
+      const options = filteredRows.map((item: any) => {
         const baseLabel = item?.[normalizedTargetField] || item?.shelf_number || item?.system_code || item?.id;
         return {
           label: formatRelationOptionLabel(targetModule, baseLabel, item.system_code),
@@ -1339,14 +1352,14 @@ const ModuleShow: React.FC = () => {
         if (dependsOnKey && recordData) {
           const dependsOnValue = String(recordData?.[dependsOnKey] || '').trim();
           if (!dependsOnValue) return;
-          const options = await loadRelationOptions(dependsOnValue, rawTargetField || 'name', null, dependsOnValue);
+          const options = await loadRelationOptions(dependsOnValue, rawTargetField || 'name', null, dependsOnValue, field.key);
           relOpts[field.key] = options;
           return;
         }
 
         const targetModule = String(field.relationConfig.targetModule || '').trim();
         if (!targetModule) return;
-        const options = await loadRelationOptions(targetModule, rawTargetField || 'name', field.relationConfig.filter || null);
+        const options = await loadRelationOptions(targetModule, rawTargetField || 'name', field.relationConfig.filter || null, null, field.key);
         relOpts[field.key] = options;
         if (field.key.includes('_')) {
           relOpts[field.key.split('_').pop() || field.key] = options;
@@ -1646,6 +1659,10 @@ const ModuleShow: React.FC = () => {
   }, [data, id, moduleConfig, modal, moduleId, msg, navigate]);
 
   const handleHeaderAction = (actionId: string) => {
+    if (actionId === 'sync_site' && moduleId === 'products') {
+      setIsSiteSyncOpen(true);
+      return;
+    }
     if (actionId === 'create_production_order') {
       if (!MODULES['production_orders']) {
         msg.error('ماژول سفارش تولید یافت نشد');
@@ -1986,9 +2003,19 @@ const ModuleShow: React.FC = () => {
         })
         : values;
 
-      const changedKeys = Object.keys(payload).filter((k) => !areValuesEqual(payload[k], previous[k]));
-
-      await supabase.from(moduleId).update(payload).eq('id', id);
+      const changedKeys = Object.keys(payload)
+        .filter((key) => !String(key).startsWith('__'))
+        .filter((k) => !areValuesEqual(payload[k], previous[k]));
+      if (moduleId === 'products') {
+        await persistProductCatalogData({
+          supabase: supabase as any,
+          recordId: id,
+          previousRecord: previous,
+          values: payload,
+        });
+      } else {
+        await supabase.from(moduleId).update(payload).eq('id', id);
+      }
 
       if (moduleId === 'invoices' || moduleId === 'purchase_invoices') {
         const { data: authData } = await supabase.auth.getUser();
@@ -2205,6 +2232,8 @@ const ModuleShow: React.FC = () => {
       .filter(f => f.type !== FieldType.IMAGE && f.type !== FieldType.JSON && f.type !== FieldType.READONLY_LOOKUP)
       .filter(f => !f.logic || checkVisibility(f.logic))
       .filter(f => canViewField(f.key))
+      .filter(f => !(moduleId === 'products' && data?.catalog_role === 'parent' && String(f.key) === 'category'))
+      .filter(f => !(moduleId === 'products' && data?.catalog_role === 'parent' && ['leatherSpec', 'liningSpec', 'kharjkarSpec', 'yaraghSpec'].includes(String((f as any).blockId || ''))))
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(f => ({ ...f, value: data[f.key] }))
       .filter(f => hasValue(f.value));
@@ -2573,10 +2602,14 @@ const ModuleShow: React.FC = () => {
       setStatusLoading(true);
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData?.user?.id || null;
+      const persisted = await persistProductCatalogData({
+        supabase: supabase as any,
+        values,
+      });
       const { data: inserted, error } = await supabase
         .from('products')
-        .insert(values)
         .select('id, main_unit, sub_unit')
+        .eq('id', persisted.id)
         .single();
       if (error) throw error;
       const productId = inserted?.id;
@@ -2826,7 +2859,11 @@ const ModuleShow: React.FC = () => {
   const canUseAction = (actionId: string) => canViewField(`__action_${actionId}`);
 
   const fieldGroups = moduleConfig.blocks?.filter(
-    (b) => b.type === BlockType.FIELD_GROUP && checkVisibility(b) && canViewField(String(b.id))
+    (b) => b.type === BlockType.FIELD_GROUP
+      && b.id !== 'product_catalog_manager'
+      && checkVisibility(b)
+      && canViewField(String(b.id))
+      && !(moduleId === 'products' && data?.catalog_role === 'parent' && ['leatherSpec', 'liningSpec', 'kharjkarSpec', 'yaraghSpec'].includes(String(b.id)))
   );
   const headerActions = (moduleConfig.actionButtons || [])
     .filter((b: any) => b.placement === 'header')
@@ -2947,6 +2984,21 @@ const ModuleShow: React.FC = () => {
         canDeleteFilesManager={filesAccessPermissions.canDeleteRecordFilesManager}
       />
 
+      {moduleId === 'products' && String(data?.catalog_role || '') === 'parent' && (
+        <ProductCatalogManager
+          productId={id}
+          product={data}
+          productFields={moduleConfig.fields}
+          dynamicOptions={dynamicOptions}
+          relationOptions={relationOptions}
+          mode="view"
+          canEdit={canEditModule}
+          checkVisibility={(logic: any) => checkVisibility(logic)}
+          onOpenEditor={() => setIsEditDrawerOpen(true)}
+          onOpenSync={() => setIsSiteSyncOpen(true)}
+        />
+      )}
+
       {moduleId === 'customers' && (
         <div className="mb-6 rounded-3xl border border-gray-200 bg-white p-5 shadow-sm">
           <div className="mb-2 text-sm font-bold text-gray-700">توضیحات</div>
@@ -2992,6 +3044,23 @@ const ModuleShow: React.FC = () => {
           onCancel={() => {
             setIsEditDrawerOpen(false);
             fetchRecord();
+          }}
+        />
+      )}
+
+      {moduleId === 'products' && (
+        <ProductSiteSyncModal
+          open={isSiteSyncOpen}
+          onClose={() => setIsSiteSyncOpen(false)}
+          productId={id}
+          isParent={String(data?.catalog_role || '') === 'parent'}
+          currentAutoSync={data?.site_sync_enabled === true}
+          onSynced={fetchRecord}
+          onAutoSyncChange={async (enabled) => {
+            if (!id) return;
+            const { error } = await supabase.from('products').update({ site_sync_enabled: enabled }).eq('id', id);
+            if (error) throw error;
+            setData((prev: any) => ({ ...(prev || {}), site_sync_enabled: enabled }));
           }}
         />
       )}

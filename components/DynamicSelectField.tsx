@@ -8,7 +8,7 @@ interface DynamicSelectFieldProps {
   value?: string | string[];
   onChange?: (value: string | string[]) => void;
   options: Array<{ label: string; value: string }>;
-  category: string;
+  category?: string;
   placeholder?: string;
   className?: string;
   showSearch?: boolean;
@@ -19,6 +19,9 @@ interface DynamicSelectFieldProps {
   getPopupContainer?: (trigger: HTMLElement) => HTMLElement;
   popupRootStyle?: React.CSSProperties;
   dropdownStyle?: React.CSSProperties;
+  manageMode?: 'remote' | 'local';
+  localOptions?: Array<{ label: string; value: string }>;
+  onLocalOptionsChange?: (options: Array<{ label: string; value: string }>) => void;
 }
 
 type ManagedOption = {
@@ -144,6 +147,9 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   },
   popupRootStyle,
   dropdownStyle,
+  manageMode = 'remote',
+  localOptions,
+  onLocalOptionsChange,
 }) => {
   const { message: msg } = App.useApp();
   const [newOptionValue, setNewOptionValue] = useState('');
@@ -153,19 +159,20 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   const [editTarget, setEditTarget] = useState<ManagedOption | null>(null);
   const [editOptionValue, setEditOptionValue] = useState('');
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  const isLocalMode = manageMode === 'local';
 
   const mergedDropdownStyle: React.CSSProperties = {
-    minWidth: isMobileViewport ? 220 : 280,
-    maxWidth: isMobileViewport ? '92vw' : 520,
-    width: isMobileViewport ? '92vw' : undefined,
+    minWidth: isMobileViewport ? undefined : 280,
+    maxWidth: isMobileViewport ? 'calc(100vw - 24px)' : 520,
     zIndex: 13000,
     ...dropdownStyle,
     ...popupRootStyle,
   };
 
   const normalizedOptions = useMemo(() => {
+    const sourceOptions = isLocalMode ? (localOptions || []) : (options || []);
     const next = dedupeOptions(
-      (Array.isArray(options) ? options : []).map((option) => ({
+      sourceOptions.map((option) => ({
         label: String(option?.label ?? option?.value ?? ''),
         value: String(option?.value ?? option?.label ?? ''),
       }))
@@ -182,11 +189,11 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       }
     });
     return next;
-  }, [options, value, mode]);
+  }, [isLocalMode, localOptions, options, value, mode]);
 
   const persistedOptionValues = useMemo(() => new Set(
-    (options || []).map((option) => String(option?.value ?? ''))
-  ), [options]);
+    (isLocalMode ? normalizedOptions : (options || [])).map((option) => String(option?.value ?? ''))
+  ), [isLocalMode, normalizedOptions, options]);
 
   const deleteReplacementOptions = useMemo(() => {
     if (!deleteTarget) return [];
@@ -234,6 +241,19 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       return;
     }
 
+    if (isLocalMode) {
+      const nextOptions = [...normalizedOptions, { label: trimmedValue, value: trimmedValue }];
+      onLocalOptionsChange?.(nextOptions);
+      if (mode === 'multiple') {
+        const currentValues = Array.isArray(value) ? value : (value ? [value] : []);
+        handleSelectChange([...currentValues, trimmedValue]);
+      } else {
+        handleSelectChange(trimmedValue);
+      }
+      setNewOptionValue('');
+      return;
+    }
+
     setLoading(true);
     try {
       const { error } = await supabase.from('dynamic_options').insert([{
@@ -265,6 +285,11 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   };
 
   const openDeleteModal = (option: ManagedOption) => {
+    if (isLocalMode) {
+      setDeleteTarget(option);
+      setDeleteReplacementValue(undefined);
+      return;
+    }
     const replacements = normalizedOptions.filter((item) =>
       persistedOptionValues.has(String(item.value))
       && String(item.value) !== String(option.value)
@@ -280,7 +305,21 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   };
 
   const handleDeleteOption = async () => {
-    if (!deleteTarget || !deleteReplacementValue) {
+    if (!deleteTarget) {
+      msg.warning('گزینه‌ای برای حذف انتخاب نشده است');
+      return;
+    }
+
+    if (isLocalMode) {
+      const nextOptions = normalizedOptions.filter((option) => String(option.value) !== String(deleteTarget.value));
+      onLocalOptionsChange?.(nextOptions);
+      applyCurrentValueRemap(deleteTarget.value, null);
+      closeDeleteModal();
+      msg.success('گزینه حذف شد');
+      return;
+    }
+
+    if (!deleteReplacementValue) {
       msg.warning('مقدار جایگزین را انتخاب کنید');
       return;
     }
@@ -288,7 +327,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     setLoading(true);
     try {
       const migration = await migrateDynamicOptionUsage({
-        category,
+        category: String(category || ''),
         fromValue: deleteTarget.value,
         toValue: deleteReplacementValue,
       });
@@ -341,8 +380,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     }
 
     const duplicateExists = normalizedOptions.some((option) =>
-      persistedOptionValues.has(String(option.value))
-      && String(option.value) !== String(editTarget.value)
+      String(option.value) !== String(editTarget.value)
       && toComparableKey(option.value) === toComparableKey(trimmedValue)
     );
     if (duplicateExists) {
@@ -350,10 +388,23 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       return;
     }
 
+    if (isLocalMode) {
+      const nextOptions = normalizedOptions.map((option) =>
+        String(option.value) === String(editTarget.value)
+          ? { label: trimmedValue, value: trimmedValue }
+          : option
+      );
+      onLocalOptionsChange?.(nextOptions);
+      applyCurrentValueRemap(editTarget.value, trimmedValue);
+      closeEditModal();
+      msg.success('گزینه ویرایش شد');
+      return;
+    }
+
     setLoading(true);
     try {
       const migration = await migrateDynamicOptionUsage({
-        category,
+        category: String(category || ''),
         fromValue: editTarget.value,
         toValue: trimmedValue,
       });
@@ -402,7 +453,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         optionFilterProp="label"
         getPopupContainer={getPopupContainer}
         options={normalizedOptions}
-        popupMatchSelectWidth={isMobileViewport}
+        popupMatchSelectWidth
         notFoundContent={loading ? 'در حال بارگذاری...' : 'موردی یافت نشد'}
         styles={{ popup: { root: mergedDropdownStyle } }}
         optionRender={(option) => {
@@ -487,29 +538,35 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         open={!!deleteTarget}
         onCancel={closeDeleteModal}
         onOk={handleDeleteOption}
-        okText="انتقال و حذف"
+        okText={isLocalMode ? 'حذف' : 'انتقال و حذف'}
         cancelText="انصراف"
         confirmLoading={loading}
-        okButtonProps={{ disabled: !deleteReplacementValue }}
+        okButtonProps={{ disabled: !isLocalMode && !deleteReplacementValue }}
         zIndex={15000}
         destroyOnHidden
       >
         <div className="flex flex-col gap-3">
           <div className="text-sm text-gray-600">
             {deleteTarget
-              ? `رکوردهایی که از "${deleteTarget.label}" استفاده کرده‌اند، قبل از حذف به کدام مقدار منتقل شوند؟`
+              ? (
+                isLocalMode
+                  ? `گزینه "${deleteTarget.label}" از همین فهرست حذف می‌شود.`
+                  : `رکوردهایی که از "${deleteTarget.label}" استفاده کرده‌اند، قبل از حذف به کدام مقدار منتقل شوند؟`
+              )
               : ''}
           </div>
-          <Select
-            value={deleteReplacementValue}
-            onChange={setDeleteReplacementValue}
-            options={deleteReplacementOptions}
-            placeholder="مقدار جایگزین را انتخاب کنید"
-            showSearch
-            optionFilterProp="label"
-            getPopupContainer={getPopupContainer}
-            styles={{ popup: { root: { zIndex: 14000 } } }}
-          />
+          {!isLocalMode && (
+            <Select
+              value={deleteReplacementValue}
+              onChange={setDeleteReplacementValue}
+              options={deleteReplacementOptions}
+              placeholder="مقدار جایگزین را انتخاب کنید"
+              showSearch
+              optionFilterProp="label"
+              getPopupContainer={getPopupContainer}
+              styles={{ popup: { root: { zIndex: 14000 } } }}
+            />
+          )}
         </div>
       </Modal>
 
@@ -527,7 +584,11 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         <div className="flex flex-col gap-3">
           <div className="text-sm text-gray-600">
             {editTarget
-              ? `نام گزینه "${editTarget.label}" تغییر می‌کند و تمام استفاده‌های فعلی به مقدار جدید منتقل می‌شوند.`
+              ? (
+                isLocalMode
+                  ? `نام گزینه "${editTarget.label}" در همین فهرست تغییر می‌کند.`
+                  : `نام گزینه "${editTarget.label}" تغییر می‌کند و تمام استفاده‌های فعلی به مقدار جدید منتقل می‌شوند.`
+              )
               : ''}
           </div>
           <Input
