@@ -22,6 +22,7 @@ import { BlockDefinition } from '../types';
 import { supabase } from '../supabaseClient';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { applyProductionMoves } from '../utils/productionWorkflow';
+import { getAllowNegativeInventory } from '../utils/companySettings';
 import {
   buildGroupStartMaterials,
   type GroupStartMaterial,
@@ -256,7 +257,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
   const steps = useMemo(
     () => [
       { key: 'setup', title: '۱. ایجاد سفارش گروهی' },
-      { key: 'materials', title: '۲. تکمیل قطعات' },
+      { key: 'materials', title: '۲. تکمیل قطعات مورد نیاز' },
       { key: 'lines', title: '۳. خطوط و تعداد' },
       { key: 'start', title: '۴. تحویل مواد اولیه' },
       { key: 'progress', title: '۵. در حال تولید' },
@@ -1495,6 +1496,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       setSourceShelfOptionsByProduct({});
       return {} as Record<string, { label: string; value: string; stock?: number }[]>;
     }
+    const allowNegativeInventory = await getAllowNegativeInventory(supabase as any);
     const productUnits = new Map<string, string>();
     const { data: productRows } = await supabase
       .from('products')
@@ -1507,21 +1509,29 @@ const ProductionGroupOrderWizard: React.FC = () => {
       if (mainUnit) productUnits.set(id, mainUnit);
     });
 
-    const { data: inventoryRows } = await supabase
+    let inventoryQuery = supabase
       .from('product_inventory')
       .select('product_id, shelf_id, stock')
-      .in('product_id', ids)
-      .gt('stock', 0);
+      .in('product_id', ids);
+    if (!allowNegativeInventory) {
+      inventoryQuery = inventoryQuery.gt('stock', 0);
+    }
+    const { data: inventoryRows } = await inventoryQuery;
 
     const validRows = (inventoryRows || []).filter((row: any) => row?.product_id && row?.shelf_id);
-    const shelfIds = Array.from(new Set(validRows.map((row: any) => String(row.shelf_id))));
+    const shelfIds = allowNegativeInventory
+      ? []
+      : Array.from(new Set(validRows.map((row: any) => String(row.shelf_id))));
     let shelfMap = new Map<string, { label: string; isProductionWarehouse: boolean }>();
-    if (shelfIds.length > 0) {
-      const { data: shelves } = await supabase
+    if (allowNegativeInventory || shelfIds.length > 0) {
+      let shelvesQuery = supabase
         .from('shelves')
         .select('id, shelf_number, name, warehouses(name)')
-        .in('id', shelfIds)
         .limit(1000);
+      if (!allowNegativeInventory) {
+        shelvesQuery = shelvesQuery.in('id', shelfIds);
+      }
+      const { data: shelves } = await shelvesQuery;
       shelfMap = new Map((shelves || []).map((shelf: any) => {
         const warehouseName = String(shelf?.warehouses?.name || '');
         const isProductionWarehouse = warehouseName.includes('تولید') || /production/i.test(warehouseName);
@@ -1545,6 +1555,29 @@ const ProductionGroupOrderWizard: React.FC = () => {
         nextOptions[productId].push({ value: shelfId, label, stock });
       }
     });
+
+    if (allowNegativeInventory) {
+      const allSourceShelves = Array.from(shelfMap.entries()).filter(([, info]) => !info.isProductionWarehouse);
+      ids.forEach((productId) => {
+        const existingShelfIds = new Set((nextOptions[productId] || []).map((item) => String(item.value)));
+        const productUnit = productUnits.get(productId);
+        const unitSuffix = productUnit ? ` ${productUnit}` : '';
+        allSourceShelves.forEach(([shelfId, shelfInfo]) => {
+          if (existingShelfIds.has(shelfId)) return;
+          if (!nextOptions[productId]) nextOptions[productId] = [];
+          nextOptions[productId].push({
+            value: shelfId,
+            label: `${shelfInfo.label} (موجودی: 0${unitSuffix})`,
+            stock: 0,
+          });
+        });
+        nextOptions[productId] = (nextOptions[productId] || []).sort((a, b) => {
+          const stockDiff = (Number(b?.stock) || 0) - (Number(a?.stock) || 0);
+          if (stockDiff !== 0) return stockDiff;
+          return String(a?.label || '').localeCompare(String(b?.label || ''), 'fa');
+        });
+      });
+    }
     setSourceShelfOptionsByProduct(nextOptions);
     return nextOptions;
   }, []);
@@ -2725,4 +2758,3 @@ const ProductionGroupOrderWizard: React.FC = () => {
 };
 
 export default ProductionGroupOrderWizard;
-

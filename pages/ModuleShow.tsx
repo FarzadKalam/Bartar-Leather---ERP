@@ -37,7 +37,6 @@ import { canAccessAssignedRecord, resolveFilesAccessPermissions } from '../utils
 import { isMissingRecordFilesError } from '../utils/recordFilesAvailability';
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from '../utils/recordCopy';
 import { attachTaskCompletionIfNeeded, buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
-import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
 import {
   calculateCustomerStatsFromInvoices,
   getDefaultLevelingConfig,
@@ -49,6 +48,11 @@ import { applyRelationTargetFilters, filterRelationRows } from '../utils/relatio
 import ProductCatalogManager from '../components/products/ProductCatalogManager';
 import ProductSiteSyncModal from '../components/products/ProductSiteSyncModal';
 import { persistProductCatalogData } from '../utils/productCatalogPersistence';
+import {
+  resolveCatalogProductMatch,
+  type ResolveCatalogProductMatchResult,
+} from '../utils/productCatalogResolver';
+import { getAllowNegativeInventory } from '../utils/companySettings';
 
 const MODULE_SHOW_OPTIONS_CACHE = new Map<string, { dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>();
 const MODULE_SHOW_OPTIONS_INFLIGHT = new Map<string, Promise<{ dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>>();
@@ -97,6 +101,7 @@ const ModuleShow: React.FC = () => {
   const [isCreateProductOpen, setIsCreateProductOpen] = useState(false);
   const [outputProductType, setOutputProductType] = useState<'semi' | 'final' | null>(null);
   const [outputMode, setOutputMode] = useState<'existing' | 'new'>('existing');
+  const [outputResolution, setOutputResolution] = useState<ResolveCatalogProductMatchResult | null>(null);
   const [productionQuantityPreview, setProductionQuantityPreview] = useState<number | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [stockMovementQuickAddSignal, setStockMovementQuickAddSignal] = useState(0);
@@ -127,10 +132,10 @@ const ModuleShow: React.FC = () => {
   }, [data, readOrderQuantity]);
 
   const resolveProductionQuantity = useCallback(async (record?: any) => {
-    const qtyFromRecord = readOrderQuantity(record ?? data);
-    if (qtyFromRecord > 0) return qtyFromRecord;
     const qtyFromLines = await fetchProductionQuantity();
     if (typeof qtyFromLines === 'number' && qtyFromLines > 0) return qtyFromLines;
+    const qtyFromRecord = readOrderQuantity(record ?? data);
+    if (qtyFromRecord > 0) return qtyFromRecord;
     return 0;
   }, [data, fetchProductionQuantity, readOrderQuantity]);
 
@@ -588,40 +593,57 @@ const ModuleShow: React.FC = () => {
         }
 
         const handover = recurrenceInfo?.production_handover;
-        const groups = Array.isArray(handover?.groups) ? handover.groups : [];
-        const targetShelfId = String(
-          handover?.targetShelfId
-          || handover?.target_shelf_id
-          || lastTask?.production_shelf_id
-          || data?.production_shelf_id
-          || ''
-        );
-        if (!targetShelfId || !groups.length) return;
-
-        groups.forEach((group: any) => {
-          const pieces = Array.isArray(group?.pieces) ? group.pieces : [];
-          const selectedPiece = pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id) || null;
-          const productId = String(
-            group?.selectedProductId
-            || group?.selected_product_id
-            || selectedPiece?.selectedProductId
-            || selectedPiece?.selected_product_id
-            || selectedPiece?.product_id
+        const forms = Array.isArray(handover?.forms) && handover.forms.length > 0
+          ? handover.forms
+          : (Array.isArray(handover?.groups) ? [{ groups: handover.groups }] : []);
+        forms.forEach((form: any) => {
+          const groups = Array.isArray(form?.groups) ? form.groups : [];
+          const targetShelfId = String(
+            form?.targetShelfId
+            || form?.target_shelf_id
+            || handover?.targetShelfId
+            || handover?.target_shelf_id
+            || lastTask?.production_shelf_id
+            || data?.production_shelf_id
             || ''
           );
-          if (!productId) return;
-          const qty = pieces.reduce((sum: number, piece: any) => {
-            const raw = piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0;
-            const value = parseFloat(raw);
-            return sum + (Number.isFinite(value) ? value : 0);
-          }, 0);
-          if (!qty || qty <= 0) return;
-          finalMoves.push({
-            product_id: productId,
-            from_shelf_id: targetShelfId,
-            to_shelf_id: targetShelfId,
-            quantity: qty,
-            unit: selectedPiece?.mainUnit || selectedPiece?.main_unit || null,
+          if (!targetShelfId || !groups.length) return;
+
+          groups.forEach((group: any) => {
+            const pieces = Array.isArray(group?.pieces) ? group.pieces : [];
+            const deliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+            const selectedPiece = pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id) || null;
+            const productId = String(
+              group?.selectedProductId
+              || group?.selected_product_id
+              || selectedPiece?.selectedProductId
+              || selectedPiece?.selected_product_id
+              || selectedPiece?.product_id
+              || ''
+            );
+            if (!productId) return;
+            const qty = deliveryRows.length > 0
+              ? deliveryRows.reduce((sum: number, row: any) => {
+                  const explicitQty = parseFloat(row?.deliveredQty ?? row?.delivered_qty);
+                  if (Number.isFinite(explicitQty) && explicitQty > 0) return sum + explicitQty;
+                  const length = parseFloat(row?.length) || 0;
+                  const width = parseFloat(row?.width) || 0;
+                  const quantity = parseFloat(row?.quantity) || 0;
+                  return sum + (length * width * quantity);
+                }, 0)
+              : pieces.reduce((sum: number, piece: any) => {
+                  const raw = piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0;
+                  const value = parseFloat(raw);
+                  return sum + (Number.isFinite(value) ? value : 0);
+                }, 0);
+            if (!qty || qty <= 0) return;
+            finalMoves.push({
+              product_id: productId,
+              from_shelf_id: targetShelfId,
+              to_shelf_id: targetShelfId,
+              quantity: qty,
+              unit: selectedPiece?.mainUnit || selectedPiece?.main_unit || deliveryRows[0]?.mainUnit || deliveryRows[0]?.main_unit || null,
+            });
           });
         });
       });
@@ -842,6 +864,7 @@ const ModuleShow: React.FC = () => {
       setSourceShelfOptionsByProduct({});
       return;
     }
+    const allowNegativeInventory = await getAllowNegativeInventory(supabase as any);
     const productUnits = new Map<string, string>();
     const { data: productRows } = await supabase
       .from('products')
@@ -854,22 +877,30 @@ const ModuleShow: React.FC = () => {
       if (mainUnit) productUnits.set(id, mainUnit);
     });
 
-    const { data: inventoryRows } = await supabase
+    let inventoryQuery = supabase
       .from('product_inventory')
       .select('product_id, shelf_id, stock, bundle_id')
-      .in('product_id', productIds)
-      .gt('stock', 0);
+      .in('product_id', productIds);
+    if (!allowNegativeInventory) {
+      inventoryQuery = inventoryQuery.gt('stock', 0);
+    }
+    const { data: inventoryRows } = await inventoryQuery;
 
     const rows = (inventoryRows || []).filter((row: any) => row?.product_id && row?.shelf_id);
 
-    const shelfIds = Array.from(new Set(rows.map((row: any) => String(row.shelf_id))));
+    const shelfIds = allowNegativeInventory
+      ? []
+      : Array.from(new Set(rows.map((row: any) => String(row.shelf_id))));
     let shelfMap = new Map<string, { label: string; isProductionWarehouse: boolean }>();
-    if (shelfIds.length > 0) {
-      const { data: shelves } = await supabase
+    if (allowNegativeInventory || shelfIds.length > 0) {
+      let shelvesQuery = supabase
         .from('shelves')
         .select('id, shelf_number, name, warehouses(name)')
-        .in('id', shelfIds)
         .limit(1000);
+      if (!allowNegativeInventory) {
+        shelvesQuery = shelvesQuery.in('id', shelfIds);
+      }
+      const { data: shelves } = await shelvesQuery;
       shelfMap = new Map((shelves || []).map((shelf: any) => {
         const warehouseName = String(shelf?.warehouses?.name || '');
         const isProductionWarehouse = warehouseName.includes('تولید') || /production/i.test(warehouseName);
@@ -894,6 +925,29 @@ const ModuleShow: React.FC = () => {
         next[productId].push({ value: shelfId, label, stock });
       }
     });
+
+    if (allowNegativeInventory) {
+      const allSourceShelves = Array.from(shelfMap.entries()).filter(([, info]) => !info.isProductionWarehouse);
+      productIds.forEach((productId) => {
+        const existingShelfIds = new Set((next[productId] || []).map((option) => String(option.value)));
+        const productUnit = productUnits.get(productId);
+        const unitSuffix = productUnit ? ` ${productUnit}` : '';
+        allSourceShelves.forEach(([shelfId, shelfInfo]) => {
+          if (existingShelfIds.has(shelfId)) return;
+          if (!next[productId]) next[productId] = [];
+          next[productId].push({
+            value: shelfId,
+            label: `${shelfInfo.label} (موجودی: 0${unitSuffix})`,
+            stock: 0,
+          });
+        });
+        next[productId] = (next[productId] || []).sort((a, b) => {
+          const stockDiff = (Number(b?.stock) || 0) - (Number(a?.stock) || 0);
+          if (stockDiff !== 0) return stockDiff;
+          return String(a?.label || '').localeCompare(String(b?.label || ''), 'fa');
+        });
+      });
+    }
     setSourceShelfOptionsByProduct(next);
   }, []);
 
@@ -924,6 +978,37 @@ const ModuleShow: React.FC = () => {
     }));
     setOutputProductOptions(options);
   }, []);
+
+  const resolveOutputProductIdentity = useCallback(async (
+    productType: 'semi' | 'final' | null,
+    options?: { autoSelect?: boolean },
+  ) => {
+    if (moduleId !== 'production_orders' || !productType) {
+      setOutputResolution(null);
+      return null;
+    }
+
+    const resolution = await resolveCatalogProductMatch({
+      supabase: supabase as any,
+      values: {
+        ...(data || {}),
+        product_type: productType,
+      },
+      productType,
+    });
+
+    setOutputResolution(resolution);
+
+    if (options?.autoSelect !== false) {
+      const suggestedProduct = resolution.exactProduct || resolution.fallbackProduct;
+      setOutputProductId(suggestedProduct?.id || null);
+      if (suggestedProduct?.id) {
+        setOutputMode('existing');
+      }
+    }
+
+    return resolution;
+  }, [data, moduleId]);
 
   const openProductionModal = async (type: 'start' | 'stop' | 'complete') => {
     if (type === 'start') {
@@ -1076,6 +1161,7 @@ const ModuleShow: React.FC = () => {
       setOutputMode('existing');
       setOutputProductId(null);
       setOutputProductType(null);
+      setOutputResolution(null);
       setProductionModal(type);
       return;
     }
@@ -1254,16 +1340,27 @@ const ModuleShow: React.FC = () => {
       ].filter(Boolean)));
 
       const dynOpts: Record<string, any[]> = {};
-      await Promise.all(dynamicCategories.map(async (category) => {
+      if (dynamicCategories.length > 0) {
         const { data } = await supabase
           .from('dynamic_options')
-          .select('label, value')
-          .eq('category', category)
-          .eq('is_active', true);
+          .select('category, label, value, display_order')
+          .in('category', dynamicCategories)
+          .eq('is_active', true)
+          .order('display_order', { ascending: true });
         if (data) {
-          dynOpts[category] = data.filter((item: any) => item.value !== null);
+          data
+            .filter((item: any) => item.value !== null)
+            .forEach((item: any) => {
+              const category = String(item.category || '').trim();
+              if (!category) return;
+              if (!dynOpts[category]) dynOpts[category] = [];
+              dynOpts[category].push({
+                label: item.label,
+                value: item.value,
+              });
+            });
         }
-      }));
+      }
 
       try {
         const { data: formulas } = await supabase.from('calculation_formulas').select('id, name');
@@ -1994,6 +2091,8 @@ const ModuleShow: React.FC = () => {
   const handleSmartFormSave = useCallback(async (values: any) => {
     try {
       if (!id) return;
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || null;
       const previous = data || {};
       const payload = moduleId === 'tasks'
         ? attachTaskCompletionIfNeeded(values, {
@@ -2011,6 +2110,7 @@ const ModuleShow: React.FC = () => {
           supabase: supabase as any,
           recordId: id,
           previousRecord: previous,
+          userId,
           values: payload,
         });
       } else {
@@ -2018,8 +2118,6 @@ const ModuleShow: React.FC = () => {
       }
 
       if (moduleId === 'invoices' || moduleId === 'purchase_invoices') {
-        const { data: authData } = await supabase.auth.getUser();
-        const userId = authData?.user?.id || null;
         await applyInvoiceFinalizationInventory({
           supabase: supabase as any,
           moduleId,
@@ -2593,56 +2691,59 @@ const ModuleShow: React.FC = () => {
   };
 
   const buildNewProductInitialValues = () => {
+    const suggestedParentId = String(outputResolution?.parentProduct?.id || '').trim() || null;
     return {
       name: data?.name || '',
+      catalog_role: suggestedParentId ? 'variant' : 'standalone',
+      parent_product_id: suggestedParentId,
       product_type: outputProductType || 'final',
+      category: data?.category || null,
       product_category: data?.product_category || null,
       model_name: data?.model_name || null,
+      sewing_type: data?.sewing_type || null,
+      leather_type: data?.leather_type || null,
+      leather_colors: Array.isArray(data?.leather_colors) ? data.leather_colors : [],
+      leather_finish_1: data?.leather_finish_1 || null,
+      leather_effect: Array.isArray(data?.leather_effect) ? data.leather_effect : [],
+      leather_sort: data?.leather_sort || null,
+      lining_material: data?.lining_material || null,
+      lining_color: data?.lining_color || null,
+      lining_width: data?.lining_width || null,
+      acc_material: data?.acc_material || null,
+      fitting_type: data?.fitting_type || null,
+      fitting_material: data?.fitting_material || null,
+      fitting_colors: Array.isArray(data?.fitting_colors) ? data.fitting_colors : [],
+      fitting_size: data?.fitting_size || null,
       related_bom: data?.bom_id || null,
       production_order_id: id || null,
       grid_materials: data?.grid_materials || [],
       product_inventory: [],
+      auto_name_enabled: true,
     } as any;
   };
 
   const handleCreateProductSave = async (values: any, meta?: { productInventory?: any[] }) => {
     try {
       setStatusLoading(true);
-      const { data: authData } = await supabase.auth.getUser();
-      const userId = authData?.user?.id || null;
-      const persisted = await persistProductCatalogData({
-        supabase: supabase as any,
-        values,
-      });
-      const { data: inserted, error } = await supabase
-        .from('products')
-        .select('id, main_unit, sub_unit')
-        .eq('id', persisted.id)
-        .single();
-      if (error) throw error;
-      const productId = inserted?.id;
-      if (!productId) throw new Error('ثبت محصول ناموفق بود');
-      await persistProductOpeningInventory({
-        supabase: supabase as any,
-        productId: String(productId),
-        productMainUnit: (inserted as any)?.main_unit ?? values?.main_unit ?? null,
-        productSubUnit: (inserted as any)?.sub_unit ?? values?.sub_unit ?? null,
-        rows: meta?.productInventory || [],
-        userId,
-      });
-      setOutputProductId(productId);
       const outputShelf = outputShelfId || null;
       if (!outputShelf) {
         msg.error(PRODUCTION_MESSAGES.requireOutputShelf);
         return;
       }
-      setOutputShelfId(outputShelf);
+
+      const openingInventoryRows = Array.isArray(meta?.productInventory) ? meta!.productInventory : [];
+      const hasOpeningInventory = openingInventoryRows.some((row: any) => (parseFloat(row?.stock) || 0) > 0);
+      if (hasOpeningInventory) {
+        msg.error('برای محصول خروجی تولید، موجودی اولیه وارد نکنید. موجودی از خود عملیات تکمیل تولید ثبت می‌شود.');
+        return;
+      }
 
       const normalizedQty = await resolveProductionQuantity();
       if (!normalizedQty || normalizedQty <= 0) {
         msg.error(PRODUCTION_MESSAGES.requireQuantity);
         return;
       }
+
       const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
       const productionShelfId = data?.production_shelf_id;
       const finalStageMoves = await buildFinalStageConsumptionMoves();
@@ -2654,6 +2755,39 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
         return;
       }
+
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData?.user?.id || null;
+      const resolution = await resolveCatalogProductMatch({
+        supabase: supabase as any,
+        values: {
+          ...(data || {}),
+          ...(values || {}),
+          product_type: outputProductType || values?.product_type || 'final',
+          related_bom: values?.related_bom || data?.bom_id || null,
+        },
+        productType: outputProductType || values?.product_type || 'final',
+      });
+      setOutputResolution(resolution);
+
+      let productId = resolution.exactProduct?.id || resolution.fallbackProduct?.id || null;
+      if (!productId) {
+        const persisted = await persistProductCatalogData({
+          supabase: supabase as any,
+          userId,
+          values,
+        });
+        const { data: inserted, error } = await supabase
+          .from('products')
+          .select('id, main_unit, sub_unit')
+          .eq('id', persisted.id)
+          .single();
+        if (error) throw error;
+        productId = inserted?.id;
+      }
+      if (!productId) throw new Error('ثبت محصول ناموفق بود');
+      setOutputProductId(productId);
+      setOutputShelfId(outputShelf);
       if (consumptionMoves.length) {
         await consumeProductionMaterials(consumptionMoves, productionShelfId || undefined);
       }
@@ -2721,7 +2855,11 @@ const ModuleShow: React.FC = () => {
         production_completed_at: nowIso,
       });
 
-      msg.success('محصول جدید ایجاد شد و سفارش تکمیل شد');
+      msg.success(
+        resolution.exactProduct || resolution.fallbackProduct
+          ? 'محصول متناظر پیدا شد، موجودی آن افزایش یافت و سفارش تکمیل شد'
+          : 'محصول جدید ایجاد شد و سفارش تکمیل شد'
+      );
       setIsCreateProductOpen(false);
     } catch (e: any) {
       msg.error(e.message || 'خطا در ایجاد محصول');
@@ -3179,6 +3317,7 @@ const ModuleShow: React.FC = () => {
                   onChange={(val) => {
                     setOutputProductType(val);
                     setOutputProductId(null);
+                    void resolveOutputProductIdentity(val, { autoSelect: true });
                   }}
                   options={[
                     { label: 'بسته نیمه آماده', value: 'semi' },
@@ -3191,6 +3330,17 @@ const ModuleShow: React.FC = () => {
 
               <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
                 <div className="text-xs text-gray-500">روش ثبت محصول خروجی:</div>
+                {outputProductType && outputResolution && (
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                    {outputResolution.exactProduct
+                      ? `محصول متناظر بر اساس هویت کاننیکال پیدا شد: ${outputResolution.exactProduct.name || outputResolution.exactProduct.system_code || outputResolution.exactProduct.id}`
+                      : outputResolution.fallbackProduct
+                        ? `یک محصول موجود با این مشخصات پیدا شد و برای افزودن موجودی پیشنهاد می‌شود: ${outputResolution.fallbackProduct.name || outputResolution.fallbackProduct.system_code || outputResolution.fallbackProduct.id}`
+                        : outputResolution.parentProduct
+                          ? `محصول مادر متناظر پیدا شد. اگر محصول جدید بسازید، فرم روی متغیر زیرِ "${outputResolution.parentProduct.name || outputResolution.parentProduct.system_code || outputResolution.parentProduct.id}" پیش‌فرض می‌شود.`
+                          : 'برای این هویت محصول متناظر فعالی پیدا نشد؛ می‌توانید محصول جدید ثبت کنید.'}
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Button
                     type={outputMode === 'existing' ? 'primary' : 'default'}

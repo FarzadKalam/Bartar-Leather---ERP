@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
@@ -2106,20 +2106,34 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   };
 
   const handleStatusChange = async (taskId: string, newStatus: string) => {
+    const previousTask = tasks.find((item: any) => String(item?.id) === String(taskId));
+    if (!previousTask) return;
+
+    const patch = buildTaskStatusUpdatePayload(newStatus, {
+      previousCompletedAt: previousTask?.completed_at || null,
+      previousStatus: previousTask?.status ?? null,
+      previousStartDate: previousTask?.start_date || null,
+    });
+
+    setTasks((prev) => prev.map((item: any) => (
+      String(item?.id) === String(taskId)
+        ? { ...item, ...patch }
+        : item
+    )));
+
     try {
-      const currentTask = tasks.find((item: any) => String(item?.id) === String(taskId));
-      const patch = buildTaskStatusUpdatePayload(newStatus, {
-        previousCompletedAt: currentTask?.completed_at || null,
-        previousStatus: currentTask?.status ?? null,
-        previousStartDate: currentTask?.start_date || null,
-      });
       const { error } = await supabase.from('tasks').update(patch).eq('id', taskId);
       if (error) throw error;
       message.success('وضعیت بروزرسانی شد');
       const nextTasks = await fetchTasks();
       await maybeOpenHandoverByStatus(taskId, newStatus, nextTasks);
     } catch (err: any) {
-      message.error('خطا');
+      setTasks((prev) => prev.map((item: any) => (
+        String(item?.id) === String(taskId)
+          ? previousTask
+          : item
+      )));
+      message.error(err?.message || 'خطا در بروزرسانی وضعیت');
     }
   };
 
@@ -2157,6 +2171,46 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         return '#9ca3af';
     }
   };
+
+  const getStatusLabel = useCallback((status: string) => {
+    switch (String(status || '').toLowerCase()) {
+      case 'done':
+      case 'completed':
+        return 'تکمیل شده';
+      case 'review':
+        return 'بازبینی';
+      case 'in_progress':
+        return 'در حال انجام';
+      case 'todo':
+      case 'pending':
+        return 'انجام نشده';
+      default:
+        return 'نامشخص';
+    }
+  }, []);
+
+  const taskStatusActions = useMemo(() => ([
+    {
+      value: 'todo',
+      label: 'انجام نشده',
+      icon: <CloseOutlined />,
+    },
+    {
+      value: 'in_progress',
+      label: 'در حال انجام',
+      icon: <PlayCircleOutlined />,
+    },
+    {
+      value: 'done',
+      label: 'تکمیل شده',
+      icon: <CheckOutlined />,
+    },
+    {
+      value: 'review',
+      label: 'بازبینی',
+      icon: <AuditOutlined />,
+    },
+  ]), []);
 
   const getAssigneeLabel = (task: any) => {
     if (task.assignee_role_id && task.assigned_role) {
@@ -2528,26 +2582,51 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const renderPopupContent = (task: any) => (
     <div className="w-72 p-1 font-['Vazirmatn']">
       <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-2">
-        <h4 className="font-bold text-gray-800 m-0 text-sm line-clamp-2">{task.title || task.name}</h4>
+        <div className="min-w-0 flex-1">
+          <h4 className="font-bold text-gray-800 m-0 text-sm line-clamp-2">{task.title || task.name}</h4>
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            {taskStatusActions.map((action) => {
+              const isActive = String(task?.status || '').toLowerCase() === action.value;
+              const actionColor = getStatusColor(action.value);
+              return (
+                <Tooltip key={action.value} title={action.label}>
+                  <button
+                    type="button"
+                    aria-label={action.label}
+                    onClick={() => {
+                      if (isActive) return;
+                      void handleStatusChange(String(task.id), action.value);
+                    }}
+                    className="h-8 w-8 rounded-full border transition-all duration-150 flex items-center justify-center"
+                    style={{
+                      color: isActive ? '#ffffff' : actionColor,
+                      backgroundColor: isActive ? actionColor : '#ffffff',
+                      borderColor: isActive ? actionColor : `${actionColor}33`,
+                      boxShadow: isActive ? `0 8px 18px ${actionColor}33` : 'none',
+                      opacity: isActive ? 1 : 0.92,
+                    }}
+                  >
+                    <span className="text-sm leading-none">{action.icon}</span>
+                  </button>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <div className="space-y-3 mb-3">
         <div className="flex items-center justify-between">
           <span className="text-xs text-gray-500">وضعیت:</span>
-          <Select
-            size="small"
-            value={task.status}
-            onChange={(val) => handleStatusChange(task.id, val)}
-            className="w-36"
-            getPopupContainer={() => document.body}
-            styles={{ popup: { root: { zIndex: 10050 } } }}
-            options={[
-              { value: 'todo', label: 'انجام نشده' },
-              { value: 'in_progress', label: 'در حال انجام' },
-              { value: 'review', label: 'بازبینی' },
-              { value: 'done', label: 'تکمیل شده' },
-            ]}
-          />
+          <span
+            className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium"
+            style={{
+              color: getStatusColor(task.status),
+              backgroundColor: `${getStatusColor(task.status)}14`,
+            }}
+          >
+            {getStatusLabel(task.status)}
+          </span>
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-gray-500">مقدار تولید شده:</span>

@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient';
 import { convertArea, type UnitValue } from './unitConversions';
 import { normalizeQuantityToProductMainUnit } from './inventoryTransactions';
+import { getAllowNegativeInventory } from './companySettings';
 
 export type ProductionMove = {
   product_id: string;
@@ -90,7 +91,13 @@ const getShelfLabel = async (shelfId: string) => {
   return label;
 };
 
-const adjustStock = async (productId: string, shelfId: string, delta: number, warehouseId?: string | null) => {
+const adjustStock = async (
+  productId: string,
+  shelfId: string,
+  delta: number,
+  warehouseId?: string | null,
+  options?: { allowNegativeStock?: boolean }
+) => {
   const { data: row, error } = await supabase
     .from('product_inventory')
     .select('id, stock, warehouse_id')
@@ -102,7 +109,10 @@ const adjustStock = async (productId: string, shelfId: string, delta: number, wa
 
   const current = parseFloat(row?.stock) || 0;
   const next = current + delta;
-  if (next < 0) {
+  const allowNegativeStock = typeof options?.allowNegativeStock === 'boolean'
+    ? options.allowNegativeStock
+    : await getAllowNegativeInventory(supabase as any);
+  if (!allowNegativeStock && next < 0) {
     const [productLabel, shelfLabel] = await Promise.all([
       getProductLabel(productId),
       getShelfLabel(shelfId),
@@ -126,6 +136,7 @@ const adjustStock = async (productId: string, shelfId: string, delta: number, wa
 };
 
 export const applyProductionMoves = async (moves: ProductionMove[]) => {
+  const allowNegativeStock = await getAllowNegativeInventory(supabase as any);
   const productMetaCache = new Map<string, { mainUnit: string | null; name: string | null }>();
   const decisionCache = new Map<string, boolean>();
   const normalizedMoves: ProductionMove[] = [];
@@ -156,9 +167,9 @@ export const applyProductionMoves = async (moves: ProductionMove[]) => {
 
   const groupedMoves = Array.from(grouped.values());
   for (const move of groupedMoves) {
-    await adjustStock(move.product_id, move.from_shelf_id, -move.quantity);
+    await adjustStock(move.product_id, move.from_shelf_id, -move.quantity, undefined, { allowNegativeStock });
     const destWarehouseId = await getShelfWarehouseId(move.to_shelf_id);
-    await adjustStock(move.product_id, move.to_shelf_id, move.quantity, destWarehouseId);
+    await adjustStock(move.product_id, move.to_shelf_id, move.quantity, destWarehouseId, { allowNegativeStock });
   }
 };
 
@@ -172,6 +183,7 @@ export const rollbackProductionMoves = async (moves: ProductionMove[]) => {
 };
 
 export const consumeProductionMaterials = async (moves: ProductionMove[], productionShelfId?: string) => {
+  const allowNegativeStock = await getAllowNegativeInventory(supabase as any);
   const productMetaCache = new Map<string, { mainUnit: string | null; name: string | null }>();
   const decisionCache = new Map<string, boolean>();
   const grouped = new Map<string, number>();
@@ -193,7 +205,7 @@ export const consumeProductionMaterials = async (moves: ProductionMove[], produc
   }
   for (const [key, qty] of grouped.entries()) {
     const [productId, shelfId] = key.split(':');
-    await adjustStock(productId, shelfId, -qty);
+    await adjustStock(productId, shelfId, -qty, undefined, { allowNegativeStock });
   }
 };
 

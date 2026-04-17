@@ -388,6 +388,7 @@ CREATE TABLE public.company_settings (
   website text,
   email text,
   logo_url text,
+  allow_negative_inventory boolean NOT NULL DEFAULT false,
   updated_at timestamptz DEFAULT now()
 );
 
@@ -860,6 +861,9 @@ ALTER TABLE public.purchase_invoices
   ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 -- 3.1) تنظیمات سطح‌بندی مشتری و فیلدهای آماری مشتری
+ALTER TABLE public.company_settings
+  ADD COLUMN IF NOT EXISTS allow_negative_inventory boolean NOT NULL DEFAULT false;
+
 ALTER TABLE public.company_settings
   ADD COLUMN IF NOT EXISTS customer_leveling_config jsonb NOT NULL DEFAULT
   '{"enabled":true,"eligible_statuses":["final","settled","completed"],"silver":{"min_purchase_count":3,"min_total_spend":30000000,"min_acquaintance_days":30},"gold":{"min_purchase_count":8,"min_total_spend":120000000,"min_acquaintance_days":120},"vip":{"min_purchase_count":15,"min_total_spend":300000000,"min_acquaintance_days":365}}'::jsonb;

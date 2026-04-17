@@ -1,0 +1,34 @@
+{
+    "extends":  "./tsconfig.json",
+    "compilerOptions":  {
+                            "noEmit":  false,
+                            "outDir":  ".tmp-tests",
+                            "rootDir":  ".",
+                            "module":  "CommonJS",
+                            "moduleResolution":  "node",
+                            "target":  "ES2022",
+                            "allowImportingTsExtensions":  false,
+                            "declaration":  false,
+                            "sourceMap":  false,
+                            "types":  [
+                                          "node"
+                                      ],
+                            "jsx":  "react-jsx",
+                            "noUnusedLocals":  false,
+                            "noUnusedParameters":  false,
+                            "noCheck":  true
+                        },
+    "include":  [
+                    "tests/productCatalog.test.ts",
+                    "tests/manualStockMovements.test.ts",
+                    "utils/productCatalog.ts",
+                    "types.ts",
+                    "tests/inventoryWorkflow.test.ts",
+                    "utils/inventoryTransactions.ts",
+                    "utils/manualStockMovements.ts",
+                    "utils/invoiceInventoryWorkflow.ts",
+                    "utils/productOpeningInventory.ts",
+                    "utils/unitConversions.ts",
+                    "utils/persianNumberFormatter.ts"
+                ]
+}

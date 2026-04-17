@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Form, Input, Button, message, Upload } from 'antd';
+import { Form, Input, Button, message, Upload, Checkbox } from 'antd';
 // نکته مهم: Divider و BuildOutlined را کاملا حذف کردم تا هیچ اثری از هدر دوم نباشد
 import { SaveOutlined, UploadOutlined, CloudUploadOutlined, GlobalOutlined } from '@ant-design/icons';
 import { supabase } from '../../supabaseClient';
+import { setCompanyInventoryPolicyCache } from '../../utils/companySettings';
 
 const CompanyTab: React.FC = () => {
   const [form] = Form.useForm();
@@ -16,12 +17,15 @@ const CompanyTab: React.FC = () => {
   }, []);
 
   const fetchData = async () => {
-    const { data } = await supabase.from('company_settings').select('*').limit(1).single();
+    const { data } = await supabase.from('company_settings').select('*').limit(1).maybeSingle();
     if (data) {
       form.setFieldsValue(data);
       setRecordId(data.id);
       setLogoUrl(data.logo_url);
       setIconUrl(data.icon_url);
+      setCompanyInventoryPolicyCache(supabase as any, {
+        allowNegativeInventory: !!data.allow_negative_inventory,
+      });
     }
   };
 
@@ -49,13 +53,21 @@ const CompanyTab: React.FC = () => {
   const onFinish = async (values: any) => {
     setLoading(true);
     try {
-      const payload = { ...values, logo_url: logoUrl, icon_url: iconUrl };
+      const payload = {
+        ...values,
+        logo_url: logoUrl,
+        icon_url: iconUrl,
+        allow_negative_inventory: !!values?.allow_negative_inventory,
+      };
       if (recordId) {
         await supabase.from('company_settings').update(payload).eq('id', recordId);
       } else {
         const { data } = await supabase.from('company_settings').insert([payload]).select().single();
         if (data) setRecordId(data.id);
       }
+      setCompanyInventoryPolicyCache(supabase as any, {
+        allowNegativeInventory: payload.allow_negative_inventory,
+      });
       message.success('تنظیمات ذخیره شد');
     } catch (error) {
       message.error('خطا در ذخیره سازی');
@@ -107,6 +119,18 @@ const CompanyTab: React.FC = () => {
         <Form.Item label={<span className="dark:text-gray-300">ایمیل</span>} name="email"><Input className="dark:bg-white/5 dark:border-gray-700 dark:text-white" /></Form.Item>
         <Form.Item label={<span className="dark:text-gray-300">آدرس وب‌سایت</span>} name="website"><Input className="dark:bg-white/5 dark:border-gray-700 dark:text-white" /></Form.Item>
         <Form.Item label={<span className="dark:text-gray-300">آدرس پستی</span>} name="address" className="md:col-span-2"><Input.TextArea rows={3} className="dark:bg-white/5 dark:border-gray-700 dark:text-white" /></Form.Item>
+        <Form.Item className="md:col-span-2">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-white/5 p-4">
+            <Form.Item name="allow_negative_inventory" valuePropName="checked" noStyle>
+              <Checkbox className="dark:text-gray-200">
+                اجازه ثبت موجودی منفی
+              </Checkbox>
+            </Form.Item>
+            <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              اگر فعال باشد، در همه مسیرهای انبار امکان کسر موجودی تا زیر صفر وجود خواهد داشت.
+            </div>
+          </div>
+        </Form.Item>
         
         <div className="md:col-span-2 flex justify-end mt-4 sticky bottom-0 bg-white dark:bg-[#1a1a1a] py-4 border-t border-gray-100 dark:border-gray-800 z-10">
           <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={loading} className="bg-leather-600 hover:!bg-leather-500 border-none h-12 px-8 rounded-xl shadow-lg shadow-leather-500/30">ذخیره تغییرات</Button>

@@ -7,6 +7,13 @@ import SmartTableRenderer from '../SmartTableRenderer';
 import { RelationQuickCreateInline } from '../SmartFieldRenderer';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
 import { convertArea } from '../../utils/unitConversions';
+import {
+  ALLOWED_MANUAL_STOCK_SOURCES,
+  buildInventoryDeltasFromMovement,
+  buildStockTransferPayloadFromMovement,
+  normalizeManualStockMovement,
+  type ManualStockMovement,
+} from '../../utils/manualStockMovements';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { insertChangelog } from '../editableTable/changelogHelpers';
 
@@ -19,8 +26,6 @@ interface ProductStockMovementsPanelProps {
   onProductStockUpdated?: (stock: number) => void;
   openQuickAddSignal?: number;
 }
-
-const ALLOWED_MANUAL_SOURCES = new Set(['opening_balance', 'inventory_count', 'waste']);
 
 const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   block,
@@ -295,7 +300,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         const next = { ...field } as ModuleField;
         if (field.key === 'source') {
           next.options = (field.options || []).filter((opt: any) =>
-            ALLOWED_MANUAL_SOURCES.has(String(opt?.value || ''))
+            ALLOWED_MANUAL_STOCK_SOURCES.has(String(opt?.value || ''))
           );
         }
         if (['main_unit', 'sub_unit', 'sub_quantity'].includes(String(field.key))) {
@@ -357,72 +362,22 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     return { incoming, outgoing };
   }, [rows]);
 
-  const buildDeltasFromPayload = (payload: {
-    voucherType: string;
-    qtyMain: number;
-    fromShelfId: string | null;
-    toShelfId: string | null;
-    mainUnit?: string | null;
-    bundleId?: string | null;  // ← اضافه شد
-  }, multiplier = 1) => {
-    const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null; bundleId?: string | null }> = [];  // ← bundleId اضافه شد
-    const qty = Math.abs(parseFloat(String(payload.qtyMain)) || 0) * multiplier;
-    if (!qty) return deltas;
-    if (payload.voucherType === 'incoming' && payload.toShelfId) {
-      deltas.push({ productId: recordId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
-    } else if (payload.voucherType === 'outgoing' && payload.fromShelfId) {
-      deltas.push({ productId: recordId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
-    } else if (payload.voucherType === 'transfer' && payload.fromShelfId && payload.toShelfId) {
-      deltas.push({ productId: recordId, shelfId: payload.fromShelfId, delta: -qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
-      deltas.push({ productId: recordId, shelfId: payload.toShelfId, delta: qty, unit: payload.mainUnit || null, bundleId: payload.bundleId ?? null });  // ← اضافه شد
-    }
-    return deltas;
-  };
-
   const normalizeFormMovement = (values: any) => {
-    const transferType = String(values?.source || '');
-    let voucher = String(values?.voucher_type || '');
-    if (!voucher) throw new Error('نوع حواله انتخاب نشده است.');
-    if (!transferType) throw new Error('منبع حواله انتخاب نشده است.');
-    if (!ALLOWED_MANUAL_SOURCES.has(transferType)) {
-      throw new Error('برای ثبت دستی، فقط "موجودی اول دوره"، "انبارگردانی" و "ضایعات" مجاز است.');
-    }
-    if (transferType === 'waste') voucher = 'outgoing';
-
-    const qtyMain = Math.abs(parseFloat(values?.main_quantity) || 0);
-    if (qtyMain <= 0) throw new Error('مقدار واحد اصلی باید بیشتر از صفر باشد.');
-    const qtySub = Math.abs(parseFloat(values?.sub_quantity) || 0);
-    const fromShelfId = values?.from_shelf_id ? String(values.from_shelf_id) : null;
-    const toShelfId = values?.to_shelf_id ? String(values.to_shelf_id) : null;
-
-    if (voucher === 'incoming' && !toShelfId) throw new Error('برای حواله ورود، قفسه ورود الزامی است.');
-    if (voucher === 'outgoing' && !fromShelfId) throw new Error('برای حواله خروج، قفسه برداشت الزامی است.');
-    if (voucher === 'transfer') {
-      if (!fromShelfId || !toShelfId) throw new Error('برای جابجایی، قفسه برداشت و قفسه ورود الزامی است.');
-      if (fromShelfId === toShelfId) throw new Error('قفسه برداشت و قفسه ورود نباید یکسان باشند.');
-    }
-
-    return {
-      transferType,
-      voucherType: voucher,
-      qtyMain,
-      qtySub,
-      fromShelfId,
-      toShelfId,
+    return normalizeManualStockMovement({
+      productId: recordId,
+      transferType: values?.source,
+      voucherType: values?.voucher_type,
+      qtyMain: values?.main_quantity,
+      qtySub: values?.sub_quantity,
+      fromShelfId: values?.from_shelf_id,
+      toShelfId: values?.to_shelf_id,
       mainUnit: values?.main_unit ? String(values.main_unit) : (productUnits.mainUnit || null),
       bundleId: values?.bundle_id ? String(values.bundle_id) : null,
-    };
+    }, { requireProductId: true });
   };
 
   const buildLogRow = (
-    normalized: {
-      transferType: string;
-      voucherType: string;
-      qtyMain: number;
-      qtySub: number;
-      fromShelfId: string | null;
-      toShelfId: string | null;
-    },
+    normalized: ManualStockMovement,
     creatorId: string | null
   ) => ({
     voucher_type: normalized.voucherType,
@@ -448,34 +403,25 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       if (!productUnits.mainUnit) throw new Error('واحد اصلی محصول مشخص نشده است.');
 
       const normalized = normalizeFormMovement(values);
-      const nextDeltas = buildDeltasFromPayload(normalized, 1);
-      const rollbackDeltas = editingRow ? buildDeltasFromPayload({
-        voucherType: String(editingRow?.voucher_type || ''),
-        qtyMain: Math.abs(parseFloat(editingRow?.main_quantity) || 0),
-        fromShelfId: editingRow?.from_shelf_id ? String(editingRow.from_shelf_id) : null,
-        toShelfId: editingRow?.to_shelf_id ? String(editingRow.to_shelf_id) : null,
+      const nextDeltas = buildInventoryDeltasFromMovement(normalized, 1);
+      const rollbackDeltas = editingRow ? buildInventoryDeltasFromMovement(normalizeManualStockMovement({
+        productId: recordId,
+        transferType: editingRow?.source,
+        voucherType: editingRow?.voucher_type,
+        qtyMain: editingRow?.main_quantity,
+        qtySub: editingRow?.sub_quantity,
+        fromShelfId: editingRow?.from_shelf_id,
+        toShelfId: editingRow?.to_shelf_id,
         mainUnit: editingRow?.main_unit ? String(editingRow.main_unit) : (productUnits.mainUnit || null),
-        bundleId: editingRow?.bundle_id ? String(editingRow.bundle_id) : null,  // ← اضافه شد
-      }, -1) : [];
+        bundleId: editingRow?.bundle_id ? String(editingRow.bundle_id) : null,
+      }, { requireProductId: true }), -1) : [];
       if (rollbackDeltas.length || nextDeltas.length) {
         await applyInventoryDeltas(supabase as any, [...rollbackDeltas, ...nextDeltas]);
       }
 
       const { data: authData } = await supabase.auth.getUser();
       const currentUserId = authData?.user?.id || null;
-      const payload = {
-        product_id: recordId,
-        transfer_type: normalized.transferType,
-        delivered_qty: normalized.qtyMain,
-        required_qty: normalized.qtySub,
-        invoice_id: null,
-        production_order_id: null,
-        from_shelf_id: normalized.fromShelfId,
-        to_shelf_id: normalized.toShelfId,
-        sender_id: currentUserId,
-        receiver_id: currentUserId,
-        bundle_id: normalized.bundleId ?? null,
-      };
+      const payload = buildStockTransferPayloadFromMovement(normalized, { userId: currentUserId });
       if (editingRow?.id) {
         const { error: updateError } = await supabase
           .from('stock_transfers')
@@ -528,14 +474,17 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       onOk: async () => {
         try {
           setActionRowLoadingId(String(row.id));
-          const rollbackDeltas = buildDeltasFromPayload({
-            voucherType: String(row?.voucher_type || ''),
-            qtyMain: Math.abs(parseFloat(row?.main_quantity) || 0),
-            fromShelfId: row?.from_shelf_id ? String(row.from_shelf_id) : null,
-            toShelfId: row?.to_shelf_id ? String(row.to_shelf_id) : null,
+          const rollbackDeltas = buildInventoryDeltasFromMovement(normalizeManualStockMovement({
+            productId: recordId,
+            transferType: row?.source,
+            voucherType: row?.voucher_type,
+            qtyMain: row?.main_quantity,
+            qtySub: row?.sub_quantity,
+            fromShelfId: row?.from_shelf_id,
+            toShelfId: row?.to_shelf_id,
             mainUnit: row?.main_unit ? String(row.main_unit) : (productUnits.mainUnit || null),
             bundleId: row?.bundle_id ? String(row.bundle_id) : null,
-          }, -1);
+          }, { requireProductId: true }), -1);
           if (rollbackDeltas.length) {
             await applyInventoryDeltas(supabase as any, rollbackDeltas);
           }

@@ -188,6 +188,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
     mode: 'copy' | 'move';
   } | null>(null);
   const [transferTargetGroupIndex, setTransferTargetGroupIndex] = useState<number | null>(null);
+  const [requirementSectionsExpanded, setRequirementSectionsExpanded] = useState<Record<string, boolean>>({});
   const [isMobile, setIsMobile] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
@@ -212,6 +213,12 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  const isRequirementSectionExpanded = (sectionKey: string) => requirementSectionsExpanded[sectionKey] !== false;
+
+  const setRequirementSectionExpanded = (sectionKey: string, expanded: boolean) => {
+    setRequirementSectionsExpanded((prev) => ({ ...prev, [sectionKey]: expanded }));
+  };
 
   const transferTargets = useMemo(
     () => materials.map((group, index) => ({
@@ -379,185 +386,236 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                       <div className="mb-4 space-y-3">
                         {group.orderRequirements.map((requirement, reqIndex) => {
                           const reqUnitLabel = getUnitSummaryLabel((requirement.pieces || []).map((piece) => piece.mainUnit));
+                          const requirementSectionKey = `${group.key}_requirement_${reqIndex}`;
+                          const requirementExpanded = isRequirementSectionExpanded(requirementSectionKey);
                           return (
                             <div key={`${group.key}_req_${reqIndex}`} className="rounded-lg border border-[#d6e5db] bg-[#f7fbf8] p-2">
-                              <div className="text-xs font-medium text-[#17372a] mb-2">
-                                قطعات مواد اولیه برای سفارش تولید "{requirement.orderName || '-'}{requirement.orderCode ? ` (${requirement.orderCode})` : ''}"
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-medium text-[#17372a]">
+                                  قطعات مواد اولیه برای سفارش تولید "{requirement.orderName || '-'}{requirement.orderCode ? ` (${requirement.orderCode})` : ''}"
+                                </div>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  className="!text-[#17372a] hover:!text-[#1f4534]"
+                                  icon={<RightOutlined className={`transition-transform ${requirementExpanded ? 'rotate-90' : ''}`} />}
+                                  onClick={() => setRequirementSectionExpanded(requirementSectionKey, !requirementExpanded)}
+                                />
                               </div>
-                              <Table
-                                size="small"
-                                pagination={false}
-                                dataSource={requirement.pieces || []}
-                                rowKey="key"
-                                scroll={{ x: true }}
-                                columns={[
-                                  {
-                                    title: 'نام قطعه',
-                                    dataIndex: 'name',
-                                    key: 'name',
-                                    width: 170,
-                                    render: (value: string) => <span className="font-medium">{value}</span>,
-                                  },
-                                  {
-                                    title: 'طول',
-                                    dataIndex: 'length',
-                                    key: 'length',
-                                    width: 90,
-                                    render: (value: number) => formatQty(value),
-                                  },
-                                  {
-                                    title: 'عرض',
-                                    dataIndex: 'width',
-                                    key: 'width',
-                                    width: 90,
-                                    render: (value: number) => formatQty(value),
-                                  },
-                                  {
-                                    title: 'تعداد در هر تولید',
-                                    dataIndex: 'quantity',
-                                    key: 'quantity',
-                                    width: 120,
-                                    render: (value: number) => formatQty(value),
-                                  },
-                                  {
-                                    title: 'تعداد کل',
-                                    dataIndex: 'totalQuantity',
-                                    key: 'totalQuantity',
-                                    width: 100,
-                                    render: (value: number) => formatQty(value),
-                                  },
-                                  {
-                                    title: 'واحد اصلی',
-                                    dataIndex: 'mainUnit',
-                                    key: 'mainUnit',
-                                    width: 100,
-                                    render: (value: string) => value || '-',
-                                  },
-                                  {
-                                    title: 'واحد فرعی',
-                                    dataIndex: 'subUnit',
-                                    key: 'subUnit',
-                                    width: 100,
-                                    render: (value: string) => value || '-',
-                                  },
-                                  {
-                                    title: 'مقدار واحد فرعی',
-                                    dataIndex: 'subUsage',
-                                    key: 'subUsage',
-                                    width: 130,
-                                    render: (value: number) => formatQty(value),
-                                  },
-                                  {
-                                    title: 'مقدار هر تولید',
-                                    dataIndex: 'perItemUsage',
-                                    key: 'perItemUsage',
-                                    width: 130,
-                                    render: (value: number) => formatQty(value),
-                                  },
-                                  {
-                                    title: 'مقدار کل',
-                                    dataIndex: 'totalUsage',
-                                    key: 'totalUsage',
-                                    width: 120,
-                                    render: (value: number) => formatQty(value),
-                                  },
-                                ]}
-                              />
-                              <div className="mt-2 text-xs text-gray-600 flex flex-col sm:flex-row gap-4">
-                                <span>
-                                  جمع مصرف هر تولید: <span className="font-medium">{formatQty(requirement.totalPerItemUsage || 0)}</span>
-                                  {reqUnitLabel ? <span className="font-medium mr-1">{reqUnitLabel}</span> : null}
-                                </span>
-                                <span>
-                                  جمع مصرف کل: <span className="font-medium">{formatQty(requirement.totalUsage || 0)}</span>
-                                  {reqUnitLabel ? <span className="font-medium mr-1">{reqUnitLabel}</span> : null}
-                                </span>
-                              </div>
+                              {requirementExpanded ? (
+                                <>
+                                  <Table
+                                    size="small"
+                                    pagination={false}
+                                    dataSource={requirement.pieces || []}
+                                    rowKey="key"
+                                    scroll={{ x: true }}
+                                    columns={[
+                                      {
+                                        title: 'نام قطعه',
+                                        dataIndex: 'name',
+                                        key: 'name',
+                                        width: 170,
+                                        render: (value: string) => <span className="font-medium">{value}</span>,
+                                      },
+                                      {
+                                        title: 'طول',
+                                        dataIndex: 'length',
+                                        key: 'length',
+                                        width: 90,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'عرض',
+                                        dataIndex: 'width',
+                                        key: 'width',
+                                        width: 90,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'تعداد در هر تولید',
+                                        dataIndex: 'quantity',
+                                        key: 'quantity',
+                                        width: 120,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'تعداد کل',
+                                        dataIndex: 'totalQuantity',
+                                        key: 'totalQuantity',
+                                        width: 100,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'واحد اصلی',
+                                        dataIndex: 'mainUnit',
+                                        key: 'mainUnit',
+                                        width: 100,
+                                        render: (value: string) => value || '-',
+                                      },
+                                      {
+                                        title: 'واحد فرعی',
+                                        dataIndex: 'subUnit',
+                                        key: 'subUnit',
+                                        width: 100,
+                                        render: (value: string) => value || '-',
+                                      },
+                                      {
+                                        title: 'مقدار واحد فرعی',
+                                        dataIndex: 'subUsage',
+                                        key: 'subUsage',
+                                        width: 130,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'مقدار هر تولید',
+                                        dataIndex: 'perItemUsage',
+                                        key: 'perItemUsage',
+                                        width: 130,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'مقدار کل',
+                                        dataIndex: 'totalUsage',
+                                        key: 'totalUsage',
+                                        width: 120,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                    ]}
+                                  />
+                                  <div className="mt-2 text-xs text-gray-600 flex flex-col sm:flex-row gap-4">
+                                    <span>
+                                      جمع مصرف هر تولید: <span className="font-medium">{formatQty(requirement.totalPerItemUsage || 0)}</span>
+                                      {reqUnitLabel ? <span className="font-medium mr-1">{reqUnitLabel}</span> : null}
+                                    </span>
+                                    <span>
+                                      جمع مصرف کل: <span className="font-medium">{formatQty(requirement.totalUsage || 0)}</span>
+                                      {reqUnitLabel ? <span className="font-medium mr-1">{reqUnitLabel}</span> : null}
+                                    </span>
+                                  </div>
+                                </>
+                              ) : null}
                             </div>
                           );
                         })}
                       </div>
                     )}
                     {Array.isArray(group.orderRequirements) && group.orderRequirements.length > 1 ? (
-                      <Table
-                        size="small"
-                        pagination={false}
-                        dataSource={group.pieces}
-                        rowKey="key"
-                        scroll={{ x: true }}
-                        columns={[
-                          {
-                            title: 'نام قطعه',
-                            dataIndex: 'name',
-                            key: 'name',
-                            width: 180,
-                            render: (value: string) => <span className="font-medium">{value}</span>,
-                          },
-                          {
-                            title: 'طول',
-                            dataIndex: 'length',
-                            key: 'length',
-                            width: 90,
-                            render: (value: number) => formatQty(value),
-                          },
-                          {
-                            title: 'عرض',
-                            dataIndex: 'width',
-                            key: 'width',
-                            width: 90,
-                            render: (value: number) => formatQty(value),
-                          },
-                          {
-                            title: 'تعداد در هر تولید',
-                            dataIndex: 'quantity',
-                            key: 'quantity',
-                            width: 120,
-                            render: (value: number) => formatQty(value),
-                          },
-                          {
-                            title: 'تعداد کل',
-                            dataIndex: 'totalQuantity',
-                            key: 'totalQuantity',
-                            width: 100,
-                            render: (value: number) => formatQty(value),
-                          },
-                          {
-                            title: 'واحد اصلی',
-                            dataIndex: 'mainUnit',
-                            key: 'mainUnit',
-                            width: 100,
-                            render: (value: string) => value || '-',
-                          },
-                          {
-                            title: 'واحد فرعی',
-                            dataIndex: 'subUnit',
-                            key: 'subUnit',
-                            width: 100,
-                            render: (value: string) => value || '-',
-                          },
-                          {
-                            title: 'مقدار واحد فرعی',
-                            dataIndex: 'subUsage',
-                            key: 'subUsage',
-                            width: 130,
-                            render: (value: number) => formatQty(value),
-                          },
-                          {
-                            title: 'مقدار هر تولید',
-                            dataIndex: 'perItemUsage',
-                            key: 'perItemUsage',
-                            width: 130,
-                            render: (value: number) => formatQty(value),
-                          },
-                          {
-                            title: 'مقدار کل',
-                            dataIndex: 'totalUsage',
-                            key: 'totalUsage',
-                            width: 120,
-                            render: (value: number) => formatQty(value),
-                          },
-                        ]}
-                      />
+                      <div className="rounded-lg border border-[#d6e5db] bg-[#eef7f1] p-2">
+                        {(() => {
+                          const summarySectionKey = `${group.key}_requirements_summary`;
+                          const summaryExpanded = isRequirementSectionExpanded(summarySectionKey);
+                          return (
+                            <>
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-medium text-[#17372a]">
+                                  جمع مقادیر مورد نیاز از این محصول:
+                                </div>
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  className="!text-[#17372a] hover:!text-[#1f4534]"
+                                  icon={<RightOutlined className={`transition-transform ${summaryExpanded ? 'rotate-90' : ''}`} />}
+                                  onClick={() => setRequirementSectionExpanded(summarySectionKey, !summaryExpanded)}
+                                />
+                              </div>
+                              {summaryExpanded ? (
+                                <>
+                                  <Table
+                                    size="small"
+                                    pagination={false}
+                                    dataSource={group.pieces}
+                                    rowKey="key"
+                                    scroll={{ x: true }}
+                                    columns={[
+                                      {
+                                        title: 'نام قطعه',
+                                        dataIndex: 'name',
+                                        key: 'name',
+                                        width: 180,
+                                        render: (value: string) => <span className="font-medium">{value}</span>,
+                                      },
+                                      {
+                                        title: 'طول',
+                                        dataIndex: 'length',
+                                        key: 'length',
+                                        width: 90,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'عرض',
+                                        dataIndex: 'width',
+                                        key: 'width',
+                                        width: 90,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'تعداد در هر تولید',
+                                        dataIndex: 'quantity',
+                                        key: 'quantity',
+                                        width: 120,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'تعداد کل',
+                                        dataIndex: 'totalQuantity',
+                                        key: 'totalQuantity',
+                                        width: 100,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'واحد اصلی',
+                                        dataIndex: 'mainUnit',
+                                        key: 'mainUnit',
+                                        width: 100,
+                                        render: (value: string) => value || '-',
+                                      },
+                                      {
+                                        title: 'واحد فرعی',
+                                        dataIndex: 'subUnit',
+                                        key: 'subUnit',
+                                        width: 100,
+                                        render: (value: string) => value || '-',
+                                      },
+                                      {
+                                        title: 'مقدار واحد فرعی',
+                                        dataIndex: 'subUsage',
+                                        key: 'subUsage',
+                                        width: 130,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'مقدار هر تولید',
+                                        dataIndex: 'perItemUsage',
+                                        key: 'perItemUsage',
+                                        width: 130,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                      {
+                                        title: 'مقدار کل',
+                                        dataIndex: 'totalUsage',
+                                        key: 'totalUsage',
+                                        width: 120,
+                                        render: (value: number) => formatQty(value),
+                                      },
+                                    ]}
+                                  />
+                                  <div className="mt-2 text-xs text-gray-600 flex flex-col sm:flex-row gap-4">
+                                    <span>
+                                      جمع مصرف مورد نیاز هر تولید: <span className="font-medium">{formatQty(group.totalPerItemUsage || 0)}</span>
+                                      {consumptionUnitLabel ? <span className="font-medium mr-1">{consumptionUnitLabel}</span> : null}
+                                    </span>
+                                    <span>
+                                      جمع مصرف مورد نیاز کل: <span className="font-semibold">{formatQty(group.totalUsage || 0)}</span>
+                                      {consumptionUnitLabel ? <span className="font-semibold mr-1">{consumptionUnitLabel}</span> : null}
+                                    </span>
+                                  </div>
+                                </>
+                              ) : null}
+                            </>
+                          );
+                        })()}
+                      </div>
                     ) : null}
                       </div>
 

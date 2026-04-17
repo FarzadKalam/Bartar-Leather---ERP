@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { convertArea, type UnitValue } from './unitConversions';
 import { toPersianNumber } from './persianNumberFormatter';
+import { getAllowNegativeInventory } from './companySettings';
 
 export interface InventoryDelta {
   productId: string;
@@ -174,6 +175,9 @@ export const applyInventoryDeltas = async (
   deltas: InventoryDelta[],
   options?: ApplyInventoryDeltasOptions
 ) => {
+  const allowNegativeStock = typeof options?.allowNegativeStock === 'boolean'
+    ? options.allowNegativeStock
+    : await getAllowNegativeInventory(supabase);
   const productMetaCache = new Map<string, ProductUnitMeta>();
   const decisionCache = new Map<string, boolean>();
   const normalizedDeltas: InventoryDelta[] = [];
@@ -221,7 +225,7 @@ export const applyInventoryDeltas = async (
 
     const currentStock = toNumber(existing?.stock);
     const nextStock = currentStock + delta;
-    if (!options?.allowNegativeStock && nextStock < 0) {
+    if (!allowNegativeStock && nextStock < 0) {
       throw new Error('موجودی قفسه کافی نیست');
     }
 

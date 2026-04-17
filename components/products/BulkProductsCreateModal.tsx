@@ -7,6 +7,7 @@ import { MODULES } from '../../moduleRegistry';
 import { FieldLocation, FieldNature, FieldType, LogicOperator, ModuleField } from '../../types';
 import { supabase } from '../../supabaseClient';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
+import { normalizeCatalogProductPayload } from '../../utils/productCatalog';
 import { convertArea, HARD_CODED_UNIT_OPTIONS, type UnitValue } from '../../utils/unitConversions';
 
 interface BulkProductsCreateModalProps {
@@ -340,7 +341,8 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         payload.name = row.auto_name_enabled === false ? norm(row.name) : buildName(row, i);
         if (isEmpty(payload.name)) throw new Error(`ردیف ${i + 1}: نام محصول نامعتبر است.`);
 
-        const { data: inserted, error: insertError } = await supabase.from('products').insert([payload]).select('id,name,system_code,main_unit,sub_unit').single();
+        const normalizedPayload = normalizeCatalogProductPayload(payload);
+        const { data: inserted, error: insertError } = await supabase.from('products').insert([normalizedPayload]).select('id,name,system_code,main_unit,sub_unit').single();
         if (insertError || !inserted?.id) throw new Error(`ردیف ${i + 1}: ${insertError?.message || 'ثبت محصول ناموفق بود.'}`);
         const pid = String(inserted.id);
         productIds.push(pid);

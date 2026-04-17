@@ -259,20 +259,26 @@ const SmartForm: React.FC<SmartFormProps> = ({
       b.tableColumns?.forEach((c: any) => { if (c.dynamicOptionsCategory) categoriesToFetch.add(c.dynamicOptionsCategory); });
     });
 
-    for (const category of Array.from(categoriesToFetch)) {
-        const { data } = await supabase
-            .from('dynamic_options')
-            .select('label, value')
-            .eq('category', category)
-            .eq('is_active', true)
-            .order('display_order', { ascending: true });
-        
-        if (data) {
-            newOptions[category] = data.map(item => ({
-                label: item.label,
-                value: item.value,
-            }));
-        }
+    const categories = Array.from(categoriesToFetch);
+    if (categories.length > 0) {
+      const { data } = await supabase
+        .from('dynamic_options')
+        .select('category, label, value, display_order')
+        .in('category', categories)
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (data) {
+        data.forEach((item: any) => {
+          const category = String(item.category || '').trim();
+          if (!category) return;
+          if (!newOptions[category]) newOptions[category] = [];
+          newOptions[category].push({
+            label: item.label,
+            value: item.value,
+          });
+        });
+      }
     }
     try {
       const { data: formulas } = await supabase
@@ -740,6 +746,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
               supabase: supabase as any,
               recordId,
               previousRecord: initialRecord,
+              userId,
               values,
             });
           } else {
@@ -803,6 +810,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
           if (module.id === 'products') {
             const persisted = await persistProductCatalogData({
               supabase: supabase as any,
+              userId,
               values,
             });
             const { data: insertedProduct, error: insertedError } = await supabase

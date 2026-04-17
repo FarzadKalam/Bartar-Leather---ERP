@@ -1,18 +1,21 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  buildCanonicalVariantIdentity,
   buildVariantName,
   buildVariantSignature,
+  normalizeCatalogProductPayload,
   normalizeProductAttributeRecord,
-  stripProductCatalogFields,
   type ProductAttributeOptionRecord,
   type ProductAttributeRecord,
   type ProductVariationRecord,
 } from './productCatalog';
+import { persistProductOpeningInventory } from './productOpeningInventory';
 
 type SaveProductCatalogOptions = {
   supabase: SupabaseClient;
   recordId?: string | null;
   previousRecord?: Record<string, any> | null;
+  userId?: string | null;
   values: Record<string, any>;
 };
 
@@ -188,6 +191,7 @@ export const persistProductCatalogData = async ({
   supabase,
   recordId,
   previousRecord,
+  userId,
   values,
 }: SaveProductCatalogOptions) => {
   const globalAttributesRaw = Array.isArray(values?.__product_global_attributes)
@@ -200,15 +204,8 @@ export const persistProductCatalogData = async ({
     ? values.__product_variations
     : [];
 
-  const productPayload = stripProductCatalogFields(values);
-  if (!productPayload.catalog_role) {
-    productPayload.catalog_role = 'standalone';
-  }
-  if (productPayload.catalog_role !== 'variant') {
-    productPayload.parent_product_id = null;
-    productPayload.variant_signature = null;
-    productPayload.variant_values = {};
-  }
+  const productPayload = normalizeCatalogProductPayload(values);
+  let parentFieldBackedAttributes: ProductAttributeRecord[] = [];
   if (productPayload.catalog_role === 'variant' && productPayload.parent_product_id) {
     const { data: parentAttributeRows, error: parentAttributesError } = await supabase
       .from('product_attributes')
@@ -218,18 +215,42 @@ export const persistProductCatalogData = async ({
       .eq('is_active', true);
     if (parentAttributesError) throw parentAttributesError;
 
-    const nextVariantValues = {
-      ...((previousRecord?.variant_values && typeof previousRecord.variant_values === 'object') ? previousRecord.variant_values : {}),
-      ...((productPayload.variant_values && typeof productPayload.variant_values === 'object') ? productPayload.variant_values : {}),
-    } as Record<string, any>;
+    parentFieldBackedAttributes = (parentAttributeRows || []).map((attribute: any, index: number) =>
+      normalizeProductAttributeRecord({
+        key: String(attribute?.key || `attr_${index + 1}`),
+        label: String(attribute?.key || `ویژگی ${index + 1}`),
+        scope_type: 'parent',
+        parent_product_id: productPayload.parent_product_id,
+        value_type: 'select',
+        option_source_type: attribute?.option_source_type === 'field' ? 'field' : 'custom',
+        source_field_key: attribute?.source_field_key ? String(attribute.source_field_key) : null,
+        is_variation: true,
+        is_visible_on_site: true,
+        sort_order: index,
+        is_active: attribute?.is_active !== false,
+        options: [],
+      }, index)
+    );
+  }
 
-    (parentAttributeRows || []).forEach((attribute: any) => {
-      if (attribute?.option_source_type !== 'field' || !attribute?.source_field_key) return;
-      nextVariantValues[String(attribute.key)] = productPayload[attribute.source_field_key] ?? null;
-    });
-
-    productPayload.variant_values = nextVariantValues;
-    productPayload.variant_signature = buildVariantSignature(nextVariantValues);
+  if (productPayload.catalog_role === 'parent') {
+    productPayload.parent_product_id = null;
+    productPayload.variant_values = {};
+    productPayload.variant_signature = null;
+  } else {
+    const identitySource = {
+      ...(previousRecord || {}),
+      ...productPayload,
+    };
+    const { variantValues, variantSignature } = buildCanonicalVariantIdentity(
+      identitySource,
+      parentFieldBackedAttributes
+    );
+    productPayload.variant_values = variantValues;
+    productPayload.variant_signature = variantSignature;
+    if (productPayload.catalog_role !== 'variant') {
+      productPayload.parent_product_id = null;
+    }
   }
 
   let productId = String(recordId || '').trim();
@@ -304,6 +325,8 @@ export const persistProductCatalogData = async ({
         ? rawVariation.variant_values
         : {};
       const siteCode = String(rawVariation?.site_code || '').trim();
+      const openingStock = toNumberOrNull(rawVariation?.opening_stock);
+      const openingShelfId = rawVariation?.opening_shelf_id ? String(rawVariation.opening_shelf_id).trim() : null;
       const payload: Record<string, any> = {
         ...parentBase,
         catalog_role: 'variant',
@@ -313,10 +336,9 @@ export const persistProductCatalogData = async ({
         image_url: rawVariation?.image_url || parentBase.image_url || null,
         site_product_link: rawVariation?.site_product_link || null,
         status: rawVariation?.status || 'active',
-        related_bom: rawVariation?.related_bom || parentBase.related_bom || null,
+        related_bom: parentBase.related_bom || null,
         site_sync_enabled: rawVariation?.site_sync_enabled === true,
         variant_values: variantValues,
-        variant_signature: buildVariantSignature(variantValues),
       };
 
       activeAttributes.forEach((attribute) => {
@@ -325,9 +347,16 @@ export const persistProductCatalogData = async ({
         payload[attribute.source_field_key] = value ?? null;
       });
 
-      payload.name = rawVariation?.name
-        ? String(rawVariation.name).trim()
-        : buildVariantName(String(parentBase.name || previousRecord?.name || 'محصول'), variantValues, activeAttributes);
+      payload.name = values?.auto_name_enabled
+        ? buildVariantName(String(parentBase.name || previousRecord?.name || 'محصول'), variantValues, activeAttributes)
+        : (
+          rawVariation?.name
+            ? String(rawVariation.name).trim()
+            : buildVariantName(String(parentBase.name || previousRecord?.name || 'محصول'), variantValues, activeAttributes)
+        );
+      const canonicalIdentity = buildCanonicalVariantIdentity(payload, activeAttributes);
+      payload.variant_values = canonicalIdentity.variantValues;
+      payload.variant_signature = canonicalIdentity.variantSignature || buildVariantSignature(variantValues);
 
       if (rawVariation?.id) {
         const { error } = await supabase
@@ -336,8 +365,23 @@ export const persistProductCatalogData = async ({
           .eq('id', rawVariation.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('products').insert(payload);
+        const { data: insertedVariation, error } = await supabase
+          .from('products')
+          .insert(payload)
+          .select('id, main_unit, sub_unit')
+          .single();
         if (error) throw error;
+        const insertedVariationId = String(insertedVariation?.id || '').trim();
+        if (insertedVariationId && openingStock && openingStock > 0 && openingShelfId) {
+          await persistProductOpeningInventory({
+            supabase,
+            productId: insertedVariationId,
+            productMainUnit: (insertedVariation as any)?.main_unit ?? payload?.main_unit ?? null,
+            productSubUnit: (insertedVariation as any)?.sub_unit ?? payload?.sub_unit ?? null,
+            rows: [{ shelf_id: openingShelfId, stock: openingStock }],
+            userId: userId ?? null,
+          });
+        }
       }
     }
   }

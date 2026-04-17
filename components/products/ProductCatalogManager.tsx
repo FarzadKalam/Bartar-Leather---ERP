@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, App, Button, Divider, Input, Modal, Select, Space, Switch, Tag } from 'antd';
+import { Alert, App, Button, Divider, Input, InputNumber, Modal, Select, Space, Switch, Tag } from 'antd';
 import { DeleteOutlined, LinkOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ModuleField } from '../../types';
 import { FieldType } from '../../types';
@@ -8,9 +8,10 @@ import DynamicSelectField from '../DynamicSelectField';
 import { supabase } from '../../supabaseClient';
 import {
   buildVariantName,
+  buildSeedVariantValues,
+  buildVariantCombinations,
   buildVariantSignature,
   buildVariantSummary,
-  cartesianProduct,
   isEligibleProductAttributeField,
   mapFieldTypeToAttributeValueType,
   normalizeAttributeKey,
@@ -62,14 +63,15 @@ const DEFAULT_ATTRIBUTE_DRAFT: CustomAttributeDraft = {
 };
 
 const VARIATION_COMMON_FIELDS: ModuleField[] = [
-  { key: 'name', type: FieldType.TEXT, labels: { fa: 'نام متغیر' } },
+  { key: 'name', type: FieldType.TEXT, labels: { fa: 'نام محصول' } },
   { key: 'site_code', type: FieldType.TEXT, labels: { fa: 'کد سایت / SKU' } },
   { key: 'sell_price', type: FieldType.PRICE, labels: { fa: 'قیمت فروش' } },
+  { key: 'opening_stock', type: FieldType.NUMBER, labels: { fa: 'موجودی اول دوره' } },
   {
-    key: 'related_bom',
+    key: 'opening_shelf_id',
     type: FieldType.RELATION,
-    labels: { fa: 'شناسنامه تولید مرجع' },
-    relationConfig: { targetModule: 'production_boms', targetField: 'name' },
+    labels: { fa: 'قفسه نگهداری' },
+    relationConfig: { targetModule: 'shelves', targetField: 'name' },
   },
   {
     key: 'status',
@@ -94,26 +96,44 @@ const MATERIAL_CATEGORY_LABELS: Record<string, string> = {
 
 const DEFAULT_GLOBAL_ATTRIBUTE_DEFINITIONS = [
   { key: 'global_color', label: 'رنگ', dynamicCategory: 'general_color', valueType: 'select' as const },
+  { key: 'global_leather_color', label: 'رنگ چرم', dynamicCategory: 'general_color', valueType: 'multi_select' as const },
+  { key: 'global_lining_color', label: 'رنگ آستر', dynamicCategory: 'general_color', valueType: 'select' as const },
+  { key: 'global_fitting_color', label: 'رنگ یراق', dynamicCategory: 'general_color', valueType: 'multi_select' as const },
   { key: 'global_size', label: 'سایز', dynamicCategory: 'fitting_size', valueType: 'select' as const },
 ];
 
 const SMART_GLOBAL_FIELD_MAPPINGS: Record<string, { key: string; label: string }> = {
   leather_type: { key: 'global_leather_type', label: 'نوع چرم' },
-  leather_colors: { key: 'global_color', label: 'رنگ' },
+  leather_colors: { key: 'global_leather_color', label: 'رنگ چرم' },
   leather_finish_1: { key: 'global_leather_finish', label: 'صفحه چرم' },
   leather_effect: { key: 'global_leather_effect', label: 'افکت چرم' },
   leather_sort: { key: 'global_leather_sort', label: 'سورت چرم' },
   lining_material: { key: 'global_lining_material', label: 'جنس آستر' },
-  lining_color: { key: 'global_color', label: 'رنگ' },
+  lining_color: { key: 'global_lining_color', label: 'رنگ آستر' },
   lining_width: { key: 'global_lining_width', label: 'عرض آستر' },
   acc_material: { key: 'global_accessory_material', label: 'جنس خرجکار' },
   fitting_type: { key: 'global_fitting_type', label: 'نوع یراق' },
   fitting_material: { key: 'global_fitting_material', label: 'جنس یراق' },
-  fitting_colors: { key: 'global_color', label: 'رنگ' },
+  fitting_colors: { key: 'global_fitting_color', label: 'رنگ یراق' },
   fitting_size: { key: 'global_size', label: 'سایز' },
 };
 
 const MAX_GENERATED_VARIATIONS = 200;
+
+const mapAttributeValueTypeToFieldType = (valueType?: ProductAttributeRecord['value_type']) => {
+  switch (valueType) {
+    case 'number':
+      return FieldType.NUMBER;
+    case 'multi_select':
+      return FieldType.MULTI_SELECT;
+    case 'text':
+      return FieldType.TEXT;
+    case 'color':
+    case 'select':
+    default:
+      return FieldType.SELECT;
+  }
+};
 
 const matchOptionByValue = (options: Array<{ label: string; value: string }>, rawValue: string) =>
   options.find((option) => String(option.value) === rawValue || String(option.label) === rawValue);
@@ -131,15 +151,73 @@ const mapSelectedOptions = (
   };
 });
 
+const normalizeAttributeOptionValue = (
+  rawValue: any,
+  options: Array<{ label: string; value: string }>,
+  valueType?: ProductAttributeRecord['value_type'],
+) => {
+  if (rawValue === undefined || rawValue === null || rawValue === '') return rawValue;
+
+  const resolveSingleValue = (input: any) => {
+    const normalizedInput = String(input ?? '').trim();
+    if (!normalizedInput) return input;
+    const matched = options.find((option) =>
+      String(option.value) === normalizedInput || String(option.label) === normalizedInput
+    );
+    return matched ? matched.value : input;
+  };
+
+  const flattenValues = (input: any): any[] => {
+    if (Array.isArray(input)) {
+      return input.flatMap((item) => flattenValues(item));
+    }
+    return input === undefined || input === null || String(input).trim() === '' ? [] : [input];
+  };
+
+  if (valueType === 'multi_select') {
+    const values = flattenValues(rawValue);
+    return values
+      .map((item) => resolveSingleValue(item))
+      .filter((item) => item !== undefined && item !== null && String(item).trim() !== '');
+  }
+
+  if (Array.isArray(rawValue)) {
+    const normalizedValues = flattenValues(rawValue)
+      .map((item) => resolveSingleValue(item))
+      .filter((item) => item !== undefined && item !== null && String(item).trim() !== '');
+    return normalizedValues[0] ?? undefined;
+  }
+
+  return resolveSingleValue(rawValue);
+};
+
+const flattenVariationInputValue = (rawValue: any): any[] => {
+  if (Array.isArray(rawValue)) {
+    return rawValue.flatMap((item) => flattenVariationInputValue(item));
+  }
+  if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return [];
+  return [rawValue];
+};
+
+const resolveVariationOptionValue = (
+  rawValue: any,
+  options: Array<{ label: string; value: string }>,
+) => {
+  const normalizedRawValue = String(rawValue ?? '').trim();
+  if (!normalizedRawValue) return undefined;
+  const matched = options.find((option) =>
+    String(option.value) === normalizedRawValue || String(option.label) === normalizedRawValue
+  );
+  return matched ? matched.value : normalizedRawValue;
+};
+
 const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   productId,
   product,
   productFields,
   dynamicOptions,
-  relationOptions = {},
   mode,
   canEdit = true,
-  checkVisibility,
   onProductPatch,
   onChange,
   onOpenEditor,
@@ -151,12 +229,13 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   const [globalLibrary, setGlobalLibrary] = useState<ProductAttributeRecord[]>([]);
   const [pendingGlobalAttributes, setPendingGlobalAttributes] = useState<GlobalTemplateDraft[]>([]);
   const [variations, setVariations] = useState<ProductVariationRecord[]>([]);
-  const [selectedFieldKey, setSelectedFieldKey] = useState<string | null>(null);
   const [selectedGlobalKey, setSelectedGlobalKey] = useState<string | null>(null);
-  const [selectedFieldOptionValues, setSelectedFieldOptionValues] = useState<string[]>([]);
   const [selectedGlobalOptionValues, setSelectedGlobalOptionValues] = useState<string[]>([]);
   const [customAttributeOpen, setCustomAttributeOpen] = useState(false);
   const [customAttributeDraft, setCustomAttributeDraft] = useState<CustomAttributeDraft>(DEFAULT_ATTRIBUTE_DRAFT);
+  const [openingShelfOptions, setOpeningShelfOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const debugVariationBinding = typeof window !== 'undefined'
+    && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +247,15 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
       try {
         const loaded = await loadProductCatalogData(supabase as any, lookupId || undefined);
         if (cancelled) return;
+        if (debugVariationBinding) {
+          console.debug('[ProductCatalogManager] loaded catalog data', {
+            lookupId,
+            productId,
+            catalogRole: product?.catalog_role,
+            parentAttributes: loaded.parentAttributes,
+            variations: loaded.variations,
+          });
+        }
         setGlobalLibrary(loaded.globalAttributes);
         setPendingGlobalAttributes([]);
         setAttributes(loaded.parentAttributes);
@@ -192,6 +280,32 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
     });
   }, [attributes, onChange, pendingGlobalAttributes, variations]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadShelfOptions = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('shelves')
+          .select('id, name, system_code, shelf_number')
+          .limit(400);
+        if (error) throw error;
+        if (cancelled) return;
+        setOpeningShelfOptions((data || []).map((row: any) => ({
+          value: String(row.id),
+          label: row.system_code
+            ? `${row.name || row.shelf_number || row.id} (${row.system_code})`
+            : String(row.name || row.shelf_number || row.id),
+        })));
+      } catch (error) {
+        console.warn('Could not load shelf options for product variations', error);
+      }
+    };
+    void loadShelfOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const fieldMap = useMemo(() => {
     const map = new Map<string, ModuleField>();
     productFields.forEach((field) => {
@@ -205,48 +319,12 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
     [productFields],
   );
 
-  const visibleFieldCandidates = useMemo(() => (
-    productFields
-      .filter((field) => isEligibleProductAttributeField(field))
-      .filter((field) => (checkVisibility ? checkVisibility(field.logic, product) : true))
-      .sort((left, right) => (left.order || 0) - (right.order || 0))
-  ), [checkVisibility, product, productFields]);
-
   const materialCategory = String(product?.category || '').trim();
   const isRawMaterialProduct = String(product?.product_type || '').trim() === 'raw';
   const materialCategoryOptions = useMemo(
     () => Object.entries(MATERIAL_CATEGORY_LABELS).map(([value, label]) => ({ value, label })),
     [],
   );
-
-  const categorySpecificFieldCandidates = useMemo(() => {
-    if (!isRawMaterialProduct || !materialCategory) return [];
-    return productFields
-      .filter((field) => isEligibleProductAttributeField(field))
-      .filter((field) => {
-        const rule = (field.logic as any)?.visibleIf || field.logic;
-        return String(rule?.field || '') === 'category'
-          && String(rule?.value || '') === materialCategory;
-      })
-      .sort((left, right) => (left.order || 0) - (right.order || 0));
-  }, [isRawMaterialProduct, materialCategory, productFields]);
-
-  const availableFieldCandidates = useMemo(() => {
-    const source = isRawMaterialProduct
-      ? categorySpecificFieldCandidates
-      : (
-          visibleFieldCandidates.length > 0
-            ? visibleFieldCandidates
-            : productFields
-                .filter((field) => isEligibleProductAttributeField(field))
-                .sort((left, right) => (left.order || 0) - (right.order || 0))
-        );
-
-    return source.filter((field) => {
-      const normalizedKey = normalizeAttributeKey(field.key);
-      return !attributes.some((attribute) => attribute.key === normalizedKey);
-    });
-  }, [attributes, categorySpecificFieldCandidates, isRawMaterialProduct, productFields, visibleFieldCandidates]);
 
   const defaultGlobalTemplates = useMemo<ProductAttributeRecord[]>(() => (
     DEFAULT_GLOBAL_ATTRIBUTE_DEFINITIONS
@@ -316,19 +394,6 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   }, [attributes, defaultGlobalTemplates, globalLibrary, pendingGlobalAttributes, smartMappedGlobalTemplates]);
 
   const availableGlobalTemplates = allGlobalTemplates;
-
-  const selectedField = useMemo(
-    () => (selectedFieldKey ? fieldMap.get(selectedFieldKey) || null : null),
-    [fieldMap, selectedFieldKey],
-  );
-
-  const selectedFieldAvailableOptions = useMemo(
-    () => (selectedField ? resolveFieldAttributeOptions(selectedField, dynamicOptions).map((option) => ({
-      label: option.label,
-      value: option.value,
-    })) : []),
-    [dynamicOptions, selectedField],
-  );
 
   const selectedGlobalTemplate = useMemo(
     () => (selectedGlobalKey ? allGlobalTemplates.find((attribute) => attribute.key === selectedGlobalKey) || null : null),
@@ -415,47 +480,62 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
     buildVariantName(String(product?.name || 'محصول'), variantValues, attributes, renderAttributeValue)
   );
 
-  const addFieldAttribute = () => {
-    if (!selectedFieldKey) return;
-    const field = fieldMap.get(selectedFieldKey);
-    if (!field) return;
-    const key = normalizeAttributeKey(field.key);
-    if (attributes.some((attribute) => attribute.key === key)) {
-      message.warning('این ویژگی قبلاً اضافه شده است.');
-      return;
-    }
-    const sourceOptions = resolveFieldAttributeOptions(field, dynamicOptions);
-    const selectedOptions = selectedFieldOptionValues.length > 0
-      ? selectedFieldOptionValues.map((rawValue, index) => {
-          const matched = matchOptionByValue(sourceOptions, String(rawValue));
+  useEffect(() => {
+    if (variations.length === 0) return;
+
+    setVariations((prev) => {
+      let hasChanges = false;
+
+      const nextVariations = prev.map((variation) => {
+        const currentValues = variation.variant_values || {};
+        let nextValues = currentValues;
+
+        attributes
+          .filter((attribute) => attribute.is_active !== false)
+          .forEach((attribute) => {
+            const normalizedValue = normalizeAttributeOptionValue(
+              currentValues[attribute.key],
+              attributeOptionsMap.get(attribute.key) || [],
+              attribute.value_type,
+            );
+
+            const previousValue = currentValues[attribute.key];
+            const changed = Array.isArray(normalizedValue) || Array.isArray(previousValue)
+              ? JSON.stringify(normalizedValue ?? []) !== JSON.stringify(previousValue ?? [])
+              : normalizedValue !== previousValue;
+
+            if (!changed) return;
+            if (nextValues === currentValues) nextValues = { ...currentValues };
+            nextValues[attribute.key] = normalizedValue;
+            hasChanges = true;
+          });
+
+        const nextName = product?.auto_name_enabled
+          ? buildVariantName(String(product?.name || 'محصول'), nextValues, attributes, renderAttributeValue)
+          : variation.name;
+
+        if (nextName !== variation.name) {
+          hasChanges = true;
           return {
-            label: String(matched?.label || rawValue),
-            value: String(matched?.value || rawValue),
-            sort_order: index,
-            is_active: true,
+            ...variation,
+            name: nextName,
+            variant_values: nextValues,
           };
-        })
-      : sourceOptions;
-    setAttributes((prev) => [
-      ...prev,
-      {
-        key,
-        label: field.labels?.fa || field.key,
-        scope_type: 'parent',
-        parent_product_id: String(productId || '').trim() || null,
-        value_type: mapFieldTypeToAttributeValueType(field.type),
-        option_source_type: 'field',
-        source_field_key: field.key,
-        is_variation: true,
-        is_visible_on_site: true,
-        sort_order: prev.length,
-        is_active: true,
-        options: selectedOptions,
-      },
-    ]);
-    setSelectedFieldKey(null);
-    setSelectedFieldOptionValues([]);
-  };
+        }
+
+        if (nextValues !== currentValues) {
+          return {
+            ...variation,
+            variant_values: nextValues,
+          };
+        }
+
+        return variation;
+      });
+
+      return hasChanges ? nextVariations : prev;
+    });
+  }, [attributeOptionsMap, attributes, product?.auto_name_enabled, product?.name, variations.length]);
 
   const addGlobalTemplate = () => {
     if (!selectedGlobalKey) return;
@@ -567,10 +647,12 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   };
 
   const addVariation = () => {
+    const activeAttributes = attributes.filter((attribute) => attribute.is_active !== false);
+    const seededValues = buildSeedVariantValues(product, activeAttributes);
     setVariations((prev) => [
       ...prev,
       {
-        name: product?.auto_name_enabled ? getAutoVariationName({}) : '',
+        name: product?.auto_name_enabled ? getAutoVariationName(seededValues) : '',
         site_code: '',
         sell_price: product?.sell_price ?? null,
         image_url: product?.image_url ?? null,
@@ -581,7 +663,9 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
         system_code: null,
         site_sync_enabled: product?.site_sync_enabled === true,
         site_sync_status: 'idle',
-        variant_values: {},
+        opening_stock: 0,
+        opening_shelf_id: null,
+        variant_values: seededValues,
       },
     ]);
   };
@@ -614,27 +698,16 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
     }
 
     try {
-      const optionGroups = variationAttributes.map((attribute) => {
-        const options = attributeOptionsMap.get(attribute.key) || [];
-        if (!options.length) {
-          throw new Error(`ویژگی "${attribute.label}" گزینه قابل ترکیب ندارد.`);
-        }
-        return options.map((option) => ({ key: attribute.key, value: option.value }));
+      const defaultSeedValues = buildSeedVariantValues(product, variationAttributes);
+      const { combinations } = buildVariantCombinations({
+        attributes: variationAttributes,
+        attributeOptionsMap,
+        seedValues: defaultSeedValues,
+        maxCombinations: MAX_GENERATED_VARIATIONS,
       });
-
-      const combinationsCount = optionGroups.reduce((total, group) => total * group.length, 1);
-      if (combinationsCount > MAX_GENERATED_VARIATIONS) {
-        throw new Error(`تعداد ترکیب‌ها (${combinationsCount}) زیاد است. لطفاً مقادیر کمتری برای ویژگی‌ها انتخاب کنید.`);
-      }
-
-      const combos = cartesianProduct(optionGroups);
       setVariations((prev) => {
         const existingSignatures = new Set(prev.map((variation) => buildVariantSignature(variation.variant_values || {})));
-        const nextRows = combos
-          .map((combo) => combo.reduce<Record<string, any>>((acc, item) => {
-            acc[item.key] = item.value;
-            return acc;
-          }, {}))
+        const nextRows = combinations
           .filter((variantValues) => {
             const signature = buildVariantSignature(variantValues);
             if (existingSignatures.has(signature)) return false;
@@ -653,6 +726,8 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
             system_code: null,
             site_sync_enabled: product?.site_sync_enabled === true,
             site_sync_status: 'idle',
+            opening_stock: 0,
+            opening_shelf_id: null,
             variant_values: variantValues,
           } satisfies ProductVariationRecord));
         return [...prev, ...nextRows];
@@ -713,53 +788,6 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                   </div>
                 </div>
               )}
-              <div className="rounded-2xl border border-gray-200 p-3 space-y-3">
-                <div className="text-xs font-bold text-gray-500">افزودن از ویژگی‌های اختصاصی</div>
-                <Select
-                  value={selectedFieldKey}
-                  onChange={(value) => {
-                    setSelectedFieldKey(value);
-                    setSelectedFieldOptionValues([]);
-                  }}
-                  placeholder={isRawMaterialProduct && !materialCategory ? 'ابتدا گروه کالای مواد اولیه را انتخاب کنید' : 'یک فیلد انتخاب کنید'}
-                  options={availableFieldCandidates.map((field) => ({
-                    label: field.labels?.fa || field.key,
-                    value: field.key,
-                  }))}
-                  className="w-full"
-                  showSearch
-                  optionFilterProp="label"
-                  disabled={isRawMaterialProduct && !materialCategory}
-                  getPopupContainer={(trigger) => trigger.parentElement || document.body}
-                  notFoundContent="فیلد قابل‌استفاده‌ای پیدا نشد"
-                />
-                {selectedFieldAvailableOptions.length > 0 && (
-                  <DynamicSelectField
-                    value={selectedFieldOptionValues}
-                    onChange={(value) => setSelectedFieldOptionValues(Array.isArray(value) ? value.map(String) : (value ? [String(value)] : []))}
-                    options={selectedFieldAvailableOptions}
-                    category={selectedField?.dynamicOptionsCategory}
-                    placeholder="مقادیر موردنظر برای ساخت ترکیب را انتخاب کنید"
-                    className="w-full"
-                    allowClear
-                    mode="multiple"
-                    manageMode={selectedField?.dynamicOptionsCategory ? 'remote' : 'local'}
-                    localOptions={selectedFieldAvailableOptions}
-                    getPopupContainer={(trigger) => trigger.parentElement || document.body}
-                  />
-                )}
-                <div className="text-xs text-gray-400">
-                  {isRawMaterialProduct && !materialCategory
-                    ? 'برای استخراج ویژگی‌های اختصاصی، ابتدا دسته‌بندی مواد اولیه را انتخاب کنید'
-                    : availableFieldCandidates.length > 0
-                      ? `${availableFieldCandidates.length} فیلد قابل استفاده${materialCategory ? ` برای گروه ${MATERIAL_CATEGORY_LABELS[materialCategory] || materialCategory}` : ''} پیدا شد`
-                      : 'فعلاً فیلد قابل استفاده‌ای در وضعیت فعلی فرم دیده نمی‌شود'}
-                </div>
-                <Button block onClick={addFieldAttribute} disabled={!selectedFieldKey}>
-                  افزودن ویژگی اختصاصی
-                </Button>
-              </div>
-
               <div className="rounded-2xl border border-gray-200 p-3 space-y-3">
                 <div className="text-xs font-bold text-gray-500">افزودن از ویژگی‌های عمومی</div>
                 <Select
@@ -951,69 +979,180 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                     .filter((attribute) => attribute.is_active !== false)
                     .map((attribute) => {
                       const sourceField = attribute.source_field_key ? fieldMap.get(attribute.source_field_key) : null;
+                      const resolvedVariationOptions = sourceField
+                        ? resolveFieldAttributeOptions(sourceField, dynamicOptions).map((option) => ({
+                            label: option.label,
+                            value: option.value,
+                          }))
+                        : (attribute.options || []).map((option) => ({ label: option.label, value: option.value }));
                       const field: ModuleField = sourceField
                         ? {
                             ...sourceField,
                             key: attribute.key,
                             labels: { fa: attribute.label },
-                            type: attribute.value_type === 'number'
-                              ? FieldType.NUMBER
-                              : attribute.value_type === 'multi_select'
-                                ? FieldType.MULTI_SELECT
-                                : FieldType.SELECT,
-                            options: attribute.option_source_type === 'field'
-                              ? sourceField.options
-                              : (attribute.options || []).map((option) => ({ label: option.label, value: option.value })),
-                            dynamicOptionsCategory: attribute.option_source_type === 'field' ? sourceField.dynamicOptionsCategory : undefined,
+                            type: mapAttributeValueTypeToFieldType(attribute.value_type),
+                            options: resolvedVariationOptions,
+                            dynamicOptionsCategory: undefined,
                           }
                         : {
                             key: attribute.key,
                             labels: { fa: attribute.label },
-                            type: attribute.value_type === 'number'
-                              ? FieldType.NUMBER
-                              : attribute.value_type === 'multi_select'
-                                ? FieldType.MULTI_SELECT
-                                : FieldType.SELECT,
+                            type: mapAttributeValueTypeToFieldType(attribute.value_type),
                             options: (attribute.options || []).map((option) => ({ label: option.label, value: option.value })),
                           };
 
-                      const customOptions = attribute.option_source_type === 'custom'
-                        ? (attribute.options || []).map((option) => ({ label: option.label, value: option.value }))
-                        : undefined;
-
                       return (
                         <div key={`${variation.id || variationIndex}_${attribute.key}`}>
-                          <SmartFieldRenderer
-                            field={field}
-                            value={variation.variant_values?.[attribute.key]}
-                            onChange={(nextValue) => {
-                              const nextValues = { ...(variation.variant_values || {}), [attribute.key]: nextValue };
-                              updateVariation(variationIndex, { variant_values: nextValues });
-                            }}
-                            options={customOptions}
-                            forceEditMode={mode === 'edit'}
-                            moduleId="products"
-                            recordId={variation.id}
-                            allValues={variation.variant_values || {}}
-                          />
+                          <div className="text-sm font-bold text-gray-700 mb-2">{attribute.label}</div>
+                          {(attribute.value_type === 'multi_select' || field.type === FieldType.MULTI_SELECT) ? (
+                            <Select
+                              key={`${variation.id || variationIndex}_${attribute.key}_multi`}
+                              mode="multiple"
+                              className="w-full"
+                              value={flattenVariationInputValue(variation.variant_values?.[attribute.key]).map((item) =>
+                                String(resolveVariationOptionValue(item, resolvedVariationOptions) ?? item)
+                              )}
+                              onChange={(nextValue) => {
+                                const nextValues = { ...(variation.variant_values || {}), [attribute.key]: nextValue };
+                                updateVariation(variationIndex, { variant_values: nextValues });
+                              }}
+                              options={resolvedVariationOptions}
+                              allowClear
+                              optionFilterProp="label"
+                              placeholder={attribute.label}
+                            />
+                          ) : field.type === FieldType.SELECT ? (
+                            <Select
+                              key={`${variation.id || variationIndex}_${attribute.key}_single`}
+                              className="w-full"
+                              value={(() => {
+                                const rawValue = flattenVariationInputValue(variation.variant_values?.[attribute.key])[0];
+                                return rawValue === undefined
+                                  ? undefined
+                                  : resolveVariationOptionValue(rawValue, resolvedVariationOptions);
+                              })()}
+                              onChange={(nextValue) => {
+                                const nextValues = { ...(variation.variant_values || {}), [attribute.key]: nextValue };
+                                updateVariation(variationIndex, { variant_values: nextValues });
+                              }}
+                              options={resolvedVariationOptions}
+                              allowClear
+                              optionFilterProp="label"
+                              placeholder={attribute.label}
+                            />
+                          ) : field.type === FieldType.NUMBER ? (
+                            <InputNumber
+                              key={`${variation.id || variationIndex}_${attribute.key}_number`}
+                              className="w-full"
+                              controls={false}
+                              value={variation.variant_values?.[attribute.key]}
+                              onChange={(nextValue) => {
+                                const nextValues = { ...(variation.variant_values || {}), [attribute.key]: nextValue };
+                                updateVariation(variationIndex, { variant_values: nextValues });
+                              }}
+                              placeholder={attribute.label}
+                            />
+                          ) : (
+                            <Input
+                              key={`${variation.id || variationIndex}_${attribute.key}_text`}
+                              value={variation.variant_values?.[attribute.key] ?? ''}
+                              onChange={(event) => {
+                                const nextValues = { ...(variation.variant_values || {}), [attribute.key]: event.target.value };
+                                updateVariation(variationIndex, { variant_values: nextValues });
+                              }}
+                              placeholder={attribute.label}
+                            />
+                          )}
                         </div>
                       );
                     })}
 
-                  {VARIATION_COMMON_FIELDS.map((field) => (
-                    <div key={`${variation.id || variationIndex}_${field.key}`}>
-                      <SmartFieldRenderer
-                        field={field.key === 'status' && statusField ? { ...statusField, key: 'status' } : field}
-                        value={(variation as any)[field.key]}
-                        onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
-                        options={field.key === 'related_bom' ? relationOptions.related_bom : undefined}
-                        forceEditMode={mode === 'edit'}
-                        moduleId="products"
-                        recordId={variation.id}
-                        allValues={variation as any}
-                      />
-                    </div>
-                  ))}
+                  {VARIATION_COMMON_FIELDS.map((field) => {
+                    const fieldKey = String(field.key);
+                    if (fieldKey === 'name') {
+                      const resolvedName = variation.name || getAutoVariationName(variation.variant_values || {});
+                      return (
+                        <div key={`${variation.id || variationIndex}_${field.key}`}>
+                          <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || 'نام محصول'}</div>
+                          <Input value={resolvedName} readOnly={product?.auto_name_enabled === true} placeholder={field.labels?.fa || 'نام محصول'} />
+                        </div>
+                      );
+                    }
+
+                    if (fieldKey === 'site_code' || fieldKey === 'site_product_link') {
+                      return (
+                        <div key={`${variation.id || variationIndex}_${field.key}`}>
+                          <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || field.key}</div>
+                          <Input
+                            value={(variation as any)[field.key] ?? ''}
+                            onChange={(event) => updateVariation(variationIndex, { [field.key]: event.target.value } as Partial<ProductVariationRecord>)}
+                            placeholder={field.labels?.fa || field.key}
+                          />
+                        </div>
+                      );
+                    }
+
+                    if (fieldKey === 'sell_price' || fieldKey === 'opening_stock') {
+                      return (
+                        <div key={`${variation.id || variationIndex}_${field.key}`}>
+                          <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || field.key}</div>
+                          <InputNumber
+                            className="w-full"
+                            controls={false}
+                            value={(variation as any)[field.key]}
+                            onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
+                            placeholder={field.labels?.fa || field.key}
+                          />
+                        </div>
+                      );
+                    }
+
+                    if (fieldKey === 'status') {
+                      const statusOptions = (statusField?.options || field.options || []).map((option: any) => ({
+                        label: option.label,
+                        value: option.value,
+                      }));
+                      return (
+                        <div key={`${variation.id || variationIndex}_${field.key}`}>
+                          <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || 'وضعیت'}</div>
+                          <Select
+                            className="w-full"
+                            value={(variation as any)[field.key] ?? 'active'}
+                            onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
+                            options={statusOptions}
+                            placeholder={field.labels?.fa || 'وضعیت'}
+                          />
+                        </div>
+                      );
+                    }
+
+                    if (fieldKey === 'site_sync_enabled') {
+                      return (
+                        <div key={`${variation.id || variationIndex}_${field.key}`}>
+                          <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || field.key}</div>
+                          <Switch
+                            checked={(variation as any)[field.key] === true}
+                            onChange={(checked) => updateVariation(variationIndex, { [field.key]: checked } as Partial<ProductVariationRecord>)}
+                          />
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={`${variation.id || variationIndex}_${field.key}`}>
+                        <SmartFieldRenderer
+                          field={field}
+                          value={(variation as any)[field.key]}
+                          onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
+                          options={field.key === 'opening_shelf_id' ? openingShelfOptions : undefined}
+                          forceEditMode={mode === 'edit'}
+                          moduleId="products"
+                          recordId={variation.id}
+                          allValues={variation as any}
+                        />
+                      </div>
+                    );
+                  })}
 
                   <div className="rounded-2xl border border-dashed border-gray-200 p-3 text-sm text-gray-600">
                     <div>کد سیستمی: <span className="font-bold text-gray-800">{variation.system_code || '-'}</span></div>

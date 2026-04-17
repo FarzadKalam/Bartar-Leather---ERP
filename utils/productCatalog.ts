@@ -42,19 +42,37 @@ export interface ProductVariationRecord {
   system_code?: string | null;
   site_sync_enabled?: boolean;
   site_sync_status?: string | null;
+  opening_stock?: number | null;
+  opening_shelf_id?: string | null;
   variant_values: Record<string, any>;
 }
 
+export type ProductAttributeOptionPair = { label: string; value: string };
+export type CatalogBaseIdentity = {
+  productType: string | null;
+  category: string | null;
+  productCategory: string | null;
+  modelName: string | null;
+  relatedBom: string | null;
+};
+
+export const LEGACY_VARIANT_FIELD_MAPPINGS: Record<string, string> = {
+  leather_type: 'global_leather_type',
+  leather_colors: 'global_color',
+  leather_finish_1: 'global_leather_finish',
+  leather_effect: 'global_leather_effect',
+  leather_sort: 'global_leather_sort',
+  lining_material: 'global_lining_material',
+  lining_color: 'global_color',
+  lining_width: 'global_lining_width',
+  acc_material: 'global_accessory_material',
+  fitting_type: 'global_fitting_type',
+  fitting_material: 'global_fitting_material',
+  fitting_colors: 'global_color',
+  fitting_size: 'global_size',
+};
+
 export const PRODUCT_CATALOG_FIELD_KEYS = new Set<string>([
-  'catalog_role',
-  'parent_product_id',
-  'variant_signature',
-  'variant_values',
-  'site_remote_id',
-  'site_sync_enabled',
-  'site_sync_status',
-  'site_last_synced_at',
-  'site_sync_error',
   '__product_attributes',
   '__product_global_attributes',
   '__product_variations',
@@ -93,7 +111,7 @@ export const mapFieldTypeToAttributeValueType = (fieldType?: FieldType | string 
     case FieldType.NUMBER:
       return 'number';
     case FieldType.MULTI_SELECT:
-      return 'select';
+      return 'multi_select';
     case FieldType.TEXT:
     case FieldType.LONG_TEXT:
     case FieldType.LINK:
@@ -184,6 +202,11 @@ const normalizeVariantValue = (value: any): any => {
   return String(value).trim();
 };
 
+const isMeaningfulVariantValue = (value: any) => {
+  if (Array.isArray(value)) return value.length > 0;
+  return !(value === '' || value === null || value === undefined);
+};
+
 export const buildVariantSignature = (variantValues: Record<string, any>) => {
   const entries = Object.entries(variantValues || {})
     .map(([key, value]) => [normalizeAttributeKey(key), normalizeVariantValue(value)] as const)
@@ -194,6 +217,17 @@ export const buildVariantSignature = (variantValues: Record<string, any>) => {
     .sort(([left], [right]) => left.localeCompare(right));
 
   return JSON.stringify(entries);
+};
+
+export const buildLegacyFieldVariantValues = (productValues: Record<string, any>) => {
+  const nextValues: Record<string, any> = {};
+  Object.entries(LEGACY_VARIANT_FIELD_MAPPINGS).forEach(([sourceFieldKey, attributeKey]) => {
+    const rawValue = productValues?.[sourceFieldKey];
+    const normalizedValue = normalizeVariantValue(rawValue);
+    if (!isMeaningfulVariantValue(normalizedValue)) return;
+    nextValues[attributeKey] = normalizedValue;
+  });
+  return nextValues;
 };
 
 export const buildVariantSummary = (
@@ -234,10 +268,161 @@ export const cartesianProduct = <T,>(lists: T[][]): T[][] => {
   );
 };
 
+export const buildSeedVariantValues = (
+  productValues: Record<string, any>,
+  attributes: ProductAttributeRecord[],
+) => {
+  const nextValues: Record<string, any> = {};
+  attributes.forEach((attribute) => {
+    if (attribute.option_source_type !== 'field' || !attribute.source_field_key) return;
+    const sourceValue = productValues?.[attribute.source_field_key];
+    if (sourceValue === undefined || sourceValue === null || sourceValue === '') return;
+    nextValues[attribute.key] = sourceValue;
+  });
+  return nextValues;
+};
+
+export const buildCanonicalVariantValues = (
+  productValues: Record<string, any>,
+  attributes: ProductAttributeRecord[] = [],
+) => {
+  const baseValues = productValues?.variant_values && typeof productValues.variant_values === 'object'
+    ? { ...productValues.variant_values }
+    : {};
+  const attributeSeedValues = buildSeedVariantValues(productValues, attributes);
+  const legacyFieldValues = buildLegacyFieldVariantValues(productValues);
+  const merged = {
+    ...baseValues,
+    ...attributeSeedValues,
+    ...legacyFieldValues,
+  } as Record<string, any>;
+
+  return Object.entries(merged).reduce<Record<string, any>>((acc, [key, value]) => {
+    const normalizedKey = normalizeAttributeKey(key);
+    const normalizedValue = normalizeVariantValue(value);
+    if (!normalizedKey || !isMeaningfulVariantValue(normalizedValue)) return acc;
+    acc[normalizedKey] = normalizedValue;
+    return acc;
+  }, {});
+};
+
+export const buildCanonicalVariantIdentity = (
+  productValues: Record<string, any>,
+  attributes: ProductAttributeRecord[] = [],
+) => {
+  const variantValues = buildCanonicalVariantValues(productValues, attributes);
+  const variantSignature = Object.keys(variantValues).length > 0
+    ? buildVariantSignature(variantValues)
+    : null;
+  return {
+    variantValues,
+    variantSignature,
+  };
+};
+
+const normalizeCatalogIdentityToken = (value: any) => {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+};
+
+export const buildCatalogBaseIdentity = (
+  productValues: Record<string, any>,
+  options?: { productType?: string | null },
+): CatalogBaseIdentity => {
+  const productType = normalizeCatalogIdentityToken(options?.productType ?? productValues?.product_type);
+  return {
+    productType,
+    category: normalizeCatalogIdentityToken(productValues?.category),
+    productCategory: normalizeCatalogIdentityToken(productValues?.product_category),
+    modelName: normalizeCatalogIdentityToken(productValues?.model_name),
+    relatedBom: normalizeCatalogIdentityToken(productValues?.related_bom ?? productValues?.bom_id),
+  };
+};
+
+export const matchesCatalogBaseIdentity = (
+  row: Record<string, any>,
+  identity: CatalogBaseIdentity,
+) => {
+  const rowIdentity = buildCatalogBaseIdentity(row);
+  if (identity.productType && rowIdentity.productType !== identity.productType) return false;
+  if (identity.productType === 'raw') {
+    if (identity.category && rowIdentity.category !== identity.category) return false;
+  } else if (identity.productCategory && rowIdentity.productCategory !== identity.productCategory) {
+    return false;
+  }
+  if (identity.modelName && rowIdentity.modelName !== identity.modelName) return false;
+  if (identity.relatedBom && rowIdentity.relatedBom !== identity.relatedBom) return false;
+  return true;
+};
+
+export const buildVariantCombinations = ({
+  attributes,
+  attributeOptionsMap,
+  seedValues = {},
+  maxCombinations,
+}: {
+  attributes: ProductAttributeRecord[];
+  attributeOptionsMap: Map<string, ProductAttributeOptionPair[]>;
+  seedValues?: Record<string, any>;
+  maxCombinations?: number;
+}) => {
+  const combinableAttributes = attributes.filter((attribute) => {
+    const options = attributeOptionsMap.get(attribute.key) || [];
+    return options.length > 0;
+  });
+
+  if (!combinableAttributes.length) {
+    throw new Error('هیچ ویژگی انتخابیِ قابل ترکیبی پیدا نشد. برای ساخت ترکیب باید حداقل یک ویژگی گزینه‌دار داشته باشید.');
+  }
+
+  const combinationsCount = combinableAttributes.reduce((total, attribute) => {
+    const options = attributeOptionsMap.get(attribute.key) || [];
+    return total * options.length;
+  }, 1);
+
+  if (typeof maxCombinations === 'number' && combinationsCount > maxCombinations) {
+    throw new Error(`تعداد ترکیب‌ها (${combinationsCount}) زیاد است. لطفاً مقادیر کمتری برای ویژگی‌ها انتخاب کنید.`);
+  }
+
+  let combinations: Record<string, any>[] = [{ ...seedValues }];
+  combinableAttributes.forEach((attribute) => {
+    const options = attributeOptionsMap.get(attribute.key) || [];
+    const next: Record<string, any>[] = [];
+    combinations.forEach((combination) => {
+      options.forEach((option) => {
+        next.push({
+          ...combination,
+          [attribute.key]: option.value,
+        });
+      });
+    });
+    combinations = next;
+  });
+
+  return {
+    combinableAttributes,
+    combinationsCount,
+    combinations,
+  };
+};
+
 export const stripProductCatalogFields = (values: Record<string, any>) => {
   const nextValues = { ...(values || {}) };
   PRODUCT_CATALOG_FIELD_KEYS.forEach((key) => {
     delete nextValues[key];
   });
   return nextValues;
+};
+
+export const normalizeCatalogProductPayload = (values: Record<string, any>) => {
+  const productPayload = stripProductCatalogFields(values);
+  if (!productPayload.catalog_role) {
+    productPayload.catalog_role = 'standalone';
+  }
+  if (productPayload.catalog_role !== 'variant') {
+    productPayload.parent_product_id = null;
+    productPayload.variant_signature = null;
+    productPayload.variant_values = {};
+  }
+  return productPayload;
 };

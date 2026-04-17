@@ -61,6 +61,14 @@ const dedupeOptions = (options: Array<{ label: string; value: string }>) => {
   return next;
 };
 
+const flattenIncomingValue = (raw: any): string[] => {
+  if (Array.isArray(raw)) {
+    return raw.flatMap((item) => flattenIncomingValue(item));
+  }
+  const normalized = String(raw ?? '').trim();
+  return normalized ? [normalized] : [];
+};
+
 const normalizeDynamicValueToLabel = (
   input: string | string[] | undefined,
   options: Array<{ label: string; value: string }>,
@@ -196,6 +204,23 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     });
     return next;
   }, [isLocalMode, localOptions, options, value, mode]);
+
+  const normalizedSelectValue = useMemo(() => {
+    const incomingValues = flattenIncomingValue(value);
+    const resolveOptionValue = (input: string) => {
+      const matched = normalizedOptions.find((option) =>
+        String(option.value) === input || String(option.label) === input
+      );
+      return String(matched?.value ?? input);
+    };
+
+    if (mode === 'multiple' || mode === 'tags') {
+      return dedupeValues(incomingValues.map(resolveOptionValue)).map((item) => String(item));
+    }
+
+    const firstValue = incomingValues[0];
+    return firstValue ? resolveOptionValue(firstValue) : undefined;
+  }, [mode, normalizedOptions, value]);
 
   const persistedOptionValues = useMemo(() => new Set(
     (isLocalMode ? normalizedOptions : (options || [])).map((option) => String(option?.value ?? ''))
@@ -448,7 +473,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     <>
       <Select
         mode={mode}
-        value={mode === 'multiple' ? (Array.isArray(value) ? value : (value ? [value] : [])) : value}
+        value={normalizedSelectValue as any}
         onChange={handleSelectChange as any}
         placeholder={placeholder}
         className={className}

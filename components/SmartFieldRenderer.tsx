@@ -64,6 +64,13 @@ const formatTextForInput = (raw: any): string => {
   return toPersianNumber(normalizeDigitsToEnglish(raw));
 };
 
+const flattenSelectValue = (raw: any): any[] => {
+  if (Array.isArray(raw)) {
+    return raw.flatMap((item) => flattenSelectValue(item));
+  }
+  return raw === undefined || raw === null || String(raw).trim() === '' ? [] : [raw];
+};
+
 interface SmartFieldRendererProps {
   field: ModuleField;
   value: any;
@@ -135,6 +142,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const relationConfigAny = field.relationConfig as any;
   const quickCreateTargetModuleId = relationConfigAny?.targetModule as string | undefined;
   const quickCreateTargetModule = quickCreateTargetModuleId ? MODULES[quickCreateTargetModuleId] : undefined;
+  const flattenedSelectValues = flattenSelectValue(value);
+  const normalizedSingleSelectValue = flattenedSelectValues[0];
+  const normalizedMultiSelectValue = flattenedSelectValues;
   const quickCreateTargetField = useMemo(() => {
     const configured = relationConfigAny?.targetField;
     if (configured) return String(configured);
@@ -701,8 +711,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       case FieldType.STATUS:
         if (field.dynamicOptionsCategory) {
              return (
-                 <DynamicSelectField
-                    value={value}
+                  <DynamicSelectField
+                    value={normalizedSingleSelectValue as any}
                     onChange={onChange}
                     options={fieldOptions}
                     category={field.dynamicOptionsCategory}
@@ -718,6 +728,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
             <Select 
                 {...commonProps}
+                value={normalizedSingleSelectValue as any}
                 showSearch={shouldEnableSearch}
                 options={fieldOptions}
                 allowClear
@@ -734,8 +745,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       case FieldType.MULTI_SELECT:
         if (field.dynamicOptionsCategory) {
              return (
-                <DynamicSelectField
-                    value={value}
+                 <DynamicSelectField
+                    value={normalizedMultiSelectValue as any}
                     onChange={onChange}
                     options={fieldOptions}
                     category={field.dynamicOptionsCategory}
@@ -752,6 +763,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
             <Select 
                 {...commonProps}
+                value={normalizedMultiSelectValue as any}
                 mode="multiple"
                 showSearch={shouldEnableSearch}
                 options={fieldOptions}
