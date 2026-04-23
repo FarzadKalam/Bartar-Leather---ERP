@@ -58,7 +58,6 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
   }, [data?.production_shelf, data?.production_shelf_id, data?.production_shelf_label, data?.production_shelf_name, relationOptions, taskShelfId]);
   const visibleFieldGroups = (fieldGroups || []).filter((block: any) =>
     (canViewField ? canViewField(String(block.id)) !== false : true)
-    && !(moduleId === 'products' && data?.catalog_role === 'parent' && String(block.id) === 'product_inventory')
     && !(moduleId === 'products' && data?.catalog_role === 'parent' && ['leatherSpec', 'liningSpec', 'kharjkarSpec', 'yaraghSpec'].includes(String(block.id)))
   );
   const quickAddTargetBlockId = useMemo(() => {
@@ -132,7 +131,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
                 برای نمایش موجودی، ابتدا قفسه مرحله تولید را انتخاب کنید.
               </div>
             )
-          ) : (
+          ) : (moduleId === 'products' && block.id === 'product_inventory' && data?.catalog_role === 'parent') ? null : (
             <EditableTable
               block={block}
               initialData={data?.[block.id] || []}
@@ -152,7 +151,6 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
         </div>
       )}
       {moduleId === 'products' && block.id === 'product_inventory' && (() => {
-        if (data?.catalog_role === 'parent') return null;
         const stockMovementsBlock = moduleConfig?.blocks?.find((b: any) => b.id === 'product_stock_movements');
         if (!stockMovementsBlock) return null;
         if (stockMovementsBlock.visibleIf && !checkVisibility(stockMovementsBlock.visibleIf)) return null;
@@ -164,7 +162,8 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
               recordId={recordId}
               relationOptions={relationOptions}
               dynamicOptions={dynamicOptions}
-              canEditModule={canEditModule}
+              isParentProduct={data?.catalog_role === 'parent'}
+              canEditModule={data?.catalog_role === 'parent' ? false : canEditModule}
               onProductStockUpdated={handleStockUpdated}
               openQuickAddSignal={stockMovementQuickAddSignal}
             />

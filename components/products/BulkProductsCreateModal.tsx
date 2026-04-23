@@ -9,6 +9,7 @@ import { supabase } from '../../supabaseClient';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
 import { normalizeCatalogProductPayload } from '../../utils/productCatalog';
 import { convertArea, HARD_CODED_UNIT_OPTIONS, type UnitValue } from '../../utils/unitConversions';
+import { buildStockTransferPayload } from '../../utils/stockTransferHelpers';
 
 interface BulkProductsCreateModalProps {
   open: boolean;
@@ -327,6 +328,13 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       const transfers: Record<string, unknown>[] = [];
       const bundleItems: Record<string, unknown>[] = [];
       const changelogs: Record<string, unknown>[] = [];
+      const preparedRows: Array<{
+        rowIndex: number;
+        payload: Record<string, unknown>;
+        openingStock: number;
+        openingShelfId: string | null;
+        bundleId: string | null;
+      }> = [];
 
       for (let i = 0; i < rows.length; i += 1) {
         const row = rows[i];
@@ -342,46 +350,73 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         if (isEmpty(payload.name)) throw new Error(`ردیف ${i + 1}: نام محصول نامعتبر است.`);
 
         const normalizedPayload = normalizeCatalogProductPayload(payload);
-        const { data: inserted, error: insertError } = await supabase.from('products').insert([normalizedPayload]).select('id,name,system_code,main_unit,sub_unit').single();
-        if (insertError || !inserted?.id) throw new Error(`ردیف ${i + 1}: ${insertError?.message || 'ثبت محصول ناموفق بود.'}`);
-        const pid = String(inserted.id);
-        productIds.push(pid);
-        changelogs.push({ module_id: 'products', record_id: pid, action: 'create', user_id: authUserId, record_title: inserted.name || inserted.system_code || null });
+        preparedRows.push({
+          rowIndex: i,
+          payload: normalizedPayload,
+          openingStock: toNum(row.opening_stock),
+          openingShelfId: row.opening_shelf_id ? String(row.opening_shelf_id) : null,
+          bundleId: row.bundle_id ? String(row.bundle_id) : null,
+        });
+      }
 
-        const q = toNum(row.opening_stock);
-        const shelf = row.opening_shelf_id ? String(row.opening_shelf_id) : null;
-        const bundleId = row.bundle_id ? String(row.bundle_id) : null;
-        if (q > 0 && shelf) {
-          const mainUnit = inserted.main_unit ? String(inserted.main_unit).trim() : '';
-          const subUnit = inserted.sub_unit ? String(inserted.sub_unit).trim() : '';
-          deltas.push({ productId: pid, shelfId: shelf, delta: q, unit: mainUnit || null, bundleId });
+      const { data: insertedRows, error: insertError } = await supabase
+        .from('products')
+        .insert(preparedRows.map((item) => item.payload))
+        .select('id,name,system_code,main_unit,sub_unit');
+      if (insertError) throw insertError;
+      if (!insertedRows || insertedRows.length !== preparedRows.length) {
+        throw new Error('تعداد محصولات ثبت‌شده با تعداد ردیف‌های ارسالی برابر نیست.');
+      }
+
+      insertedRows.forEach((inserted: any, index: number) => {
+        const prepared = preparedRows[index];
+        const pid = String(inserted?.id || '').trim();
+        if (!pid) {
+          throw new Error(`ردیف ${prepared.rowIndex + 1}: ثبت محصول ناموفق بود.`);
+        }
+        productIds.push(pid);
+        changelogs.push({
+          module_id: 'products',
+          record_id: pid,
+          action: 'create',
+          user_id: authUserId,
+          record_title: inserted?.name || inserted?.system_code || null,
+        });
+
+        if (prepared.openingStock > 0 && prepared.openingShelfId) {
+          const mainUnit = inserted?.main_unit ? String(inserted.main_unit).trim() : '';
+          const subUnit = inserted?.sub_unit ? String(inserted.sub_unit).trim() : '';
+          deltas.push({
+            productId: pid,
+            shelfId: prepared.openingShelfId,
+            delta: prepared.openingStock,
+            unit: mainUnit || null,
+            bundleId: prepared.bundleId,
+          });
           const subQty = !mainUnit || !subUnit
             ? 0
             : (mainUnit === subUnit
-              ? q
-              : (isUnitValue(mainUnit) && isUnitValue(subUnit) ? convertArea(q, mainUnit, subUnit) : 0));
-          transfers.push({
-            transfer_type: 'opening_balance',
-            product_id: pid,
-            bundle_id: bundleId,
-            delivered_qty: q,
-            required_qty: Number.isFinite(subQty) ? subQty : 0,
-            invoice_id: null,
-            production_order_id: null,
-            from_shelf_id: null,
-            to_shelf_id: shelf,
-            sender_id: actorProfileId,
-            receiver_id: actorProfileId,
-          });
-          if (bundleId) {
+              ? prepared.openingStock
+              : (isUnitValue(mainUnit) && isUnitValue(subUnit) ? convertArea(prepared.openingStock, mainUnit, subUnit) : 0));
+          transfers.push(buildStockTransferPayload({
+            transferType: 'opening_balance',
+            productId: pid,
+            bundleId: prepared.bundleId,
+            deliveredQty: prepared.openingStock,
+            requiredQty: Number.isFinite(subQty) ? subQty : 0,
+            fromShelfId: null,
+            toShelfId: prepared.openingShelfId,
+            userId: actorProfileId,
+          }));
+          if (prepared.bundleId) {
             bundleItems.push({
-              bundle_id: bundleId,
+              bundle_id: prepared.bundleId,
               product_id: pid,
-              quantity: q,
+              quantity: prepared.openingStock,
             });
           }
         }
-      }
+      });
 
       if (deltas.length) await applyInventoryDeltas(supabase as never, deltas);
       if (productIds.length) await syncMultipleProductsStock(supabase as never, productIds);

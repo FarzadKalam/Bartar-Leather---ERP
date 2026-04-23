@@ -16,12 +16,14 @@ import {
 } from '../../utils/manualStockMovements';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { insertChangelog } from '../editableTable/changelogHelpers';
+import { mapStockTransferRowToEditorRow } from '../../utils/stockTransferHelpers';
 
 interface ProductStockMovementsPanelProps {
   block: any;
   recordId: string;
   relationOptions: Record<string, any[]>;
   dynamicOptions: Record<string, any[]>;
+  isParentProduct?: boolean;
   canEditModule?: boolean;
   onProductStockUpdated?: (stock: number) => void;
   openQuickAddSignal?: number;
@@ -32,6 +34,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   recordId,
   relationOptions,
   dynamicOptions,
+  isParentProduct = false,
   canEditModule = true,
   onProductStockUpdated,
   openQuickAddSignal = 0,
@@ -82,26 +85,53 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     if (!recordId) return;
     setLoading(true);
     try {
-      const [{ data: productMeta }, { data: transferRows, error: transferError }] = await Promise.all([
-        supabase
-          .from('products')
-          .select('main_unit, sub_unit, stock')
-          .eq('id', recordId)
-          .maybeSingle(),
-        supabase
-          .from('stock_transfers')
-          .select('id, transfer_type, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id,bundle_number)')
-          .eq('product_id', recordId)
-          .order('created_at', { ascending: true }),
-      ]);
-      if (transferError) throw transferError;
+      const { data: productMeta, error: productMetaError } = await supabase
+        .from('products')
+        .select('main_unit, sub_unit, stock')
+        .eq('id', recordId)
+        .maybeSingle();
+      if (productMetaError) throw productMetaError;
 
       const nextUnits = {
         mainUnit: productMeta?.main_unit || null,
         subUnit: productMeta?.sub_unit || null,
       };
       setProductUnits(nextUnits);
-      const nextStock = parseFloat(productMeta?.stock) || 0;
+      let transferRows: any[] = [];
+      let nextStock = parseFloat(productMeta?.stock) || 0;
+
+      if (isParentProduct) {
+        const { data: variants, error: variantsError } = await supabase
+          .from('products')
+          .select('id, stock')
+          .eq('catalog_role', 'variant')
+          .eq('parent_product_id', recordId);
+        if (variantsError) throw variantsError;
+
+        const variantIds = (variants || [])
+          .map((row: any) => String(row?.id || '').trim())
+          .filter(Boolean);
+        nextStock = (variants || []).reduce((sum: number, row: any) => sum + (parseFloat(row?.stock) || 0), 0);
+
+        if (variantIds.length > 0) {
+          const { data, error: transferError } = await supabase
+            .from('stock_transfers')
+            .select('id, product_id, transfer_type, delivered_qty, required_qty, invoice_id, purchase_invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id,bundle_number), products(name,system_code)')
+            .in('product_id', variantIds)
+            .order('created_at', { ascending: true });
+          if (transferError) throw transferError;
+          transferRows = data || [];
+        }
+      } else {
+        const { data, error: transferError } = await supabase
+          .from('stock_transfers')
+          .select('id, product_id, transfer_type, delivered_qty, required_qty, invoice_id, purchase_invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id,bundle_number), products(name,system_code)')
+          .eq('product_id', recordId)
+          .order('created_at', { ascending: true });
+        if (transferError) throw transferError;
+        transferRows = data || [];
+      }
+
       setCurrentProductStock(nextStock);
       if (onProductStockUpdatedRef.current) onProductStockUpdatedRef.current(nextStock);
 
@@ -117,35 +147,16 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         userMap = new Map((profiles || []).map((item: any) => [String(item.id), item.full_name || String(item.id)]));
       }
 
-      const mappedRows = (transferRows || []).map((row: any, index: number) => {
-        const transferType = String(row?.transfer_type || '').trim() || 'inventory_count';
-        const fromShelf = row?.from_shelf_id ? String(row.from_shelf_id) : null;
-        const toShelf = row?.to_shelf_id ? String(row.to_shelf_id) : null;
-        const derivedVoucherType = fromShelf && toShelf ? 'transfer' : toShelf ? 'incoming' : 'outgoing';
-        const creatorId = row?.sender_id || row?.receiver_id || null;
-        const isPurchaseSource = transferType === 'purchase_invoice';
-        const autoSource = ['sales_invoice', 'purchase_invoice', 'production'].includes(transferType);
-        return {
-          id: row.id,
-          key: row.id || `move_${index}`,
-          voucher_type: derivedVoucherType,
-          source: transferType,
-          main_unit: nextUnits.mainUnit,
-          main_quantity: Math.abs(parseFloat(row?.delivered_qty) || 0),
-          sub_unit: nextUnits.subUnit,
-          sub_quantity: Math.abs(parseFloat(row?.required_qty) || 0),
-          bundle_id: (row?.product_bundles as any)?.id || row?.bundle_id || null,
-          product_bundles: row?.product_bundles || null,   
-          from_shelf_id: fromShelf,
-          to_shelf_id: toShelf,
-          invoice_id: isPurchaseSource ? null : (row?.invoice_id || null),
-          purchase_invoice_id: isPurchaseSource ? (row?.invoice_id || null) : null,
-          production_order_id: row?.production_order_id || null,
-          created_by_name: creatorId ? (userMap.get(String(creatorId)) || String(creatorId)) : '-',
-          created_at: row?.created_at || null,
-          _readonly: autoSource || !!row?.invoice_id || !!row?.production_order_id,
-        };
-      });
+      const mappedRows = (transferRows || []).map((row: any, index: number) => (
+        mapStockTransferRowToEditorRow(row, {
+          mainUnit: nextUnits.mainUnit,
+          subUnit: nextUnits.subUnit,
+          userMap,
+          keyPrefix: 'move',
+          index,
+          readonly: isParentProduct ? true : undefined,
+        })
+      ));
       setRows(mappedRows);
     } catch (err) {
       console.error(err);
@@ -154,7 +165,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [recordId]);
+  }, [isParentProduct, recordId]);
 
   useEffect(() => {
     loadRows();
@@ -190,10 +201,11 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   }, [quickCreateOpen, quickCreateForm, productUnits.mainUnit, productUnits.subUnit, editingRow]);
 
   useEffect(() => {
+    if (isParentProduct) return;
     if (!openQuickAddSignal) return;
     setEditingRow(null);
     setQuickCreateOpen(true);
-  }, [openQuickAddSignal]);
+  }, [isParentProduct, openQuickAddSignal]);
 
   useEffect(() => {
     if (!quickCreateOpen) return;
@@ -224,6 +236,17 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     order: index + 1,
   })) as ModuleField[];
 
+  if (isParentProduct && !baseFields.some((field) => field.key === 'product_id')) {
+    baseFields.unshift({
+      key: 'product_id',
+      type: FieldType.RELATION,
+      labels: { fa: 'محصول متغیر', en: 'Variant Product' },
+      relationConfig: { targetModule: 'products', targetField: 'name' },
+      isTableColumn: true,
+      order: 0,
+    } as ModuleField);
+  }
+
   // ✅ تغییر اصلی: اضافه کردن فیلد بسته محصول به جدول
   const bundleField = {
     key: 'bundle_id',
@@ -239,7 +262,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     baseFields.push(bundleField);
   }
 
-  if (canEditModule) {
+  if (canEditModule && !isParentProduct) {
     baseFields.push({
       key: 'row_actions',
       type: FieldType.TEXT,
@@ -250,7 +273,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   }
 
   return baseFields;
-}, [block.tableColumns, canEditModule]);
+}, [block.tableColumns, canEditModule, isParentProduct]);
 
   const tableModuleConfig = useMemo(() => ({
     id: 'product_stock_movements_view',
@@ -277,8 +300,37 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       }
     });
 
+    if (isParentProduct) {
+      const existingProductOptions = Array.isArray(next.product_id) ? next.product_id : [];
+      const fallbackProductOptions = rows
+        .map((row: any) => {
+          const value = String(row?.product_id || '').trim();
+          if (!value) return null;
+          const productName = String(row?.product_name || '').trim();
+          const productCode = String(row?.product_system_code || '').trim();
+          const label = productName || productCode || value;
+          return {
+            value,
+            label: productCode && productName ? `${productName} (${productCode})` : label,
+          };
+        })
+        .filter(Boolean) as Array<{ value: string; label: string }>;
+
+      const mergedById = new Map<string, any>();
+      [...existingProductOptions, ...fallbackProductOptions].forEach((option: any) => {
+        const value = String(option?.value ?? '').trim();
+        if (!value) return;
+        mergedById.set(value, {
+          ...option,
+          value,
+          label: String(option?.label ?? value),
+        });
+      });
+      next.product_id = Array.from(mergedById.values());
+    }
+
     return next;
-  }, [block.tableColumns, displayFields, getRelationOptions, relationOptions]);
+  }, [block.tableColumns, displayFields, getRelationOptions, isParentProduct, relationOptions, rows]);
 
 
   const baseAddFields = useMemo(() => {
@@ -513,7 +565,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   const tableRows = useMemo(() => {
     return rows.map((row: any) => ({
       ...row,
-      row_actions: canEditModule ? (
+      row_actions: canEditModule && !isParentProduct ? (
         <Space size={4}>
           <Tooltip title={row?._readonly ? 'این ردیف سیستمی است' : 'ویرایش'}>
             <Button
@@ -544,7 +596,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         </Space>
       ) : '-',
     }));
-  }, [actionRowLoadingId, canEditModule, rows]);
+  }, [actionRowLoadingId, canEditModule, isParentProduct, rows]);
 
   if (loading) {
     return <div className="p-10 text-center"><Spin /></div>;
@@ -557,7 +609,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
           <span className="w-1 h-5 bg-leather-500 rounded-full inline-block"></span>
           {block?.titles?.fa || 'ورود و خروج کالا'}
         </h3>
-        {canEditModule && (
+        {canEditModule && !isParentProduct && (
           <Button
             size="small"
             icon={<PlusOutlined />}
@@ -586,24 +638,26 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       <div className="mt-3 text-xs md:text-sm flex flex-wrap gap-4">
         <span>جمع ورود: <span className="text-green-600 persian-number">{toPersianNumber(totals.incoming)}</span></span>
         <span>جمع خروج: <span className="text-red-600 persian-number">{toPersianNumber(totals.outgoing)}</span></span>
-        <span>موجودی فعلی: <span className="text-leather-600 persian-number">{toPersianNumber(currentProductStock)}</span></span>
+        <span>{isParentProduct ? 'موجودی تجمیعی متغیرها' : 'موجودی فعلی'}: <span className="text-leather-600 persian-number">{toPersianNumber(currentProductStock)}</span></span>
       </div>
 
-      <RelationQuickCreateInline
-        open={quickCreateOpen}
-        label={editingRow ? 'ویرایش حواله' : (block?.titles?.fa || 'ورود و خروج کالا')}
-        fields={quickCreateFields}
-        form={quickCreateForm}
-        loading={quickCreateLoading}
-        relationOptions={addRelationOptions}
-        dynamicOptions={dynamicOptions}
-        onCancel={() => {
-          setQuickCreateOpen(false);
-          setEditingRow(null);
-          quickCreateForm.resetFields();
-        }}
-        onOk={handleSubmit}
-      />
+      {!isParentProduct && (
+        <RelationQuickCreateInline
+          open={quickCreateOpen}
+          label={editingRow ? 'ویرایش حواله' : (block?.titles?.fa || 'ورود و خروج کالا')}
+          fields={quickCreateFields}
+          form={quickCreateForm}
+          loading={quickCreateLoading}
+          relationOptions={addRelationOptions}
+          dynamicOptions={dynamicOptions}
+          onCancel={() => {
+            setQuickCreateOpen(false);
+            setEditingRow(null);
+            quickCreateForm.resetFields();
+          }}
+          onOk={handleSubmit}
+        />
+      )}
     </div>
   );
 };

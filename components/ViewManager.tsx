@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Button, Modal, Input, Checkbox, Tabs, Badge, List, 
   Tooltip, Popconfirm, Alert, App, Skeleton 
@@ -19,6 +19,33 @@ interface ViewManagerProps {
   onViewChange: (view: SavedView | null, config: ViewConfig | null) => void;
   onRefresh: () => void;
 }
+
+const areStringArraysEqual = (a: string[] = [], b: string[] = []) =>
+  a.length === b.length && a.every((item, index) => item === b[index]);
+
+const areFiltersEqual = (a: any[] = [], b: any[] = []) =>
+  a.length === b.length &&
+  a.every((item, index) => {
+    const other = b[index];
+    return (
+      item?.id === other?.id &&
+      item?.field === other?.field &&
+      item?.operator === other?.operator &&
+      item?.value === other?.value
+    );
+  });
+
+const areViewConfigsEqual = (a?: ViewConfig | null, b?: ViewConfig | null) => {
+  const left = a || { columns: [], filters: [] };
+  const right = b || { columns: [], filters: [] };
+  const leftSort = Array.isArray(left.sort) ? left.sort : [];
+  const rightSort = Array.isArray(right.sort) ? right.sort : [];
+  return (
+    areStringArraysEqual(left.columns || [], right.columns || []) &&
+    areFiltersEqual(left.filters || [], right.filters || []) &&
+    JSON.stringify(leftSort) === JSON.stringify(rightSort)
+  );
+};
 
 const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onViewChange, onRefresh }) => {
   const { message } = App.useApp();
@@ -68,15 +95,25 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
     };
   }, [moduleId]);
 
-  const handleOpenNewView = () => {
+  const updateConfig = useCallback((updater: (prev: ViewConfig) => ViewConfig) => {
+    setConfig((prev) => {
+      const next = updater(prev);
+      return areViewConfigsEqual(prev, next) ? prev : next;
+    });
+  }, []);
+
+  const handleOpenNewView = useCallback(() => {
     const allCols = moduleConfig.fields.map(f => f.key);
-    setConfig({ columns: allCols, filters: [] });
+    setConfig((prev) => {
+      const next = { columns: allCols, filters: [] };
+      return areViewConfigsEqual(prev, next) ? prev : next;
+    });
     setViewName('');
     setEditingViewId(null);
     setIsModalOpen(true);
-  };
+  }, [moduleConfig.fields]);
 
-  const handleEditView = (view: SavedView, e: React.MouseEvent) => {
+  const handleEditView = useCallback((view: SavedView, e: React.MouseEvent) => {
     e.stopPropagation();
     const rawConfig = (view.config as any) || {};
     const safeConfig: ViewConfig = {
@@ -86,7 +123,7 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
         filters: Array.isArray(rawConfig.filters) ? rawConfig.filters : [],
         sort: rawConfig.sort
     };
-    setConfig(safeConfig);
+    setConfig((prev) => (areViewConfigsEqual(prev, safeConfig) ? prev : safeConfig));
     
     if (view.is_default || view.id.startsWith('default_')) {
         setViewName(view.name + ' (کپی)');
@@ -96,7 +133,7 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
         setEditingViewId(view.id);
     }
     setIsModalOpen(true);
-  };
+  }, [moduleConfig.fields]);
 
   const handleSaveView = async () => {
     if (!viewName.trim()) {
@@ -156,27 +193,66 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
     }
   };
   
-  const moveColumn = (index: number, direction: 'up' | 'down') => {
-      setConfig(prev => {
+  const moveColumn = useCallback((index: number, direction: 'up' | 'down') => {
+      updateConfig(prev => {
           const newCols = [...(prev.columns || [])];
           if (direction === 'up' && index > 0) [newCols[index], newCols[index - 1]] = [newCols[index - 1], newCols[index]];
           else if (direction === 'down' && index < newCols.length - 1) [newCols[index], newCols[index + 1]] = [newCols[index + 1], newCols[index]];
           return { ...prev, columns: newCols };
       });
-  };
+  }, [updateConfig]);
 
-  const toggleColumn = (key: string) => {
-      setConfig(prev => {
-          let newCols = [...(prev.columns || [])];
-          if (newCols.includes(key)) newCols = newCols.filter(c => c !== key);
-          else newCols.push(key);
-          return { ...prev, columns: newCols };
-      });
-  };
+  const toggleColumn = useCallback((key: string) => {
+      updateConfig(prev => {
+           let newCols = [...(prev.columns || [])];
+           if (newCols.includes(key)) newCols = newCols.filter(c => c !== key);
+           else newCols.push(key);
+           return { ...prev, columns: newCols };
+       });
+  }, [updateConfig]);
 
-  const handleFilterChange = (newFilters: any[]) => {
-      setConfig(prev => ({ ...prev, filters: newFilters }));
-  };
+  const handleFilterChange = useCallback((newFilters: any[]) => {
+      updateConfig(prev => ({ ...prev, filters: newFilters }));
+  }, [updateConfig]);
+
+  const tabsItems = useMemo(() => ([
+      {
+          key: 'columns',
+          label: <span><CheckSquareOutlined /> ستون‌ها</span>,
+          children: (
+              <div className="flex gap-4 h-[350px] border border-t-0 p-4 rounded-b-lg border-gray-200">
+                  <div className="flex-1 flex flex-col"><div className="text-xs text-gray-500 mb-2 font-bold bg-gray-50 p-2 rounded">موجود</div><div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">{moduleConfig.fields.map(field => (<div key={field.key} className="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded cursor-pointer" onClick={() => toggleColumn(field.key)}><Checkbox checked={config.columns?.includes(field.key)} /><span className="text-sm">{field.labels.fa}</span></div>))}</div></div>
+                  <div className="w-[1px] bg-gray-200 my-2"></div>
+                  <div className="flex-1 flex flex-col"><div className="text-xs text-gray-500 mb-2 font-bold bg-gray-50 p-2 rounded flex justify-between"><span>انتخاب شده</span><span className="badge border px-1 rounded">{config.columns?.length || 0}</span></div><div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                        <List
+                            size="small"
+                            dataSource={config.columns || []}
+                            renderItem={(item) => {
+                                const colKey = item as string;
+                                const field = moduleConfig.fields.find(f => f.key === colKey);
+                                if (!field) return null;
+                                const index = config.columns.indexOf(colKey);
+                                return (
+                                    <List.Item className="bg-white mb-1.5 rounded-lg px-3 border border-gray-100 shadow-sm !py-2 flex justify-between group hover:border-leather-300">
+                                        <span className="text-sm font-medium">{field.labels.fa}</span>
+                                        <div className="flex gap-1 opacity-50 group-hover:opacity-100">
+                                            <Button size="small" type="text" icon={<ArrowUpOutlined className="text-[10px]" />} disabled={index === 0} onClick={() => moveColumn(index, 'up')} />
+                                            <Button size="small" type="text" icon={<ArrowDownOutlined className="text-[10px]" />} disabled={index === (config.columns?.length || 0) - 1} onClick={() => moveColumn(index, 'down')} />
+                                        </div>
+                                    </List.Item>
+                                );
+                            }}
+                        />
+                      </div></div>
+              </div>
+          )
+      },
+      {
+          key: 'filters',
+          label: <div className="flex items-center gap-2"><FilterOutlined />فیلترها{config.filters && config.filters.length > 0 && <Badge count={config.filters.length} size="small" color="#356d52" />}</div>,
+          children: <div className="bg-white p-4 border border-t-0 rounded-b-lg min-h-[350px]"><FilterBuilder module={moduleConfig} filters={config.filters || []} onChange={handleFilterChange} /></div>
+      }
+  ]), [config.columns, config.filters, handleFilterChange, moduleConfig, moveColumn, toggleColumn]);
 
   return (
     <>
@@ -262,51 +338,15 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
 
         </div>
 
-
-      <Modal title={<div className="flex items-center gap-2">{editingViewId ? <EditOutlined /> : <PlusOutlined />}{editingViewId ? "ویرایش نما" : "ساخت نمای جدید"}</div>} open={isModalOpen} onCancel={() => setIsModalOpen(false)} width={700} zIndex={1001} footer={[<Button key="back" onClick={() => setIsModalOpen(false)}>انصراف</Button>, <Button key="submit" type="primary" icon={<SaveOutlined />} onClick={handleSaveView} className="bg-leather-600 hover:!bg-leather-500">{editingViewId ? 'ذخیره تغییرات' : 'ایجاد نما'}</Button>]}>
-          <div className="flex flex-col gap-4 py-4">
-              {!editingViewId && viewName.includes('(کپی)') && <Alert type="info" showIcon message="شما در حال کپی کردن یک نمای پایه هستید." className="mb-2" />}
-              <Input placeholder="نام نما" value={viewName} onChange={e => setViewName(e.target.value)} prefix={<span className="text-red-500 text-lg leading-none ml-1">*</span>} size="large" />
-              <Tabs type="card" items={[
-                  {
-                      key: 'columns',
-                      label: <span><CheckSquareOutlined /> ستون‌ها</span>,
-                      children: (
-                          <div className="flex gap-4 h-[350px] border border-t-0 p-4 rounded-b-lg border-gray-200">
-                              <div className="flex-1 flex flex-col"><div className="text-xs text-gray-500 mb-2 font-bold bg-gray-50 p-2 rounded">موجود</div><div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">{moduleConfig.fields.map(field => (<div key={field.key} className="flex items-center gap-2 py-1.5 px-2 hover:bg-gray-50 rounded cursor-pointer" onClick={() => toggleColumn(field.key)}><Checkbox checked={config.columns?.includes(field.key)} /><span className="text-sm">{field.labels.fa}</span></div>))}</div></div>
-                              <div className="w-[1px] bg-gray-200 my-2"></div>
-                              <div className="flex-1 flex flex-col"><div className="text-xs text-gray-500 mb-2 font-bold bg-gray-50 p-2 rounded flex justify-between"><span>انتخاب شده</span><span className="badge border px-1 rounded">{config.columns?.length || 0}</span></div><div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                                    <List
-                                        size="small" 
-                                        dataSource={config.columns || []} 
-                                        renderItem={(item) => {
-                                            const colKey = item as string;
-                                            const field = moduleConfig.fields.find(f => f.key === colKey);
-                                            if (!field) return null;
-                                            const index = config.columns.indexOf(colKey);
-                                            return (
-                                                <List.Item className="bg-white mb-1.5 rounded-lg px-3 border border-gray-100 shadow-sm !py-2 flex justify-between group hover:border-leather-300">
-                                                    <span className="text-sm font-medium">{field.labels.fa}</span>
-                                                    <div className="flex gap-1 opacity-50 group-hover:opacity-100">
-                                                        <Button size="small" type="text" icon={<ArrowUpOutlined className="text-[10px]" />} disabled={index === 0} onClick={() => moveColumn(index, 'up')} />
-                                                        <Button size="small" type="text" icon={<ArrowDownOutlined className="text-[10px]" />} disabled={index === (config.columns?.length || 0) - 1} onClick={() => moveColumn(index, 'down')} />
-                                                    </div>
-                                                </List.Item>
-                                            );
-                                        }} 
-                                    />
-                                  </div></div>
-                          </div>
-                      )
-                  },
-                  {
-                      key: 'filters',
-                      label: <div className="flex items-center gap-2"><FilterOutlined />فیلترها{config.filters && config.filters.length > 0 && <Badge count={config.filters.length} size="small" color="#356d52" />}</div>,
-                      children: <div className="bg-white p-4 border border-t-0 rounded-b-lg min-h-[350px]"><FilterBuilder module={moduleConfig} filters={config.filters || []} onChange={handleFilterChange} /></div>
-                  }
-              ]} />
-          </div>
-      </Modal>
+      {isModalOpen && (
+        <Modal title={<div className="flex items-center gap-2">{editingViewId ? <EditOutlined /> : <PlusOutlined />}{editingViewId ? "ویرایش نما" : "ساخت نمای جدید"}</div>} open={isModalOpen} onCancel={() => setIsModalOpen(false)} width={700} zIndex={1001} footer={[<Button key="back" onClick={() => setIsModalOpen(false)}>انصراف</Button>, <Button key="submit" type="primary" icon={<SaveOutlined />} onClick={handleSaveView} className="bg-leather-600 hover:!bg-leather-500">{editingViewId ? 'ذخیره تغییرات' : 'ایجاد نما'}</Button>]}>
+            <div className="flex flex-col gap-4 py-4">
+                {!editingViewId && viewName.includes('(کپی)') && <Alert type="info" showIcon message="شما در حال کپی کردن یک نمای پایه هستید." className="mb-2" />}
+                <Input placeholder="نام نما" value={viewName} onChange={e => setViewName(e.target.value)} prefix={<span className="text-red-500 text-lg leading-none ml-1">*</span>} size="large" />
+                <Tabs type="card" items={tabsItems} />
+            </div>
+        </Modal>
+      )}
     </>
   );
 };

@@ -11,6 +11,7 @@ import { runWorkflowsForEvent } from "../utils/workflowRuntime";
 import { syncCustomerLevelsByInvoiceCustomers } from "../utils/customerLeveling";
 import { attachTaskCompletionIfNeeded } from "../utils/taskCompletion";
 import { persistProductOpeningInventory } from "../utils/productOpeningInventory";
+import { persistProductCatalogData } from "../utils/productCatalogPersistence";
 
 export const ModuleCreate = () => {
   const { moduleId } = useParams();
@@ -183,16 +184,21 @@ export const ModuleCreate = () => {
               }
 
               if (moduleId === "products") {
+                const { data: authData } = await supabase.auth.getUser();
+                const userId = authData?.user?.id || null;
+                const persisted = await persistProductCatalogData({
+                  supabase: supabase as any,
+                  userId,
+                  values,
+                });
                 const { data: inserted, error } = await supabase
                   .from(moduleConfig.table)
-                  .insert(values)
                   .select("*")
+                  .eq("id", persisted.id)
                   .single();
                 if (error) throw error;
                 if (!inserted?.id) throw new Error("ثبت محصول ناموفق بود");
 
-                const { data: authData } = await supabase.auth.getUser();
-                const userId = authData?.user?.id || null;
                 await persistProductOpeningInventory({
                   supabase: supabase as any,
                   productId: String(inserted.id),

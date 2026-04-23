@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { applyInventoryDeltas, syncMultipleProductsStock } from './inventoryTransactions';
 import { convertArea, HARD_CODED_UNIT_OPTIONS, type UnitValue } from './unitConversions';
+import { buildStockTransferPayload } from './stockTransferHelpers';
 
 type OpeningInventoryRow = {
   shelf_id?: unknown;
@@ -20,6 +21,13 @@ type PersistProductOpeningInventoryParams = {
   productSubUnit?: string | null;
   rows?: OpeningInventoryRow[] | null;
   userId?: string | null;
+};
+
+type InventoryBalanceRow = {
+  product_id: string;
+  shelf_id: string;
+  bundle_id?: string | null;
+  stock?: unknown;
 };
 
 const UNIT_VALUES = new Set<UnitValue>(HARD_CODED_UNIT_OPTIONS.map((item) => item.value));
@@ -142,19 +150,16 @@ export const persistProductOpeningInventory = async ({
       unit: rowMainUnit || null,
     });
 
-    transfers.push({
-      transfer_type: 'opening_balance',
-      product_id: normalizedProductId,
-      bundle_id: row.bundleId ?? null,
-      delivered_qty: row.qtyMain,
-      required_qty: Math.abs(resolvedSubQty || 0),
-      invoice_id: null,
-      production_order_id: null,
-      from_shelf_id: null,
-      to_shelf_id: row.shelfId,
-      sender_id: userId || null,
-      receiver_id: userId || null,
-    });
+    transfers.push(buildStockTransferPayload({
+      transferType: 'opening_balance',
+      productId: normalizedProductId,
+      bundleId: row.bundleId ?? null,
+      deliveredQty: row.qtyMain,
+      requiredQty: Math.abs(resolvedSubQty || 0),
+      fromShelfId: null,
+      toShelfId: row.shelfId,
+      userId: userId || null,
+    }));
   });
 
   if (deltas.length) {
@@ -178,4 +183,247 @@ export const persistProductOpeningInventory = async ({
     if (error) throw error;
   }
 
+};
+
+export const reconcileMissingOpeningBalanceTransfers = async (
+  supabase: SupabaseClient,
+  options?: { userId?: string | null }
+) => {
+  const { data: inventoryRows, error: inventoryError } = await supabase
+    .from('product_inventory')
+    .select('product_id, shelf_id, bundle_id, stock');
+  if (inventoryError) throw inventoryError;
+
+  const positiveRows = (inventoryRows || []).filter((row: any) => (toNumber(row?.stock) > 0));
+  if (!positiveRows.length) return { inserted: 0 };
+
+  const { data: transfers, error: transfersError } = await supabase
+    .from('stock_transfers')
+    .select('transfer_type, product_id, bundle_id, from_shelf_id, to_shelf_id');
+  if (transfersError) throw transfersError;
+
+  const { data: products, error: productsError } = await supabase
+    .from('products')
+    .select('id, main_unit, sub_unit');
+  if (productsError) throw productsError;
+
+  const productUnits = new Map(
+    (products || []).map((row: any) => [
+      String(row?.id || ''),
+      {
+        mainUnit: normalizeUnit(row?.main_unit),
+        subUnit: normalizeUnit(row?.sub_unit),
+      },
+    ])
+  );
+
+  const openingKeys = new Set(
+    (transfers || [])
+      .filter((row: any) => String(row?.transfer_type || '').trim() === 'opening_balance')
+      .map((row: any) => {
+        const shelfKey = String(row?.to_shelf_id || row?.from_shelf_id || '').trim();
+        return `${row?.product_id || ''}::${shelfKey}::${row?.bundle_id ?? '__null__'}`;
+      })
+  );
+
+  const movementKeys = new Set(
+    (transfers || []).flatMap((row: any) => {
+      const productId = String(row?.product_id || '').trim();
+      const bundleKey = row?.bundle_id ?? '__null__';
+      const result: string[] = [];
+      const fromShelf = String(row?.from_shelf_id || '').trim();
+      const toShelf = String(row?.to_shelf_id || '').trim();
+      if (productId && fromShelf) result.push(`${productId}::${fromShelf}::${bundleKey}`);
+      if (productId && toShelf) result.push(`${productId}::${toShelf}::${bundleKey}`);
+      return result;
+    })
+  );
+
+  const missingTransfers = positiveRows
+    .filter((row: any) => {
+      const productId = String(row?.product_id || '').trim();
+      const shelfId = String(row?.shelf_id || '').trim();
+      const bundleKey = row?.bundle_id ?? '__null__';
+      const key = `${productId}::${shelfId}::${bundleKey}`;
+      return productId && shelfId && !openingKeys.has(key) && !movementKeys.has(key);
+    })
+    .map((row: any) => {
+      const productId = String(row?.product_id || '').trim();
+      const shelfId = String(row?.shelf_id || '').trim();
+      const bundleId = row?.bundle_id ?? null;
+      const qtyMain = toNumber(row?.stock);
+      const unitMeta = productUnits.get(productId) || { mainUnit: '', subUnit: '' };
+      let qtySub = qtyMain;
+      if (unitMeta.mainUnit && unitMeta.subUnit && unitMeta.mainUnit !== unitMeta.subUnit) {
+        if (isUnitValue(unitMeta.mainUnit) && isUnitValue(unitMeta.subUnit)) {
+          const converted = convertArea(qtyMain, unitMeta.mainUnit, unitMeta.subUnit);
+          qtySub = Number.isFinite(converted) ? converted : qtyMain;
+        }
+      }
+      return buildStockTransferPayload({
+        transferType: 'opening_balance',
+        productId,
+        bundleId,
+        deliveredQty: qtyMain,
+        requiredQty: Math.abs(qtySub || 0),
+        fromShelfId: null,
+        toShelfId: shelfId,
+        userId: options?.userId || null,
+      });
+    });
+
+  if (!missingTransfers.length) return { inserted: 0 };
+
+  const { error: insertError } = await supabase
+    .from('stock_transfers')
+    .insert(missingTransfers);
+  if (insertError) throw insertError;
+
+  return { inserted: missingTransfers.length };
+};
+
+export const syncOpeningBalanceTransfersForInventoryRows = async ({
+  supabase,
+  inventoryRows,
+  removedRows,
+  userId,
+}: {
+  supabase: SupabaseClient;
+  inventoryRows: InventoryBalanceRow[];
+  removedRows?: InventoryBalanceRow[];
+  userId?: string | null;
+}) => {
+  const finalRows = (inventoryRows || []).map((row) => ({
+    productId: String(row?.product_id || '').trim(),
+    shelfId: String(row?.shelf_id || '').trim(),
+    bundleId: normalizeRelationId(row?.bundle_id),
+    stock: toNumber(row?.stock),
+  })).filter((row) => row.productId && row.shelfId);
+
+  const deletedRows = (removedRows || []).map((row) => ({
+    productId: String(row?.product_id || '').trim(),
+    shelfId: String(row?.shelf_id || '').trim(),
+    bundleId: normalizeRelationId(row?.bundle_id),
+  })).filter((row) => row.productId && row.shelfId);
+
+  const keyOf = (row: { productId: string; shelfId: string; bundleId?: string | null }) =>
+    `${row.productId}::${row.shelfId}::${row.bundleId ?? '__null__'}`;
+
+  const finalByKey = new Map(finalRows.map((row) => [keyOf(row), row]));
+  const affectedKeys = new Set([
+    ...finalRows.map(keyOf),
+    ...deletedRows.map(keyOf),
+  ]);
+  if (!affectedKeys.size) return { inserted: 0, updated: 0, deleted: 0 };
+
+  const productIds = Array.from(new Set([...finalRows, ...deletedRows].map((row) => row.productId)));
+  const { data: transfers, error: transfersError } = await supabase
+    .from('stock_transfers')
+    .select('id, transfer_type, product_id, bundle_id, delivered_qty, required_qty, from_shelf_id, to_shelf_id');
+  if (transfersError) throw transfersError;
+
+  const { data: products, error: productsError } = await supabase
+    .from('products')
+    .select('id, main_unit, sub_unit')
+    .in('id', productIds);
+  if (productsError) throw productsError;
+
+  const productUnits = new Map(
+    (products || []).map((row: any) => [
+      String(row?.id || ''),
+      {
+        mainUnit: normalizeUnit(row?.main_unit),
+        subUnit: normalizeUnit(row?.sub_unit),
+      },
+    ])
+  );
+
+  const relevantTransfers = (transfers || []).filter((row: any) => {
+    const productId = String(row?.product_id || '').trim();
+    if (!productId) return false;
+    const bundleId = normalizeRelationId(row?.bundle_id);
+    const fromShelfId = row?.from_shelf_id ? String(row.from_shelf_id).trim() : '';
+    const toShelfId = row?.to_shelf_id ? String(row.to_shelf_id).trim() : '';
+    const keys = [
+      `${productId}::${fromShelfId}::${bundleId ?? '__null__'}`,
+      `${productId}::${toShelfId}::${bundleId ?? '__null__'}`,
+    ];
+    return keys.some((key) => affectedKeys.has(key));
+  });
+
+  const toInsert: Array<Record<string, unknown>> = [];
+  const toUpdate: Array<Record<string, unknown>> = [];
+  const toDeleteIds: string[] = [];
+
+  affectedKeys.forEach((key) => {
+    const currentRow = finalByKey.get(key);
+    const [productId, shelfId, bundleKey] = key.split('::');
+    const bundleId = bundleKey === '__null__' ? null : bundleKey;
+    const keyTransfers = relevantTransfers.filter((row: any) => {
+      const rowProductId = String(row?.product_id || '').trim();
+      const rowBundleId = normalizeRelationId(row?.bundle_id);
+      const rowShelfId = String(row?.to_shelf_id || row?.from_shelf_id || '').trim();
+      return rowProductId === productId && rowShelfId === shelfId && rowBundleId === bundleId;
+    });
+    const openingTransfers = keyTransfers.filter((row: any) => String(row?.transfer_type || '').trim() === 'opening_balance');
+    const nonOpeningTransfers = keyTransfers.filter((row: any) => String(row?.transfer_type || '').trim() !== 'opening_balance');
+
+    if (nonOpeningTransfers.length > 0) {
+      return;
+    }
+
+    if (!currentRow || currentRow.stock <= 0) {
+      openingTransfers.forEach((row: any) => {
+        if (row?.id) toDeleteIds.push(String(row.id));
+      });
+      return;
+    }
+
+    const unitMeta = productUnits.get(productId) || { mainUnit: '', subUnit: '' };
+    let subQty = currentRow.stock;
+    if (unitMeta.mainUnit && unitMeta.subUnit && unitMeta.mainUnit !== unitMeta.subUnit) {
+      if (isUnitValue(unitMeta.mainUnit) && isUnitValue(unitMeta.subUnit)) {
+        const converted = convertArea(currentRow.stock, unitMeta.mainUnit, unitMeta.subUnit);
+        subQty = Number.isFinite(converted) ? converted : currentRow.stock;
+      }
+    }
+
+    const payload = buildStockTransferPayload({
+      transferType: 'opening_balance',
+      productId,
+      bundleId,
+      deliveredQty: currentRow.stock,
+      requiredQty: Math.abs(subQty || 0),
+      fromShelfId: null,
+      toShelfId: shelfId,
+      userId: userId || null,
+    });
+
+    if (openingTransfers[0]?.id) {
+      toUpdate.push({ id: String(openingTransfers[0].id), ...payload });
+      openingTransfers.slice(1).forEach((row: any) => {
+        if (row?.id) toDeleteIds.push(String(row.id));
+      });
+    } else {
+      toInsert.push(payload);
+    }
+  });
+
+  if (toDeleteIds.length > 0) {
+    const uniqueDeleteIds = Array.from(new Set(toDeleteIds));
+    const { error } = await supabase.from('stock_transfers').delete().in('id', uniqueDeleteIds);
+    if (error) throw error;
+  }
+
+  if (toUpdate.length > 0) {
+    const { error } = await supabase.from('stock_transfers').upsert(toUpdate, { onConflict: 'id' });
+    if (error) throw error;
+  }
+
+  if (toInsert.length > 0) {
+    const { error } = await supabase.from('stock_transfers').insert(toInsert);
+    if (error) throw error;
+  }
+
+  return { inserted: toInsert.length, updated: toUpdate.length, deleted: toDeleteIds.length };
 };

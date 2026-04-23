@@ -16,6 +16,7 @@ import {
 } from '../../utils/manualStockMovements';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { insertChangelog } from '../editableTable/changelogHelpers';
+import { mapStockTransferRowToEditorRow } from '../../utils/stockTransferHelpers';
 
 interface BundleStockMovementsPanelProps {
   block: any;
@@ -115,7 +116,7 @@ const BundleStockMovementsPanel: React.FC<BundleStockMovementsPanelProps> = ({
     try {
       const { data: transferRows, error: transferError } = await supabase
         .from('stock_transfers')
-        .select('id, transfer_type, product_id, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id, bundle_number)')
+        .select('id, transfer_type, product_id, delivered_qty, required_qty, invoice_id, purchase_invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id, bundle_number)')
         .eq('bundle_id', recordId)
         .order('created_at', { ascending: true });
       if (transferError) throw transferError;
@@ -169,33 +170,15 @@ const BundleStockMovementsPanel: React.FC<BundleStockMovementsPanelProps> = ({
       const mappedRows = (transferRows || []).map((row: any, index: number) => {
         const productId = row?.product_id ? String(row.product_id) : null;
         const productMeta = productId ? productsMap.get(productId) : null;
-        const transferType = String(row?.transfer_type || '').trim() || 'inventory_count';
-        const fromShelf = row?.from_shelf_id ? String(row.from_shelf_id) : null;
-        const toShelf = row?.to_shelf_id ? String(row.to_shelf_id) : null;
-        const derivedVoucherType = fromShelf && toShelf ? 'transfer' : toShelf ? 'incoming' : 'outgoing';
-        const creatorId = row?.sender_id || row?.receiver_id || null;
-        const isPurchaseSource = transferType === 'purchase_invoice';
-        const autoSource = ['sales_invoice', 'purchase_invoice', 'production'].includes(transferType);
         return {
-          id: row.id,
-          key: row.id || `bundle_move_${index}`,
+          ...mapStockTransferRowToEditorRow(row, {
+            mainUnit: productMeta?.mainUnit || null,
+            subUnit: productMeta?.subUnit || null,
+            userMap,
+            keyPrefix: 'bundle_move',
+            index,
+          }),
           product_id: productId,
-          voucher_type: derivedVoucherType,
-          source: transferType,
-          main_unit: productMeta?.mainUnit || null,
-          main_quantity: toQty(row?.delivered_qty),
-          sub_unit: productMeta?.subUnit || null,
-          sub_quantity: toQty(row?.required_qty),
-          bundle_id: (row?.product_bundles as any)?.id || row?.bundle_id || null,
-          product_bundles: row?.product_bundles || null,
-          from_shelf_id: fromShelf,
-          to_shelf_id: toShelf,
-          invoice_id: isPurchaseSource ? null : (row?.invoice_id || null),
-          purchase_invoice_id: isPurchaseSource ? (row?.invoice_id || null) : null,
-          production_order_id: row?.production_order_id || null,
-          created_by_name: creatorId ? (userMap.get(String(creatorId)) || String(creatorId)) : '-',
-          created_at: row?.created_at || null,
-          _readonly: autoSource || !!row?.invoice_id || !!row?.production_order_id,
         };
       });
       setRows(mappedRows);

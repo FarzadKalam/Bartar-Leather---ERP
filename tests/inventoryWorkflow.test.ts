@@ -1,7 +1,7 @@
-﻿import * as assert from 'node:assert/strict';
+import * as assert from 'node:assert/strict';
 import { applyInventoryDeltas } from '../utils/inventoryTransactions';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
-import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
+import { persistProductOpeningInventory, reconcileMissingOpeningBalanceTransfers } from '../utils/productOpeningInventory';
 
 type Row = Record<string, any>;
 type Filter = { type: 'eq' | 'is'; column: string; value: any };
@@ -234,6 +234,8 @@ runTest('purchase invoice finalization increases stock and logs incoming transfe
   assert.equal(supabase.getTable('product_inventory')[0].stock, 3);
   assert.equal(supabase.getTable('stock_transfers')[0].transfer_type, 'purchase_invoice');
   assert.equal(supabase.getTable('stock_transfers')[0].to_shelf_id, 's1');
+  assert.equal(supabase.getTable('stock_transfers')[0].purchase_invoice_id, 'inv-purchase-1');
+  assert.equal(supabase.getTable('stock_transfers')[0].invoice_id ?? null, null);
   assert.equal(supabase.getTable('products')[0].stock, 3);
 });
 
@@ -281,6 +283,47 @@ runTest('invoice finalization does not apply twice when transfer row already exi
   assert.equal(result.applied, false);
   assert.equal((result as any).skipped, 'already_applied');
   assert.equal(supabase.getTable('product_inventory')[0].stock, 5);
+});
+
+runTest('legacy purchase transfer referenced by invoice_id is still treated as already applied', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 5, sub_stock: 500 }],
+    product_inventory: [{ id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: null, stock: 5, warehouse_id: 'w1' }],
+    stock_transfers: [{ id: 'st1', invoice_id: 'inv-purchase-1', purchase_invoice_id: null, transfer_type: 'purchase_invoice' }],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'purchase_invoices',
+    recordId: 'inv-purchase-1',
+    previousStatus: 'draft',
+    nextStatus: 'final',
+    invoiceItems: [{ product_id: 'p1', shelf_id: 's1', quantity: 2, main_unit: 'متر' }],
+    userId: 'u1',
+  });
+
+  assert.equal(result.applied, false);
+  assert.equal((result as any).skipped, 'already_applied');
+  assert.equal(supabase.getTable('product_inventory')[0].stock, 5);
+});
+
+runTest('reconcileMissingOpeningBalanceTransfers backfills only inventory rows without any movement history', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 4, sub_stock: 400 }],
+    product_inventory: [{ id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: null, stock: 4, warehouse_id: 'w1' }],
+    stock_transfers: [],
+  });
+
+  const result = await reconcileMissingOpeningBalanceTransfers(supabase as any, { userId: 'u1' });
+
+  assert.equal(result.inserted, 1);
+  assert.equal(supabase.getTable('stock_transfers').length, 1);
+  assert.equal(supabase.getTable('stock_transfers')[0].transfer_type, 'opening_balance');
+  assert.equal(supabase.getTable('stock_transfers')[0].to_shelf_id, 's1');
+
+  const second = await reconcileMissingOpeningBalanceTransfers(supabase as any, { userId: 'u1' });
+  assert.equal(second.inserted, 0);
+  assert.equal(supabase.getTable('stock_transfers').length, 1);
 });
 
 runTest('transfer between shelves keeps total stock stable and tracks each shelf separately', async () => {

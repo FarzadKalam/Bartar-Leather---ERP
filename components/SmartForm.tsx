@@ -16,9 +16,11 @@ import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWork
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
 import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
 import { findDuplicateUniqueFields } from '../utils/fieldUniqueness';
+import { getErrorMessage } from '../utils/errorHandling';
 import ProductCatalogManager from './products/ProductCatalogManager';
 import { persistProductCatalogData } from '../utils/productCatalogPersistence';
 import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
+import { stripInternalFormFields } from '../utils/productCatalog';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -385,7 +387,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
         setLastAppliedParentProductId(String(data?.parent_product_id || '').trim() || null);
       }
     } catch (err: any) {
-      message.error('خطا: ' + err.message);
+      message.error('خطا: ' + getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -666,6 +668,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
       if (values?.__skipBomConfirm !== undefined) {
         delete values.__skipBomConfirm;
       }
+      if (module.fields?.some((field: any) => field.type === FieldType.TAGS) && values?.tags !== undefined) {
+        delete values.tags;
+      }
 
       if (module.id === 'products' && values.auto_name_enabled) {
         const nextName = buildAutoProductName(values);
@@ -734,8 +739,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
         return;
       }
 
+      const sanitizedValues = stripInternalFormFields(values);
+      const persistenceValues = module.id === 'products' ? values : sanitizedValues;
+
       if (onSave) {
-        await onSave(values, { productInventory: productInventoryRows });
+        await onSave(persistenceValues, { productInventory: productInventoryRows });
       } else {
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || null;
@@ -747,10 +755,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
               recordId,
               previousRecord: initialRecord,
               userId,
-              values,
+              values: persistenceValues,
             });
           } else {
-            await supabase.from(module.table).update(values).eq('id', recordId);
+            await supabase.from(module.table).update(sanitizedValues).eq('id', recordId);
           }
 
           if (module.id === 'invoices' || module.id === 'purchase_invoices') {
@@ -758,27 +766,27 @@ const SmartForm: React.FC<SmartFormProps> = ({
               supabase: supabase as any,
               moduleId: module.id,
               recordId,
-              previousStatus: initialRecord?.status ?? null,
-              nextStatus: values?.status ?? initialRecord?.status ?? null,
-              invoiceItems: values?.invoiceItems ?? initialRecord?.invoiceItems ?? [],
-              userId,
-            });
-            if (module.id === 'invoices') {
-              await syncCustomerLevelsByInvoiceCustomers({
-                supabase: supabase as any,
-                customerIds: [initialRecord?.customer_id, values?.customer_id],
-              });
-            }
-          }
+               previousStatus: initialRecord?.status ?? null,
+               nextStatus: sanitizedValues?.status ?? initialRecord?.status ?? null,
+               invoiceItems: sanitizedValues?.invoiceItems ?? initialRecord?.invoiceItems ?? [],
+               userId,
+             });
+             if (module.id === 'invoices') {
+               await syncCustomerLevelsByInvoiceCustomers({
+                 supabase: supabase as any,
+                 customerIds: [initialRecord?.customer_id, sanitizedValues?.customer_id],
+               });
+             }
+           }
 
           const changes: any[] = [];
           const compareKeys = new Set<string>(
-            [...Object.keys(values || {}), ...Object.keys(initialRecord || {})]
+            [...Object.keys(sanitizedValues || {}), ...Object.keys(initialRecord || {})]
               .filter((key) => !String(key).startsWith('__'))
           );
           compareKeys.forEach((key) => {
             const before = initialRecord?.[key];
-            const after = values?.[key];
+            const after = sanitizedValues?.[key];
             const beforeStr = JSON.stringify(before ?? null);
             const afterStr = JSON.stringify(after ?? null);
             if (beforeStr !== afterStr) {
@@ -792,10 +800,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 old_value: before ?? null,
                 new_value: after ?? null,
                 user_id: userId,
-                record_title: values?.name || values?.title || values?.system_code || null,
-              });
-            }
-          });
+                 record_title: sanitizedValues?.name || sanitizedValues?.title || sanitizedValues?.system_code || null,
+               });
+             }
+           });
 
           if (changes.length > 0) {
             try {
@@ -811,7 +819,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
             const persisted = await persistProductCatalogData({
               supabase: supabase as any,
               userId,
-              values,
+              values: persistenceValues,
             });
             const { data: insertedProduct, error: insertedError } = await supabase
               .from(module.table)
@@ -847,21 +855,21 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 moduleId: module.id,
                 recordId: inserted.id,
                 previousStatus: null,
-                nextStatus: values?.status ?? null,
-                invoiceItems: values?.invoiceItems ?? [],
+                nextStatus: sanitizedValues?.status ?? null,
+                invoiceItems: sanitizedValues?.invoiceItems ?? [],
                 userId,
               });
               if (module.id === 'invoices') {
                 await syncCustomerLevelsByInvoiceCustomers({
                   supabase: supabase as any,
-                  customerIds: [values?.customer_id],
+                  customerIds: [sanitizedValues?.customer_id],
                 });
               }
             }
             if (module.id === 'production_orders') {
               const postPayload: any = {};
-              if (values?.grid_materials !== undefined) postPayload.grid_materials = values.grid_materials;
-              if (values?.production_stages_draft !== undefined) postPayload.production_stages_draft = values.production_stages_draft;
+              if (sanitizedValues?.grid_materials !== undefined) postPayload.grid_materials = sanitizedValues.grid_materials;
+              if (sanitizedValues?.production_stages_draft !== undefined) postPayload.production_stages_draft = sanitizedValues.production_stages_draft;
               if (Object.keys(postPayload).length > 0) {
                 await supabase.from(module.table).update(postPayload).eq('id', inserted.id);
               }
@@ -869,13 +877,13 @@ const SmartForm: React.FC<SmartFormProps> = ({
             try {
               const { error } = await supabase.from('changelogs').insert([
                 {
-                  module_id: module.id,
-                  record_id: inserted.id,
-                  action: 'create',
-                  user_id: userId,
-                  record_title: values?.name || values?.title || values?.system_code || null,
-                },
-              ]);
+                   module_id: module.id,
+                   record_id: inserted.id,
+                   action: 'create',
+                   user_id: userId,
+                   record_title: sanitizedValues?.name || sanitizedValues?.title || sanitizedValues?.system_code || null,
+                 },
+               ]);
               if (error) throw error;
             } catch (err) {
               console.warn('Changelog insert failed:', err);
@@ -886,7 +894,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
         message.success('ثبت شد');
         onCancel();
       }
-    } catch (err: any) { message.error(err.message); } finally { setLoading(false); }
+    } catch (err: any) { message.error(getErrorMessage(err)); } finally { setLoading(false); }
   };
 
   const handleValuesChange = (changedValues: any, allValues: any) => {

@@ -18,6 +18,13 @@ import { buildProductFilters, runProductsQuery } from './editableTable/productio
 import { MODULES } from '../moduleRegistry';
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
 import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
+import {
+  buildInventoryDeltasFromMovement,
+  buildStockTransferPayloadFromMovement,
+  normalizeManualStockMovement,
+} from '../utils/manualStockMovements';
+import { mapStockTransferRowToEditorRow } from '../utils/stockTransferHelpers';
+import { syncOpeningBalanceTransfersForInventoryRows } from '../utils/productOpeningInventory';
 
 const { Text } = Typography;
 
@@ -341,7 +348,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
           const { data: rows, error } = await supabase
             .from('stock_transfers')
-            .select('id, transfer_type, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at')
+            .select('id, transfer_type, delivered_qty, required_qty, invoice_id, purchase_invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id,bundle_number)')
             .eq('product_id', recordId)
             .order('created_at', { ascending: true });
           if (error) throw error;
@@ -358,33 +365,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
             userMap = new Map((profiles || []).map((item: any) => [String(item.id), item.full_name || String(item.id)]));
           }
 
-          const mappedRows = (rows || []).map((row: any, index: number) => {
-            const source = String(row?.transfer_type || '').trim() || 'inventory_count';
-            const fromShelf = row?.from_shelf_id ? String(row.from_shelf_id) : null;
-            const toShelf = row?.to_shelf_id ? String(row.to_shelf_id) : null;
-            const voucherType = fromShelf && toShelf ? 'transfer' : toShelf ? 'incoming' : 'outgoing';
-            const creatorId = row?.sender_id || row?.receiver_id || null;
-            const autoSource = ['sales_invoice', 'purchase_invoice', 'production'].includes(source);
-            const isPurchaseSource = source === 'purchase_invoice';
-            return {
-              id: row.id,
-              key: row.id || `move_${index}`,
-              voucher_type: voucherType,
-              source,
-              main_unit: mainUnit,
-              main_quantity: Math.abs(parseFloat(row?.delivered_qty) || 0),
-              sub_unit: subUnit,
-              sub_quantity: Math.abs(parseFloat(row?.required_qty) || 0),
-              from_shelf_id: fromShelf,
-              to_shelf_id: toShelf,
-              invoice_id: isPurchaseSource ? null : (row?.invoice_id || null),
-              purchase_invoice_id: isPurchaseSource ? (row?.invoice_id || null) : null,
-              production_order_id: row?.production_order_id || null,
-              created_by_name: creatorId ? (userMap.get(String(creatorId)) || String(creatorId)) : '-',
-              created_at: row?.created_at || null,
-              _readonly: autoSource || !!row?.invoice_id || !!row?.production_order_id,
-            };
-          });
+          const mappedRows = (rows || []).map((row: any, index: number) => (
+            mapStockTransferRowToEditorRow(row, {
+              mainUnit,
+              subUnit,
+              userMap,
+              keyPrefix: 'move',
+              index,
+            })
+          ));
           setData(mappedRows);
           return;
         }
@@ -868,26 +857,20 @@ const EditableTable: React.FC<EditableTableProps> = ({
         const allowedManualSources = new Set(['opening_balance', 'inventory_count', 'waste']);
         const toQty = (value: any) => Math.abs(parseFloat(value) || 0);
 
-        const buildDeltas = (rows: any[], multiplier = 1) => {
-          const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
-          rows.forEach((row: any) => {
-            const voucherType = String(row?.voucher_type || '');
-            const qty = toQty(row?.main_quantity);
-            if (!qty) return;
-            const fromShelfId = row?.from_shelf_id ? String(row.from_shelf_id) : null;
-            const toShelfId = row?.to_shelf_id ? String(row.to_shelf_id) : null;
-            const mainUnit = row?.main_unit ? String(row.main_unit) : (currentProductUnits.mainUnit || null);
-            if (voucherType === 'incoming' && toShelfId) {
-              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier, unit: mainUnit });
-            } else if (voucherType === 'outgoing' && fromShelfId) {
-              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier, unit: mainUnit });
-            } else if (voucherType === 'transfer' && fromShelfId && toShelfId) {
-              deltas.push({ productId: recordId, shelfId: fromShelfId, delta: -qty * multiplier, unit: mainUnit });
-              deltas.push({ productId: recordId, shelfId: toShelfId, delta: qty * multiplier, unit: mainUnit });
-            }
-          });
-          return deltas;
-        };
+        const normalizeManualRow = (row: any) => normalizeManualStockMovement({
+          productId: recordId,
+          transferType: row?.source,
+          voucherType: row?.voucher_type,
+          qtyMain: row?.main_quantity,
+          qtySub: row?.sub_quantity,
+          fromShelfId: row?.from_shelf_id ? String(row.from_shelf_id) : null,
+          toShelfId: row?.to_shelf_id ? String(row.to_shelf_id) : null,
+          mainUnit: row?.main_unit ? String(row.main_unit) : (currentProductUnits.mainUnit || null),
+          bundleId: row?.bundle_id ? String(row.bundle_id) : null,
+        }, { requireProductId: true });
+
+        const buildDeltas = (rows: any[], multiplier = 1) =>
+          rows.flatMap((row: any) => buildInventoryDeltasFromMovement(normalizeManualRow(row), multiplier));
 
         editableRows.forEach((row: any) => {
           const voucherType = String(row?.voucher_type || '');
@@ -916,16 +899,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
         const payload = editableRows.map((row: any) => ({
           id: row?.id || undefined,
-          product_id: recordId,
-          transfer_type: row?.source || 'inventory_count',
-          delivered_qty: toQty(row?.main_quantity),
-          required_qty: toQty(row?.sub_quantity),
-          invoice_id: null,
-          production_order_id: null,
-          from_shelf_id: row?.from_shelf_id || null,
-          to_shelf_id: row?.to_shelf_id || null,
-          sender_id: currentUserId,
-          receiver_id: currentUserId,
+          ...buildStockTransferPayloadFromMovement(normalizeManualRow(row), { userId: currentUserId }),
         }));
 
         const oldManualIds = previousManualRows.map((row: any) => row?.id).filter(Boolean);
@@ -960,7 +934,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
         const { data: refreshedRows, error: rowsError } = await supabase
           .from('stock_transfers')
-          .select('id, transfer_type, delivered_qty, required_qty, invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at')
+          .select('id, transfer_type, delivered_qty, required_qty, invoice_id, purchase_invoice_id, production_order_id, from_shelf_id, to_shelf_id, sender_id, receiver_id, created_at, bundle_id, product_bundles:bundle_id(id,bundle_number)')
           .eq('product_id', recordId)
           .order('created_at', { ascending: true });
         if (rowsError) throw rowsError;
@@ -977,33 +951,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
           userMap = new Map((profiles || []).map((item: any) => [String(item.id), item.full_name || String(item.id)]));
         }
 
-        const mappedRows = (refreshedRows || []).map((row: any, index: number) => {
-          const source = String(row?.transfer_type || '').trim() || 'inventory_count';
-          const fromShelf = row?.from_shelf_id ? String(row.from_shelf_id) : null;
-          const toShelf = row?.to_shelf_id ? String(row.to_shelf_id) : null;
-          const voucherType = fromShelf && toShelf ? 'transfer' : toShelf ? 'incoming' : 'outgoing';
-          const creatorId = row?.sender_id || row?.receiver_id || null;
-          const autoSource = ['sales_invoice', 'purchase_invoice', 'production'].includes(source);
-          const isPurchaseSource = source === 'purchase_invoice';
-          return {
-            id: row.id,
-            key: row.id || `move_${index}`,
-            voucher_type: voucherType,
-            source,
-            main_unit: mainUnit,
-            main_quantity: Math.abs(parseFloat(row?.delivered_qty) || 0),
-            sub_unit: subUnit,
-            sub_quantity: Math.abs(parseFloat(row?.required_qty) || 0),
-            from_shelf_id: fromShelf,
-            to_shelf_id: toShelf,
-            invoice_id: isPurchaseSource ? null : (row?.invoice_id || null),
-            purchase_invoice_id: isPurchaseSource ? (row?.invoice_id || null) : null,
-            production_order_id: row?.production_order_id || null,
-            created_by_name: creatorId ? (userMap.get(String(creatorId)) || String(creatorId)) : '-',
-            created_at: row?.created_at || null,
-            _readonly: autoSource || !!row?.invoice_id || !!row?.production_order_id,
-          };
-        });
+        const mappedRows = (refreshedRows || []).map((row: any, index: number) => (
+          mapStockTransferRowToEditorRow(row, {
+            mainUnit,
+            subUnit,
+            userMap,
+            keyPrefix: 'move',
+            index,
+          })
+        ));
 
         const oldValue = data.map(({ key, ...rest }) => rest);
         const newValue = mappedRows.map(({ key, ...rest }) => rest);
@@ -1069,6 +1025,14 @@ const EditableTable: React.FC<EditableTableProps> = ({
         const newKeys = new Set(
           payload.map((row: any) => `${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`)
         );
+        const removedRows = data
+          .filter((row: any) => !newKeys.has(`${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`))
+          .map((row: any) => ({
+            product_id: row.product_id,
+            shelf_id: row.shelf_id,
+            bundle_id: row.bundle_id ?? null,
+            stock: row.stock,
+          }));
         const removedIds = data
           .filter((row: any) => !newKeys.has(`${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`) && row.id)
           .map((row: any) => row.id);
@@ -1090,6 +1054,15 @@ const EditableTable: React.FC<EditableTableProps> = ({
           if (upsertError) throw upsertError;
           savedRows = saved || [];
         }
+
+        const { data: authData } = await supabase.auth.getUser();
+        const currentUserId = authData?.user?.id || null;
+        await syncOpeningBalanceTransfersForInventoryRows({
+          supabase: supabase as any,
+          inventoryRows: payload,
+          removedRows,
+          userId: currentUserId,
+        });
 
         if (isProductInventory) {
           await updateProductStock(supabase as any, recordId);

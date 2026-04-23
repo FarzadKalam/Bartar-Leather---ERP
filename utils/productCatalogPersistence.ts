@@ -61,16 +61,20 @@ const upsertAttributeOptions = async (
   const normalizedOptions = normalizeAttributeOptions(options);
   const { data: existingRows, error: existingError } = await supabase
     .from('product_attribute_options')
-    .select('id')
+    .select('id, value')
     .eq('attribute_id', attributeId);
   if (existingError) throw existingError;
 
   const existingIds = new Set((existingRows || []).map((row: any) => String(row.id)));
+  const existingIdByValue = new Map(
+    (existingRows || []).map((row: any) => [String(row.value), String(row.id)] as const)
+  );
   const keptIds = new Set<string>();
   const payload = normalizedOptions.map((option) => {
-    if (option.id) keptIds.add(String(option.id));
+    const existingId = option.id ? String(option.id) : existingIdByValue.get(option.value);
+    if (existingId) keptIds.add(existingId);
     return {
-      id: option.id,
+      ...(existingId ? { id: existingId } : {}),
       attribute_id: attributeId,
       label: option.label,
       value: option.value,
@@ -82,7 +86,7 @@ const upsertAttributeOptions = async (
   if (payload.length > 0) {
     const { error } = await supabase
       .from('product_attribute_options')
-      .upsert(payload, { onConflict: 'id' });
+      .upsert(payload, { onConflict: 'attribute_id,value' });
     if (error) throw error;
   }
 
@@ -102,7 +106,7 @@ const upsertAttributeRows = async (
 ) => {
   if (!attributes.length) return [];
   const payload = attributes.map((attribute) => ({
-    id: attribute.id,
+    ...(attribute.id ? { id: attribute.id } : {}),
     scope_type: attribute.scope_type,
     parent_product_id: attribute.parent_product_id ?? null,
     key: attribute.key,
@@ -320,7 +324,7 @@ export const persistProductCatalogData = async ({
     });
 
     const activeAttributes = normalizedParentAttributes.filter((attribute) => attribute.is_active !== false);
-    for (const rawVariation of variationsRaw as ProductVariationRecord[]) {
+    const preparedVariations = (variationsRaw as ProductVariationRecord[]).map((rawVariation) => {
       const variantValues = rawVariation?.variant_values && typeof rawVariation.variant_values === 'object'
         ? rawVariation.variant_values
         : {};
@@ -357,32 +361,88 @@ export const persistProductCatalogData = async ({
       const canonicalIdentity = buildCanonicalVariantIdentity(payload, activeAttributes);
       payload.variant_values = canonicalIdentity.variantValues;
       payload.variant_signature = canonicalIdentity.variantSignature || buildVariantSignature(variantValues);
+      return {
+        existingId: rawVariation?.id ? String(rawVariation.id).trim() : null,
+        payload,
+        openingStock,
+        openingShelfId,
+      };
+    });
 
-      if (rawVariation?.id) {
-        const { error } = await supabase
-          .from('products')
-          .update(payload)
-          .eq('id', rawVariation.id);
-        if (error) throw error;
-      } else {
-        const { data: insertedVariation, error } = await supabase
-          .from('products')
-          .insert(payload)
-          .select('id, main_unit, sub_unit')
-          .single();
-        if (error) throw error;
-        const insertedVariationId = String(insertedVariation?.id || '').trim();
-        if (insertedVariationId && openingStock && openingStock > 0 && openingShelfId) {
-          await persistProductOpeningInventory({
-            supabase,
-            productId: insertedVariationId,
-            productMainUnit: (insertedVariation as any)?.main_unit ?? payload?.main_unit ?? null,
-            productSubUnit: (insertedVariation as any)?.sub_unit ?? payload?.sub_unit ?? null,
-            rows: [{ shelf_id: openingShelfId, stock: openingStock }],
-            userId: userId ?? null,
-          });
-        }
+    const { data: existingVariantRows, error: existingVariantsError } = await supabase
+      .from('products')
+      .select('id')
+      .eq('catalog_role', 'variant')
+      .eq('parent_product_id', productId);
+    if (existingVariantsError) throw existingVariantsError;
+
+    const upsertPayload = preparedVariations
+      .filter((item) => item.existingId)
+      .map((item) => ({
+        id: item.existingId,
+        ...item.payload,
+      }));
+    if (upsertPayload.length > 0) {
+      const { error } = await supabase
+        .from('products')
+        .upsert(upsertPayload, { onConflict: 'id' });
+      if (error) throw error;
+    }
+
+    const newVariationPayloads = preparedVariations.filter((item) => !item.existingId);
+    const insertedVariationsByIndex = new Map<number, any>();
+    if (newVariationPayloads.length > 0) {
+      const { data: insertedVariations, error } = await supabase
+        .from('products')
+        .insert(newVariationPayloads.map((item) => item.payload))
+        .select('id, main_unit, sub_unit');
+      if (error) throw error;
+      if ((insertedVariations || []).length !== newVariationPayloads.length) {
+        throw new Error('تعداد متغیرهای درج‌شده با داده‌های ارسالی همخوانی ندارد.');
       }
+      (insertedVariations || []).forEach((row: any, index: number) => {
+        insertedVariationsByIndex.set(index, row);
+      });
+    }
+
+    const keptVariantIds = new Set<string>();
+    preparedVariations.forEach((item) => {
+      if (item.existingId) keptVariantIds.add(item.existingId);
+    });
+    insertedVariationsByIndex.forEach((row: any) => {
+      const insertedId = String(row?.id || '').trim();
+      if (insertedId) keptVariantIds.add(insertedId);
+    });
+
+    const deleteVariantIds = (existingVariantRows || [])
+      .map((row: any) => String(row?.id || '').trim())
+      .filter((id) => id && !keptVariantIds.has(id));
+    if (deleteVariantIds.length > 0) {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .in('id', deleteVariantIds);
+      if (error) throw error;
+    }
+
+    const openingInventoryJobs = newVariationPayloads.map((item, index) => {
+      const insertedVariation = insertedVariationsByIndex.get(index);
+      const insertedVariationId = String(insertedVariation?.id || '').trim();
+      if (!insertedVariationId || !item.openingStock || item.openingStock <= 0 || !item.openingShelfId) {
+        return null;
+      }
+      return persistProductOpeningInventory({
+        supabase,
+        productId: insertedVariationId,
+        productMainUnit: insertedVariation?.main_unit ?? item.payload?.main_unit ?? null,
+        productSubUnit: insertedVariation?.sub_unit ?? item.payload?.sub_unit ?? null,
+        rows: [{ shelf_id: item.openingShelfId, stock: item.openingStock }],
+        userId: userId ?? null,
+      });
+    }).filter(Boolean) as Promise<any>[];
+
+    if (openingInventoryJobs.length > 0) {
+      await Promise.all(openingInventoryJobs);
     }
   }
 

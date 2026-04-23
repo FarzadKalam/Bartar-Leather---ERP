@@ -25,6 +25,7 @@ import { convertArea } from '../utils/unitConversions';
 import QrScanPopover from '../components/QrScanPopover';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import { getRecordTitle } from '../utils/recordTitle';
+import { getErrorMessage } from '../utils/errorHandling';
 import {
   applyProductionMoves,
   rollbackProductionMoves,
@@ -2062,7 +2063,7 @@ const ModuleShow: React.FC = () => {
       msg.success('ذخیره شد');
       setTimeout(() => setEditingFields(prev => ({ ...prev, [key]: false })), 100);
     } catch (error: any) {
-      const rawMessage = String(error?.message || '');
+      const rawMessage = getErrorMessage(error, '');
       const isMissingCustomerStatusColumn =
         moduleId === 'customers' &&
         key === 'customer_status' &&
@@ -2862,7 +2863,7 @@ const ModuleShow: React.FC = () => {
       );
       setIsCreateProductOpen(false);
     } catch (e: any) {
-      msg.error(e.message || 'خطا در ایجاد محصول');
+      msg.error(getErrorMessage(e, 'خطا در ایجاد محصول'));
     } finally {
       setStatusLoading(false);
     }

@@ -48,6 +48,10 @@ Optional switches:
 - `-SkipUpload` if the archive is already on the server and you only want to activate it
 - `-SkipHostKeyScan` if the server host key is already present in `~/.ssh/known_hosts`
 
+Notes:
+- `deploy:server:quick` still runs `npm run build`; it only skips `npm ci` and typecheck. Your local `node_modules` must already contain a healthy `vite` install.
+- If you already have a fresh `dist/` and only want to send it, use `deploy:server:uploadonly`.
+
 ## GitHub Secrets (Required)
 
 In your GitHub repo: Settings -> Secrets and variables -> Actions -> Repository secrets:

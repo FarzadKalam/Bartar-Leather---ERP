@@ -96,6 +96,17 @@ export const stockTransfersConfig: ModuleDefinition = {
       relationConfig: { targetModule: 'invoices', targetField: 'name' },
     },
     {
+      key: 'purchase_invoice_id',
+      labels: { fa: 'فاکتور خرید مرتبط', en: 'Related Purchase Invoice' },
+      type: FieldType.RELATION,
+      location: FieldLocation.BLOCK,
+      blockId: 'general',
+      order: 7.5,
+      nature: FieldNature.STANDARD,
+      isTableColumn: true,
+      relationConfig: { targetModule: 'purchase_invoices', targetField: 'name' },
+    },
+    {
       key: 'production_order_id',
       labels: { fa: 'سفارش تولید مرتبط', en: 'Related Production Order' },
       type: FieldType.RELATION,
@@ -149,4 +160,3 @@ export const stockTransfersConfig: ModuleDefinition = {
   ],
   relatedTabs: [],
 };
-

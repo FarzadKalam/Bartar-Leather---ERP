@@ -1,4 +1,4 @@
-﻿import * as assert from 'node:assert/strict';
+import * as assert from 'node:assert/strict';
 import {
   buildInventoryDeltasFromMovement,
   buildStockTransferPayloadFromMovement,
@@ -65,6 +65,7 @@ runTest('payload builder keeps stock_transfers structure consistent', () => {
     delivered_qty: 2,
     required_qty: 200,
     invoice_id: null,
+    purchase_invoice_id: null,
     production_order_id: null,
     from_shelf_id: null,
     to_shelf_id: 's1',

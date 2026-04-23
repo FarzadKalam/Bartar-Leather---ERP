@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { applyInventoryDeltas, syncMultipleProductsStock } from './inventoryTransactions';
+import { buildStockTransferPayload } from './stockTransferHelpers';
 
 const toNumber = (value: any) => {
   const parsed = parseFloat(value);
@@ -43,11 +44,16 @@ export const applyInvoiceFinalizationInventory = async ({
 
   const { data: existingTransfers, error: existingError } = await supabase
     .from('stock_transfers')
-    .select('id')
-    .eq('invoice_id', recordId)
-    .limit(1);
+    .select('id, invoice_id, purchase_invoice_id')
+    .eq('transfer_type', transferType);
   if (existingError) throw existingError;
-  if ((existingTransfers || []).length > 0) {
+  const alreadyApplied = (existingTransfers || []).some((row: any) => {
+    if (direction === 'purchase') {
+      return row?.purchase_invoice_id === recordId || row?.invoice_id === recordId;
+    }
+    return row?.invoice_id === recordId;
+  });
+  if (alreadyApplied) {
     return { applied: false, skipped: 'already_applied' as const };
   }
 
@@ -76,34 +82,30 @@ export const applyInvoiceFinalizationInventory = async ({
 
     if (direction === 'purchase') {
       deltas.push({ productId, shelfId, delta: qty, unit });
-      transfersPayload.push({
-        transfer_type: transferType,
-        product_id: productId,
-        delivered_qty: qty,
-        required_qty: qty,
-        invoice_id: recordId,
-        production_order_id: null,
-        from_shelf_id: null,
-        to_shelf_id: shelfId,
-        sender_id: userId || null,
-        receiver_id: userId || null,
-      });
+      transfersPayload.push(buildStockTransferPayload({
+        transferType,
+        productId,
+        deliveredQty: qty,
+        requiredQty: qty,
+        purchaseInvoiceId: recordId,
+        fromShelfId: null,
+        toShelfId: shelfId,
+        userId: userId || null,
+      }));
       return;
     }
 
     deltas.push({ productId, shelfId, delta: -qty, unit });
-    transfersPayload.push({
-      transfer_type: transferType,
-      product_id: productId,
-      delivered_qty: qty,
-      required_qty: qty,
-      invoice_id: recordId,
-      production_order_id: null,
-      from_shelf_id: shelfId,
-      to_shelf_id: null,
-      sender_id: userId || null,
-      receiver_id: userId || null,
-    });
+    transfersPayload.push(buildStockTransferPayload({
+      transferType,
+      productId,
+      deliveredQty: qty,
+      requiredQty: qty,
+      invoiceId: recordId,
+      fromShelfId: shelfId,
+      toShelfId: null,
+      userId: userId || null,
+    }));
   });
 
   if (deltas.length === 0) return { applied: false };

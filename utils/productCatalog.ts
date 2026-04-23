@@ -78,6 +78,17 @@ export const PRODUCT_CATALOG_FIELD_KEYS = new Set<string>([
   '__product_variations',
 ]);
 
+const PRODUCT_TRANSIENT_FORM_KEYS = new Set<string>([
+  '__requireInventoryShelf',
+  '__skipBomConfirm',
+  'opening_stock',
+  'opening_shelf_id',
+  'bundle_id',
+  'product_inventory',
+  'product_stock_movements',
+  'tags',
+]);
+
 const PRODUCT_ATTRIBUTE_EXCLUDED_SOURCE_KEYS = new Set<string>([
   'id',
   'name',
@@ -414,14 +425,48 @@ export const stripProductCatalogFields = (values: Record<string, any>) => {
   return nextValues;
 };
 
+export const stripInternalFormFields = (values: Record<string, any>) => {
+  const nextValues = { ...(values || {}) };
+  Object.keys(nextValues).forEach((key) => {
+    const normalizedKey = String(key || '').trim();
+    if (normalizedKey.startsWith('__') || PRODUCT_TRANSIENT_FORM_KEYS.has(normalizedKey)) {
+      delete nextValues[key];
+    }
+  });
+  return nextValues;
+};
+
 export const normalizeCatalogProductPayload = (values: Record<string, any>) => {
-  const productPayload = stripProductCatalogFields(values);
+  const productPayload = stripInternalFormFields(stripProductCatalogFields(values));
+  if (!Array.isArray(productPayload.grid_materials)) {
+    productPayload.grid_materials = [];
+  }
+  if (!Array.isArray(productPayload.leather_colors)) {
+    productPayload.leather_colors = [];
+  }
+  if (!Array.isArray(productPayload.leather_effect)) {
+    productPayload.leather_effect = [];
+  }
+  if (!Array.isArray(productPayload.fitting_colors)) {
+    productPayload.fitting_colors = [];
+  }
+  if (productPayload.sub_stock === null || productPayload.sub_stock === undefined || productPayload.sub_stock === '') {
+    productPayload.sub_stock = 0;
+  }
   if (!productPayload.catalog_role) {
     productPayload.catalog_role = 'standalone';
+  }
+  if (productPayload.site_sync_enabled === null || productPayload.site_sync_enabled === undefined) {
+    productPayload.site_sync_enabled = false;
+  }
+  if (!productPayload.site_sync_status) {
+    productPayload.site_sync_status = 'idle';
   }
   if (productPayload.catalog_role !== 'variant') {
     productPayload.parent_product_id = null;
     productPayload.variant_signature = null;
+    productPayload.variant_values = {};
+  } else if (!productPayload.variant_values || typeof productPayload.variant_values !== 'object') {
     productPayload.variant_values = {};
   }
   return productPayload;

@@ -114,6 +114,50 @@ function Get-PlatformCommand {
     return $Primary
 }
 
+function Test-NodePackageBinary {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PackageName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$RelativeBinaryPath
+    )
+
+    $packagePath = Join-Path $ProjectRoot "node_modules\$PackageName"
+    if (-not (Test-Path $packagePath)) {
+        return $false
+    }
+
+    $binaryPath = Join-Path $packagePath $RelativeBinaryPath
+    return (Test-Path $binaryPath)
+}
+
+function Assert-LocalBuildPrerequisites {
+    param(
+        [switch]$NeedsTypecheck,
+        [switch]$NeedsBuild
+    )
+
+    if (-not (Test-Path (Join-Path $ProjectRoot "node_modules"))) {
+        throw "node_modules was not found. Run npm ci first or remove -SkipInstall."
+    }
+
+    $missingPackages = New-Object System.Collections.Generic.List[string]
+
+    if ($NeedsTypecheck -and -not (Test-NodePackageBinary -PackageName "typescript" -RelativeBinaryPath "bin/tsc")) {
+        $missingPackages.Add("typescript")
+    }
+
+    if ($NeedsBuild -and -not (Test-NodePackageBinary -PackageName "vite" -RelativeBinaryPath "bin/vite.js")) {
+        $missingPackages.Add("vite")
+    }
+
+    if ($missingPackages.Count -gt 0) {
+        $packages = $missingPackages -join ", "
+        throw "Local dependencies are missing or incomplete for: $packages. Run npm ci first or remove -SkipInstall."
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($ServerHost)) {
     throw "ServerHost is required. Pass -ServerHost or set SERVER_HOST."
 }
@@ -194,6 +238,10 @@ $remoteCommand = @(
 
 Push-Location $ProjectRoot
 try {
+    if ($SkipInstall -and ((-not $SkipTypecheck) -or (-not $SkipBuild))) {
+        Assert-LocalBuildPrerequisites -NeedsTypecheck:(-not $SkipTypecheck) -NeedsBuild:(-not $SkipBuild)
+    }
+
     if (-not $SkipInstall) {
         Write-Step "Installing dependencies with npm ci"
         Invoke-External -FilePath $npmCommand -Arguments @("ci")

@@ -16,6 +16,13 @@ type ProductUnitMeta = {
   name: string | null;
 };
 
+type ProductCatalogMeta = {
+  main_unit: string | null;
+  sub_unit: string | null;
+  catalog_role: string | null;
+  parent_product_id: string | null;
+};
+
 export type UnitMismatchConfirmPayload = {
   productId: string;
   productName: string;
@@ -250,20 +257,40 @@ export const applyInventoryDeltas = async (
 };
 
 export const syncSingleProductStock = async (supabase: SupabaseClient, productId: string) => {
-  const { data: rows, error } = await supabase
-    .from('product_inventory')
-    .select('stock')
-    .eq('product_id', productId);
-  if (error) throw error;
-
-  const totalStock = (rows || []).reduce((sum: number, row: any) => sum + toNumber(row?.stock), 0);
-  const { data: productRow } = await supabase
+  const { data: productRow, error: productError } = await supabase
     .from('products')
-    .select('main_unit, sub_unit')
+    .select('main_unit, sub_unit, catalog_role, parent_product_id')
     .eq('id', productId)
     .maybeSingle();
-  const mainUnit = productRow?.main_unit as UnitValue | undefined;
-  const subUnit = productRow?.sub_unit as UnitValue | undefined;
+  if (productError) throw productError;
+
+  const catalogMeta: ProductCatalogMeta = {
+    main_unit: productRow?.main_unit ? String(productRow.main_unit) : null,
+    sub_unit: productRow?.sub_unit ? String(productRow.sub_unit) : null,
+    catalog_role: productRow?.catalog_role ? String(productRow.catalog_role) : null,
+    parent_product_id: productRow?.parent_product_id ? String(productRow.parent_product_id) : null,
+  };
+
+  let totalStock = 0;
+  if (catalogMeta.catalog_role === 'parent') {
+    const { data: variantRows, error: variantError } = await supabase
+      .from('products')
+      .select('stock')
+      .eq('catalog_role', 'variant')
+      .eq('parent_product_id', productId);
+    if (variantError) throw variantError;
+    totalStock = (variantRows || []).reduce((sum: number, row: any) => sum + toNumber(row?.stock), 0);
+  } else {
+    const { data: rows, error } = await supabase
+      .from('product_inventory')
+      .select('stock')
+      .eq('product_id', productId);
+    if (error) throw error;
+    totalStock = (rows || []).reduce((sum: number, row: any) => sum + toNumber(row?.stock), 0);
+  }
+
+  const mainUnit = catalogMeta.main_unit as UnitValue | undefined;
+  const subUnit = catalogMeta.sub_unit as UnitValue | undefined;
   const subStock = mainUnit && subUnit ? convertArea(totalStock, mainUnit, subUnit) : 0;
 
   const { error: updateError } = await supabase
@@ -271,6 +298,10 @@ export const syncSingleProductStock = async (supabase: SupabaseClient, productId
     .update({ stock: totalStock, sub_stock: subStock })
     .eq('id', productId);
   if (updateError) throw updateError;
+
+  if (catalogMeta.parent_product_id) {
+    await syncSingleProductStock(supabase, catalogMeta.parent_product_id);
+  }
 };
 
 export const syncMultipleProductsStock = async (supabase: SupabaseClient, productIds: string[]) => {

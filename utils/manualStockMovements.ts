@@ -1,3 +1,5 @@
+import { buildStockTransferPayload } from './stockTransferHelpers';
+
 export const ALLOWED_MANUAL_STOCK_SOURCES = new Set(['opening_balance', 'inventory_count', 'waste']);
 
 export interface ManualStockMovement {
@@ -128,18 +130,19 @@ export const buildStockTransferPayloadFromMovement = (
   options?: {
     userId?: string | null;
     invoiceId?: string | null;
+    purchaseInvoiceId?: string | null;
     productionOrderId?: string | null;
   }
-) => ({
-  product_id: movement.productId,
-  transfer_type: movement.transferType,
-  delivered_qty: movement.qtyMain,
-  required_qty: movement.qtySub,
-  invoice_id: options?.invoiceId || null,
-  production_order_id: options?.productionOrderId || null,
-  from_shelf_id: movement.fromShelfId,
-  to_shelf_id: movement.toShelfId,
-  sender_id: options?.userId || null,
-  receiver_id: options?.userId || null,
-  bundle_id: movement.bundleId ?? null,
+) => buildStockTransferPayload({
+  productId: movement.productId,
+  transferType: movement.transferType,
+  deliveredQty: movement.qtyMain,
+  requiredQty: movement.qtySub,
+  invoiceId: options?.invoiceId || null,
+  purchaseInvoiceId: options?.purchaseInvoiceId || null,
+  productionOrderId: options?.productionOrderId || null,
+  fromShelfId: movement.fromShelfId,
+  toShelfId: movement.toShelfId,
+  userId: options?.userId || null,
+  bundleId: movement.bundleId ?? null,
 });

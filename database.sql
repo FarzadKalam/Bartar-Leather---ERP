@@ -232,6 +232,7 @@ CREATE TABLE public.stock_transfers (
   required_qty numeric,
   delivered_qty numeric,
   invoice_id uuid,
+  purchase_invoice_id uuid,
   production_order_id uuid,
   sender_id uuid REFERENCES public.profiles(id),
   receiver_id uuid REFERENCES public.profiles(id),
@@ -903,6 +904,7 @@ ALTER TABLE public.stock_transfers
   ADD COLUMN IF NOT EXISTS delivered_qty numeric,
   ADD COLUMN IF NOT EXISTS required_qty numeric,
   ADD COLUMN IF NOT EXISTS invoice_id uuid,
+  ADD COLUMN IF NOT EXISTS purchase_invoice_id uuid REFERENCES public.purchase_invoices(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS production_order_id uuid,
   ADD COLUMN IF NOT EXISTS from_shelf_id uuid REFERENCES public.shelves(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS to_shelf_id uuid REFERENCES public.shelves(id) ON DELETE SET NULL,
@@ -914,6 +916,8 @@ CREATE INDEX IF NOT EXISTS idx_stock_transfers_product_created_at
   ON public.stock_transfers(product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_invoice
   ON public.stock_transfers(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_stock_transfers_purchase_invoice
+  ON public.stock_transfers(purchase_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_production_order
   ON public.stock_transfers(production_order_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transfers_from_shelf
