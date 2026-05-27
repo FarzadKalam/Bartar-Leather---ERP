@@ -14,6 +14,7 @@ import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
 import ProductionStagesField from './ProductionStagesField';
 import RelatedRecordPopover from './RelatedRecordPopover';
+import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 
 interface SmartTableRendererProps {
   moduleConfig: ModuleDefinition | null | undefined;
@@ -276,7 +277,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
         const emptyDateCell = <span className="dir-ltr text-gray-500 font-mono text-[11px]">-</span>;
         
         if (field.type === FieldType.IMAGE) {
-            return <Avatar src={value} icon={<AppstoreOutlined />} shape="square" size="default" className="bg-gray-100 border border-gray-200" />;
+            return <Avatar src={normalizeStoragePublicUrl(value)} icon={<AppstoreOutlined />} shape="square" size="default" className="bg-gray-100 border border-gray-200" />;
         }
         if (field.type === FieldType.DATE && value) {
           const formatted = formatPersianDate(value, 'DATE');
@@ -468,7 +469,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
           return (
             <div className="flex items-center gap-1">
               {user.avatar_url ? (
-                <Avatar src={user.avatar_url} size="small" />
+                <Avatar src={normalizeStoragePublicUrl(user.avatar_url)} size="small" />
               ) : (
                 <Avatar icon={<UserOutlined />} size="small" />
               )}

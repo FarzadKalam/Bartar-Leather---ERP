@@ -20,6 +20,7 @@ import {
   isMissingRecordFilesError,
   setRecordFilesTableAvailability,
 } from '../utils/recordFilesAvailability';
+import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 
 export type RecordFileType = 'image' | 'video' | 'file';
 
@@ -136,7 +137,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
       id: String(row.id),
       module_id: moduleId,
       record_id: recordId,
-      file_url: String(row.image_url || ''),
+      file_url: normalizeStoragePublicUrl(String(row.image_url || '')) || '',
       file_type: 'image' as const,
       file_name: null,
       mime_type: null,
@@ -176,7 +177,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
           id: String(row.id),
           module_id: String(row.module_id || moduleId),
           record_id: String(row.record_id || recordId),
-          file_url: String(row.file_url || ''),
+          file_url: normalizeStoragePublicUrl(String(row.file_url || '')) || '',
           file_type: normalizeType(row.file_type, row.mime_type, row.file_url),
           file_name: row.file_name ? String(row.file_name) : null,
           mime_type: row.mime_type ? String(row.mime_type) : null,
@@ -220,7 +221,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
     const filePath = `record_files/${moduleId}/${recordId}/${storedFileName}`;
     const { error } = await supabase.storage.from('images').upload(filePath, file);
     if (error) throw error;
-    return supabase.storage.from('images').getPublicUrl(filePath).data.publicUrl;
+    return normalizeStoragePublicUrl(supabase.storage.from('images').getPublicUrl(filePath).data.publicUrl) || '';
   };
 
   const uploadFile = async (file: File, desiredName: string) => {
@@ -262,7 +263,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
             id: String(data.id),
             module_id: moduleId,
             record_id: recordId,
-            file_url: String(data.image_url || ''),
+            file_url: normalizeStoragePublicUrl(String(data.image_url || '')) || '',
             file_type: 'image',
             file_name: desiredName,
             mime_type: file.type || null,
@@ -282,7 +283,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
           {
             module_id: moduleId,
             record_id: recordId,
-            file_url: url,
+            file_url: normalizeStoragePublicUrl(url) || '',
             file_type: type,
             file_name: desiredName,
             mime_type: file.type || null,
@@ -299,7 +300,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
           id: String(data.id),
           module_id: String(data.module_id),
           record_id: String(data.record_id),
-          file_url: String(data.file_url),
+          file_url: normalizeStoragePublicUrl(String(data.file_url)) || '',
           file_type: normalizeType(data.file_type, data.mime_type, data.file_url),
           file_name: data.file_name ? String(data.file_name) : null,
           mime_type: data.mime_type ? String(data.mime_type) : null,
@@ -375,8 +376,12 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
 
       const nextItems = items.filter((it) => it.id !== fileId);
       setItems(nextItems);
-      if (target?.file_type === 'image' && target.file_url === mainImage) {
-        onMainImageChange?.(nextItems.find((it) => it.file_type === 'image')?.file_url || null);
+      if (
+        target?.file_type === 'image'
+        && (normalizeStoragePublicUrl(target.file_url) || target.file_url) === (normalizeStoragePublicUrl(mainImage) || mainImage)
+      ) {
+        const nextMainImage = nextItems.find((it) => it.file_type === 'image')?.file_url || null;
+        onMainImageChange?.(normalizeStoragePublicUrl(nextMainImage) || null);
       }
       msg.success('فایل حذف شد');
     } catch (error) {
@@ -419,7 +424,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   const downloadFile = (item: RecordFileItem) => {
     const fileLabel = getDisplayFileName(item);
     const link = document.createElement('a');
-    link.href = item.file_url;
+    link.href = normalizeStoragePublicUrl(item.file_url) || item.file_url;
     link.download = fileLabel;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
@@ -429,7 +434,9 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
   };
 
   const renderMediaCard = (item: RecordFileItem, index: number, fileType: 'image' | 'video', total: number) => {
-    const isMain = item.file_type === 'image' && mainImage === item.file_url;
+    const normalizedFileUrl = normalizeStoragePublicUrl(item.file_url) || item.file_url;
+    const normalizedMainImage = normalizeStoragePublicUrl(mainImage) || mainImage;
+    const isMain = item.file_type === 'image' && normalizedMainImage === normalizedFileUrl;
     const isHighlighted = highlightFileId && highlightFileId === item.id;
     const fileLabel = getDisplayFileName(item);
     return (
@@ -439,13 +446,13 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
       >
         <div className="h-40 overflow-hidden rounded">
           {item.file_type === 'video' ? (
-            <video src={item.file_url} controls className="w-full h-full object-cover rounded" preload="metadata" />
+            <video src={normalizedFileUrl} controls className="w-full h-full object-cover rounded" preload="metadata" />
           ) : (
             <Image
-              src={item.file_url}
+              src={normalizedFileUrl}
               className="w-full h-full object-cover rounded"
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              preview={{ src: item.file_url }}
+              preview={{ src: normalizedFileUrl }}
             />
           )}
         </div>
@@ -457,7 +464,7 @@ const RecordFilesManager: React.FC<RecordFilesManagerProps> = ({
 
         <div className="absolute bottom-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
           {item.file_type === 'image' && (
-            <Button size="small" icon={<StarOutlined />} onClick={() => onMainImageChange?.(item.file_url)} disabled={!canEdit}>تصویر اصلی</Button>
+            <Button size="small" icon={<StarOutlined />} onClick={() => onMainImageChange?.(normalizedFileUrl)} disabled={!canEdit}>تصویر اصلی</Button>
           )}
           <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(item.id)} disabled={!canDeleteFiles}>حذف</Button>
         </div>

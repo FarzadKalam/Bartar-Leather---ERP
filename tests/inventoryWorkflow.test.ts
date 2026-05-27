@@ -194,6 +194,30 @@ runTest('opening inventory updates shelf stock, product stock, and transfer log'
   assert.equal(supabase.getTable('products')[0].stock, 5);
 });
 
+runTest('opening inventory keeps bundle id on inventory, bundle items, and transfer log', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'عدد', sub_unit: 'عدد', stock: 0, sub_stock: 0 }],
+    product_inventory: [],
+    stock_transfers: [],
+    bundle_items: [],
+  });
+
+  await persistProductOpeningInventory({
+    supabase: supabase as any,
+    productId: 'p1',
+    productMainUnit: 'عدد',
+    productSubUnit: 'عدد',
+    rows: [{ shelf_id: 's1', bundle_id: 'bundle-1', stock: 2 }],
+    userId: 'u1',
+  });
+
+  assert.equal(supabase.getTable('product_inventory')[0].bundle_id, 'bundle-1');
+  assert.equal(supabase.getTable('bundle_items')[0].bundle_id, 'bundle-1');
+  assert.equal(supabase.getTable('bundle_items')[0].product_id, 'p1');
+  assert.equal(supabase.getTable('bundle_items')[0].quantity, 2);
+  assert.equal(supabase.getTable('stock_transfers')[0].bundle_id, 'bundle-1');
+});
+
 runTest('applyInventoryDeltas aggregates per product/shelf and blocks negative stock by default', async () => {
   const supabase = new MockSupabase({
     products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 4, sub_stock: 400 }],

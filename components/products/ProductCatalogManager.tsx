@@ -7,6 +7,7 @@ import SmartFieldRenderer from '../SmartFieldRenderer';
 import DynamicSelectField from '../DynamicSelectField';
 import { supabase } from '../../supabaseClient';
 import {
+  buildCatalogGroupPrefixedName,
   buildVariantName,
   buildSeedVariantValues,
   buildVariantCombinations,
@@ -15,6 +16,8 @@ import {
   isEligibleProductAttributeField,
   mapFieldTypeToAttributeValueType,
   normalizeAttributeKey,
+  PRODUCT_ATTRIBUTE_GROUP_LABELS,
+  resolveProductAttributeGroupLabel,
   resolveFieldAttributeOptions,
   type ProductAttributeRecord,
   type ProductVariationRecord,
@@ -65,7 +68,15 @@ const DEFAULT_ATTRIBUTE_DRAFT: CustomAttributeDraft = {
 const VARIATION_COMMON_FIELDS: ModuleField[] = [
   { key: 'name', type: FieldType.TEXT, labels: { fa: 'نام محصول' } },
   { key: 'site_code', type: FieldType.TEXT, labels: { fa: 'کد سایت / SKU' } },
+  { key: 'waste_rate', type: FieldType.NUMBER, labels: { fa: 'نرخ پرت' } },
+  { key: 'buy_price', type: FieldType.PRICE, labels: { fa: 'قیمت خرید' } },
   { key: 'sell_price', type: FieldType.PRICE, labels: { fa: 'قیمت فروش' } },
+  {
+    key: 'bundle_id',
+    type: FieldType.RELATION,
+    labels: { fa: 'بسته محصول' },
+    relationConfig: { targetModule: 'product_bundles', targetField: 'bundle_number' },
+  },
   { key: 'opening_stock', type: FieldType.NUMBER, labels: { fa: 'موجودی اول دوره' } },
   {
     key: 'opening_shelf_id',
@@ -87,12 +98,7 @@ const VARIATION_COMMON_FIELDS: ModuleField[] = [
   { key: 'site_sync_enabled', type: FieldType.CHECKBOX, labels: { fa: 'همگام‌سازی خودکار' } },
 ];
 
-const MATERIAL_CATEGORY_LABELS: Record<string, string> = {
-  leather: 'چرم',
-  lining: 'آستر',
-  accessory: 'خرجکار',
-  fitting: 'یراق',
-};
+const MATERIAL_CATEGORY_LABELS = PRODUCT_ATTRIBUTE_GROUP_LABELS;
 
 const DEFAULT_GLOBAL_ATTRIBUTE_DEFINITIONS = [
   { key: 'global_color', label: 'رنگ', dynamicCategory: 'general_color', valueType: 'select' as const },
@@ -216,6 +222,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   product,
   productFields,
   dynamicOptions,
+  relationOptions = {},
   mode,
   canEdit = true,
   onProductPatch,
@@ -476,8 +483,13 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
     return options.find((option) => option.value === rawValue)?.label || String(rawValue ?? '');
   };
 
+  const productAttributeGroupLabel = resolveProductAttributeGroupLabel(product);
+  const getAutoVariationBaseName = () => (
+    buildCatalogGroupPrefixedName(String(product?.name || 'محصول'), productAttributeGroupLabel)
+  );
+
   const getAutoVariationName = (variantValues: Record<string, any>) => (
-    buildVariantName(String(product?.name || 'محصول'), variantValues, attributes, renderAttributeValue)
+    buildVariantName(getAutoVariationBaseName(), variantValues, attributes, renderAttributeValue)
   );
 
   useEffect(() => {
@@ -511,7 +523,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
           });
 
         const nextName = product?.auto_name_enabled
-          ? buildVariantName(String(product?.name || 'محصول'), nextValues, attributes, renderAttributeValue)
+          ? buildVariantName(getAutoVariationBaseName(), nextValues, attributes, renderAttributeValue)
           : variation.name;
 
         if (nextName !== variation.name) {
@@ -535,7 +547,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
 
       return hasChanges ? nextVariations : prev;
     });
-  }, [attributeOptionsMap, attributes, product?.auto_name_enabled, product?.name, variations.length]);
+  }, [attributeOptionsMap, attributes, product?.auto_name_enabled, product?.name, productAttributeGroupLabel, variations.length]);
 
   const addGlobalTemplate = () => {
     if (!selectedGlobalKey) return;
@@ -654,7 +666,10 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
       {
         name: product?.auto_name_enabled ? getAutoVariationName(seededValues) : '',
         site_code: '',
-        sell_price: product?.sell_price ?? null,
+        waste_rate: null,
+        buy_price: null,
+        sell_price: null,
+        bundle_id: null,
         image_url: product?.image_url ?? null,
         site_product_link: null,
         status: 'active',
@@ -717,7 +732,10 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
           .map((variantValues) => ({
             name: product?.auto_name_enabled ? getAutoVariationName(variantValues) : '',
             site_code: '',
-            sell_price: product?.sell_price ?? null,
+            waste_rate: null,
+            buy_price: null,
+            sell_price: null,
+            bundle_id: null,
             image_url: product?.image_url ?? null,
             site_product_link: null,
             status: 'active',
@@ -1092,7 +1110,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                       );
                     }
 
-                    if (fieldKey === 'sell_price' || fieldKey === 'opening_stock') {
+                    if (fieldKey === 'waste_rate' || fieldKey === 'buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock') {
                       return (
                         <div key={`${variation.id || variationIndex}_${field.key}`}>
                           <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || field.key}</div>
@@ -1144,7 +1162,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                           field={field}
                           value={(variation as any)[field.key]}
                           onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
-                          options={field.key === 'opening_shelf_id' ? openingShelfOptions : undefined}
+                          options={field.key === 'opening_shelf_id' ? openingShelfOptions : (relationOptions[field.key] || undefined)}
                           forceEditMode={mode === 'edit'}
                           moduleId="products"
                           recordId={variation.id}

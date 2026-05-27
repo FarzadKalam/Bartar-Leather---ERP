@@ -12,6 +12,7 @@ import {
 } from '../utils/recordFilesAvailability';
 import { getRecordTitle } from '../utils/recordTitle';
 import { fetchCurrentUserRolePermissions, resolveFilesAccessPermissions } from '../utils/permissions';
+import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 
 type GalleryFileType = 'image' | 'video' | 'file';
 type GalleryViewMode = 'list' | 'grid';
@@ -98,7 +99,7 @@ const FilesGalleryPage: React.FC = () => {
       id: String(row.id),
       module_id: 'products',
       record_id: String(row.product_id || ''),
-      file_url: String(row.image_url || ''),
+      file_url: normalizeStoragePublicUrl(String(row.image_url || '')) || '',
       file_type: 'image',
       file_name: null,
       mime_type: null,
@@ -135,7 +136,7 @@ const FilesGalleryPage: React.FC = () => {
           id: String(row.id),
           module_id: String(row.module_id || ''),
           record_id: String(row.record_id || ''),
-          file_url: String(row.file_url || ''),
+          file_url: normalizeStoragePublicUrl(String(row.file_url || '')) || '',
           file_type: normalizeType(row.file_type, row.mime_type, row.file_url),
           file_name: row.file_name ? String(row.file_name) : null,
           mime_type: row.mime_type ? String(row.mime_type) : null,
@@ -257,11 +258,11 @@ const FilesGalleryPage: React.FC = () => {
       : 'w-full h-44 object-cover rounded-xl border border-gray-100';
 
     if (item.file_type === 'image') {
-      return <img src={item.file_url} alt={item.file_name || 'image'} className={mediaClass} />;
+      return <img src={normalizeStoragePublicUrl(item.file_url) || item.file_url} alt={item.file_name || 'image'} className={mediaClass} />;
     }
 
     if (item.file_type === 'video') {
-      return <video src={item.file_url} controls className={mediaClass} preload="metadata" />;
+      return <video src={normalizeStoragePublicUrl(item.file_url) || item.file_url} controls className={mediaClass} preload="metadata" />;
     }
 
     return (
@@ -410,4 +411,3 @@ const FilesGalleryPage: React.FC = () => {
 };
 
 export default FilesGalleryPage;
-

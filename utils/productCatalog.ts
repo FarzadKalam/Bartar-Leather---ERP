@@ -33,7 +33,10 @@ export interface ProductVariationRecord {
   id?: string;
   name?: string | null;
   site_code?: string | null;
+  waste_rate?: number | null;
+  buy_price?: number | null;
   sell_price?: number | null;
+  bundle_id?: string | null;
   image_url?: string | null;
   site_product_link?: string | null;
   status?: string | null;
@@ -104,7 +107,17 @@ const PRODUCT_ATTRIBUTE_EXCLUDED_SOURCE_KEYS = new Set<string>([
   'site_product_link',
   'catalog_role',
   'parent_product_id',
+  'waste_rate',
+  'buy_price',
+  'sell_price',
 ]);
+
+export const PRODUCT_ATTRIBUTE_GROUP_LABELS: Record<string, string> = {
+  leather: 'چرم',
+  lining: 'آستر',
+  accessory: 'خرجکار',
+  fitting: 'یراق',
+};
 
 export const normalizeAttributeKey = (input: string) => {
   const normalized = String(input || '')
@@ -269,6 +282,32 @@ export const buildVariantName = (
   const summary = buildVariantSummary(variantValues, attributes, labelResolver);
   if (!summary) return String(baseName || 'محصول').trim();
   return `${String(baseName || 'محصول').trim()} - ${summary}`;
+};
+
+export const shouldPrefixProductAttributeGroup = (productValues: Record<string, any>) => {
+  const catalogRole = String(productValues?.catalog_role || '').trim();
+  return catalogRole === 'parent' || catalogRole === 'variant';
+};
+
+export const resolveProductAttributeGroupLabel = (
+  productValues: Record<string, any>,
+  labelResolver?: (fieldKey: string, value: any) => string,
+) => {
+  const category = String(productValues?.category || '').trim();
+  if (!category) return '';
+  const resolved = labelResolver ? labelResolver('category', category) : '';
+  return String(resolved || PRODUCT_ATTRIBUTE_GROUP_LABELS[category] || category).trim();
+};
+
+export const buildCatalogGroupPrefixedName = (baseName: string, groupLabel?: string | null) => {
+  const normalizedName = String(baseName || '').replace(/\s+/g, ' ').trim();
+  const normalizedGroup = String(groupLabel || '').replace(/\s+/g, ' ').trim();
+  if (!normalizedGroup) return normalizedName;
+  if (!normalizedName) return normalizedGroup;
+  if (normalizedName === normalizedGroup || normalizedName.startsWith(`${normalizedGroup} `)) {
+    return normalizedName;
+  }
+  return `${normalizedGroup} ${normalizedName}`;
 };
 
 export const cartesianProduct = <T,>(lists: T[][]): T[][] => {

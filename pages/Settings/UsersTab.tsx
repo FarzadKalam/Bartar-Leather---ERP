@@ -4,6 +4,7 @@ import { UserOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from '@ant-d
 import { Link } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../../supabaseClient';
+import { normalizeStoragePublicUrl, normalizeStoragePublicUrlsInRecord } from '../../utils/storageUrls';
 
 type ResponsiveBreakpoint = 'xxl' | 'xl' | 'lg' | 'md' | 'sm' | 'xs';
 
@@ -49,7 +50,7 @@ const UsersTab: React.FC = () => {
     setLoading(true);
     const { data: usersData } = await supabase.from('profiles').select('*, org_roles(title)');
     const { data: rolesData } = await supabase.from('org_roles').select('*');
-    if (usersData) setUsers(usersData);
+    if (usersData) setUsers(usersData.map((row: any) => normalizeStoragePublicUrlsInRecord(row)));
     if (rolesData) setRoles(rolesData);
     setLoading(false);
   };
@@ -70,7 +71,7 @@ const UsersTab: React.FC = () => {
           const { error } = await supabase.storage.from('images').upload(fileName, file);
           if (error) throw error;
           const { data } = supabase.storage.from('images').getPublicUrl(fileName);
-          setAvatarUrl(data.publicUrl);
+          setAvatarUrl(normalizeStoragePublicUrl(data.publicUrl));
           return false;
       } catch(e) { message.error('خطا در آپلود عکس'); return false; }
   };
@@ -102,7 +103,7 @@ const UsersTab: React.FC = () => {
                     mobile_1: values.mobile,
                     role_id: values.role_id,
                     role: values.role,
-                    avatar_url: avatarUrl ?? editingUser.avatar_url,
+                    avatar_url: normalizeStoragePublicUrl(avatarUrl ?? editingUser.avatar_url),
                     is_active: values.is_active,
                 }).eq('id', editingUser.id);
                 if (error) throw error;
@@ -118,7 +119,7 @@ const UsersTab: React.FC = () => {
                     email: values.email,
                     password: values.password,
                     options: {
-                        data: { full_name: values.full_name, avatar_url: avatarUrl || undefined }
+                        data: { full_name: values.full_name, avatar_url: normalizeStoragePublicUrl(avatarUrl) || undefined }
                     }
                 });
                 if (signUpError) throw signUpError;
@@ -134,7 +135,7 @@ const UsersTab: React.FC = () => {
                     mobile_1: values.mobile,
                     role_id: values.role_id,
                     role: values.role,
-                    avatar_url: avatarUrl,
+                    avatar_url: normalizeStoragePublicUrl(avatarUrl),
                     is_active: true
                 }]);
 
@@ -160,7 +161,7 @@ const UsersTab: React.FC = () => {
             return;
         }
         setEditingUser(record);
-        setAvatarUrl(record.avatar_url || null);
+        setAvatarUrl(normalizeStoragePublicUrl(record.avatar_url) || null);
         form.setFieldsValue({
             full_name: record.full_name,
             email: record.email,
@@ -195,7 +196,7 @@ const UsersTab: React.FC = () => {
           key: 'full_name',
           render: (text: string, record: any) => (
               <Link to={`/profile/${record.id}`} className="flex items-center gap-3 group">
-                  <Avatar src={record.avatar_url} icon={<UserOutlined />} className="bg-leather-100 text-leather-600 border border-leather-200" size={40} />
+                  <Avatar src={normalizeStoragePublicUrl(record.avatar_url)} icon={<UserOutlined />} className="bg-leather-100 text-leather-600 border border-leather-200" size={40} />
                   <div className="flex flex-col">
                       <span className="font-bold text-gray-700 dark:text-gray-200 group-hover:text-leather-600 transition-colors">{text || 'بدون نام'}</span>
                       <span className="text-xs text-gray-400">{record.email}</span>
@@ -291,7 +292,7 @@ const UsersTab: React.FC = () => {
                         <Form form={form} layout="vertical" onFinish={handleAddOrEditUser}>
                 <div className="flex justify-center mb-6">
                     <div className="text-center">
-                        <Avatar size={80} src={avatarUrl} icon={<UserOutlined />} className="mb-2 bg-gray-100" />
+                        <Avatar size={80} src={normalizeStoragePublicUrl(avatarUrl)} icon={<UserOutlined />} className="mb-2 bg-gray-100" />
                         <Upload showUploadList={false} beforeUpload={handleAvatarUpload}>
                             <Button size="small" icon={<UploadOutlined />}>آپلود عکس</Button>
                         </Upload>

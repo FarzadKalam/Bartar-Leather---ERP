@@ -19,6 +19,7 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { FieldLocation, FieldType } from '../../types';
 import RecordFilesManager from '../RecordFilesManager';
 import TagInput from '../TagInput';
+import { normalizeStoragePublicUrl } from '../../utils/storageUrls';
 
 interface HeroSectionProps {
   data: any;
@@ -77,6 +78,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
   const location = useLocation();
   const imageField = moduleConfig?.fields?.find((f: any) => f.type === FieldType.IMAGE);
   const canShowImage = !!imageField && (canViewField ? canViewField(imageField.key) !== false : true);
+  const imageUrl = normalizeStoragePublicUrl(data?.image_url);
   const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
   const canOpenFilesGallery = supportsFilesGallery && canViewFilesManager;
 
@@ -137,9 +139,9 @@ const HeroSection: React.FC<HeroSectionProps> = ({
       <div className="flex flex-col lg:flex-row gap-8 items-stretch">
         {canShowImage && (
           <div className="w-full lg:w-56 h-48 lg:h-56 shrink-0 rounded-2xl border-4 border-white dark:border-gray-700 shadow-xl relative group overflow-hidden bg-gray-100 dark:bg-black/20 self-center lg:self-start">
-            {data.image_url ? (
+            {imageUrl ? (
               <Image
-                src={data.image_url}
+                src={imageUrl}
                 className="w-full h-full object-cover"
                 wrapperStyle={{ width: '100%', height: '100%' }}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
@@ -308,8 +310,8 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           onClose={handleCloseGallery}
           moduleId={moduleId}
           recordId={data.id}
-          mainImage={data.image_url}
-          onMainImageChange={onMainImageChange}
+          mainImage={imageUrl}
+          onMainImageChange={(url) => onMainImageChange?.(normalizeStoragePublicUrl(url))}
           canEdit={!!canEditModule && !!canEditFilesManager}
           canDelete={!!canDeleteFilesManager}
           highlightFileId={highlightFileId}

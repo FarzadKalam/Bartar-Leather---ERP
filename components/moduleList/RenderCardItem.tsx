@@ -6,6 +6,7 @@ import { formatPersianPrice, toPersianNumber, safeJalaliFormat, parseDateValue }
 import { getRecordTitle } from "../../utils/recordTitle";
 import ProductionStagesField from "../ProductionStagesField";
 import { MODULES } from "../../moduleRegistry";
+import { normalizeStoragePublicUrl } from "../../utils/storageUrls";
 
 export interface RenderCardItemProps {
   item: any;
@@ -43,7 +44,7 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
   relationOptions = {},
 }) => {
   const isSelected = selectedRowKeys.includes(item.id);
-  const imageUrl = imageField ? item[imageField] : null;
+  const imageUrl = imageField ? normalizeStoragePublicUrl(item[imageField]) : null;
   const title = getRecordTitle(item, moduleConfig, { fallback: "-" });
   const isTasks = moduleId === 'tasks';
   const isProductionTask = (
@@ -106,7 +107,7 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
       if (user) {
         return (
           <div className="flex items-center gap-1 min-w-0">
-            <Avatar size={18} src={user.avatar_url}>
+            <Avatar size={18} src={normalizeStoragePublicUrl(user.avatar_url)}>
               {!user.avatar_url && user.full_name?.[0]}
             </Avatar>
             <span className="text-[10px] text-gray-600 dark:text-gray-300 truncate max-w-[90px]">

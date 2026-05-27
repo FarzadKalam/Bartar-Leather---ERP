@@ -20,6 +20,7 @@
                         },
     "include":  [
                     "tests/productCatalog.test.ts",
+                    "utils/productCatalogPersistence.ts",
                     "tests/manualStockMovements.test.ts",
                     "utils/productCatalog.ts",
                     "types.ts",

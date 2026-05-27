@@ -20,7 +20,12 @@ import { getErrorMessage } from '../utils/errorHandling';
 import ProductCatalogManager from './products/ProductCatalogManager';
 import { persistProductCatalogData } from '../utils/productCatalogPersistence';
 import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
-import { stripInternalFormFields } from '../utils/productCatalog';
+import {
+  buildCatalogGroupPrefixedName,
+  resolveProductAttributeGroupLabel,
+  shouldPrefixProductAttributeGroup,
+  stripInternalFormFields,
+} from '../utils/productCatalog';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -355,7 +360,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
     }
     addPart(getFieldValueLabel('brand_name', values?.brand_name));
 
-    return parts.join(' ');
+    const baseName = parts.join(' ');
+    if (!shouldPrefixProductAttributeGroup(values)) return baseName;
+    return buildCatalogGroupPrefixedName(baseName, resolveProductAttributeGroupLabel(values, getFieldValueLabel));
   };
 
   const buildAutoProductionOrderName = (values: any) => {
@@ -1213,7 +1220,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     .filter(f => f.nature !== 'system') // 👈 این خط اضافه شد: حذف کامل فیلدهای سیستمی از گرید
                     .filter(f => canViewField(f.key))
                     .filter(f => f.key !== 'assignee_id' && f.key !== 'assignee_type')
-                    .filter(f => !(module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && f.key === 'category'))
+                    .filter(f => !(module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && ['category', 'waste_rate', 'buy_price', 'sell_price'].includes(String(f.key))))
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
                   return (

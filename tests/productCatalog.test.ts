@@ -2,17 +2,132 @@
 import { performance } from 'node:perf_hooks';
 import { FieldType } from '../types';
 import {
+  buildCatalogGroupPrefixedName,
   buildSeedVariantValues,
   buildVariantCombinations,
   mapFieldTypeToAttributeValueType,
   normalizeCatalogProductPayload,
+  isEligibleProductAttributeField,
+  resolveProductAttributeGroupLabel,
   type ProductAttributeRecord,
 } from '../utils/productCatalog';
+import { persistProductCatalogData } from '../utils/productCatalogPersistence';
 
-const tests: Array<{ name: string; fn: () => void }> = [];
-const runTest = (name: string, fn: () => void) => {
+type Row = Record<string, any>;
+type Filter = { type: 'eq'; column: string; value: any };
+
+const tests: Array<{ name: string; fn: () => Promise<void> | void }> = [];
+const runTest = (name: string, fn: () => Promise<void> | void) => {
   tests.push({ name, fn });
 };
+
+class MockQuery {
+  private filters: Filter[] = [];
+
+  constructor(
+    private readonly db: MockSupabase,
+    private readonly table: string,
+    private readonly mode: 'select' | 'insert' | 'upsert' | 'update',
+    private readonly payload?: any,
+  ) {}
+
+  eq(column: string, value: any) {
+    this.filters.push({ type: 'eq', column, value });
+    return this;
+  }
+
+  select(_fields?: string) {
+    return this;
+  }
+
+  insert(payload: any) {
+    return new MockQuery(this.db, this.table, 'insert', payload);
+  }
+
+  upsert(payload: any, _options?: any) {
+    return new MockQuery(this.db, this.table, 'upsert', payload);
+  }
+
+  update(payload: any) {
+    return new MockQuery(this.db, this.table, 'update', payload).withFilters(this.filters);
+  }
+
+  async single() {
+    if (this.mode === 'insert') return { data: this.db.insertRows(this.table, this.payload)[0] ?? null, error: null };
+    if (this.mode === 'upsert') return { data: this.db.upsertRows(this.table, this.payload)[0] ?? null, error: null };
+    return { data: this.executeSelect()[0] ?? null, error: null };
+  }
+
+  async then(resolve: (value: { data: any; error: null }) => unknown) {
+    if (this.mode === 'insert') return resolve({ data: this.db.insertRows(this.table, this.payload), error: null });
+    if (this.mode === 'upsert') return resolve({ data: this.db.upsertRows(this.table, this.payload), error: null });
+    if (this.mode === 'update') return resolve({ data: this.db.updateRows(this.table, this.filters, this.payload), error: null });
+    return resolve({ data: this.executeSelect(), error: null });
+  }
+
+  private withFilters(filters: Filter[]) {
+    this.filters = [...filters];
+    return this;
+  }
+
+  private executeSelect() {
+    return this.db.getTable(this.table)
+      .filter((row) => this.filters.every((filter) => row?.[filter.column] === filter.value))
+      .map((row) => ({ ...row }));
+  }
+}
+
+class MockSupabase {
+  constructor(private readonly tables: Record<string, Row[]>) {}
+
+  from(table: string) {
+    return new MockQuery(this, table, 'select');
+  }
+
+  getTable(table: string) {
+    if (!this.tables[table]) this.tables[table] = [];
+    return this.tables[table];
+  }
+
+  insertRows(table: string, payload: any) {
+    const rows = Array.isArray(payload) ? payload : [payload];
+    const target = this.getTable(table);
+    return rows.map((row) => {
+      const next = { id: row.id ?? `${table}_${target.length + 1}`, ...row };
+      target.push(next);
+      return { ...next };
+    });
+  }
+
+  upsertRows(table: string, payload: any) {
+    const rows = Array.isArray(payload) ? payload : [payload];
+    const target = this.getTable(table);
+    return rows.map((row) => {
+      if (row.id) {
+        const idx = target.findIndex((item) => item.id === row.id);
+        if (idx >= 0) {
+          target[idx] = { ...target[idx], ...row };
+          return { ...target[idx] };
+        }
+      }
+      const next = { id: row.id ?? `${table}_${target.length + 1}`, ...row };
+      target.push(next);
+      return { ...next };
+    });
+  }
+
+  updateRows(table: string, filters: Filter[], payload: any) {
+    const target = this.getTable(table);
+    const updated: Row[] = [];
+    target.forEach((row, index) => {
+      const matches = filters.every((filter) => row?.[filter.column] === filter.value);
+      if (!matches) return;
+      target[index] = { ...row, ...payload };
+      updated.push({ ...target[index] });
+    });
+    return updated;
+  }
+}
 
 const makeAttribute = (patch: Partial<ProductAttributeRecord>): ProductAttributeRecord => ({
   scope_type: 'parent',
@@ -132,6 +247,70 @@ runTest('normalizes standalone and parent payloads to the same catalog shape', (
   assert.ok(!('__product_variations' in parentLikePayload));
 });
 
+runTest('prefixes catalog parent and variant auto names with the selected attribute group', () => {
+  const groupLabel = resolveProductAttributeGroupLabel({ category: 'leather' });
+  assert.equal(groupLabel, 'چرم');
+  assert.equal(buildCatalogGroupPrefixedName('کیف مدل آریا', groupLabel), 'چرم کیف مدل آریا');
+  assert.equal(buildCatalogGroupPrefixedName('چرم کیف مدل آریا', groupLabel), 'چرم کیف مدل آریا');
+});
+
+runTest('excludes parent-only price fields from attribute source candidates', () => {
+  assert.equal(isEligibleProductAttributeField({ key: 'waste_rate', type: FieldType.NUMBER, labels: { fa: 'نرخ پرت' } }), false);
+  assert.equal(isEligibleProductAttributeField({ key: 'model_name', type: FieldType.SELECT, labels: { fa: 'مدل' } }), true);
+});
+
+runTest('persists parent variants with prefixed names, variant prices, and bundle id', async () => {
+  const supabase = new MockSupabase({
+    products: [],
+    product_attributes: [],
+    product_attribute_options: [],
+  });
+
+  const persisted = await persistProductCatalogData({
+    supabase: supabase as any,
+    values: {
+      catalog_role: 'parent',
+      product_type: 'raw',
+      category: 'leather',
+      name: 'کیف مدل آریا',
+      auto_name_enabled: true,
+      main_unit: 'عدد',
+      sub_unit: 'عدد',
+      __product_attributes: [
+        makeAttribute({
+          key: 'color',
+          label: 'رنگ',
+          option_source_type: 'custom',
+          source_field_key: null,
+          options: [{ label: 'مشکی', value: 'مشکی' }],
+        }),
+      ],
+      __product_variations: [
+        {
+          variant_values: { color: 'مشکی' },
+          waste_rate: 3,
+          buy_price: 1200,
+          sell_price: 1800,
+          bundle_id: 'bundle-1',
+          opening_stock: 0,
+        },
+      ],
+    },
+  });
+
+  const products = supabase.getTable('products');
+  const parent = products.find((row) => row.id === persisted.id);
+  const variant = products.find((row) => row.catalog_role === 'variant');
+
+  assert.equal(parent?.name, 'چرم کیف مدل آریا');
+  assert.equal(variant?.parent_product_id, persisted.id);
+  assert.equal(variant?.name, 'چرم کیف مدل آریا - رنگ: مشکی');
+  assert.equal(variant?.waste_rate, 3);
+  assert.equal(variant?.buy_price, 1200);
+  assert.equal(variant?.sell_price, 1800);
+  assert.equal(variant?.bundle_id, 'bundle-1');
+});
+
 runTest('combination builder stays responsive near the configured UI cap', () => {
   const attributes: ProductAttributeRecord[] = [
     makeAttribute({ key: 'color' }),
@@ -163,22 +342,26 @@ runTest('combination builder stays responsive near the configured UI cap', () =>
   assert.ok(elapsedMs < 250, `expected combination build to stay under 250ms, got ${elapsedMs.toFixed(2)}ms`);
 });
 
-let failures = 0;
-for (const { name, fn } of tests) {
-  try {
-    fn();
-    console.log(`PASS ${name}`);
-  } catch (error) {
-    failures += 1;
-    console.error(`FAIL ${name}`);
-    console.error(error);
+const main = async () => {
+  let failures = 0;
+  for (const { name, fn } of tests) {
+    try {
+      await fn();
+      console.log(`PASS ${name}`);
+    } catch (error) {
+      failures += 1;
+      console.error(`FAIL ${name}`);
+      console.error(error);
+    }
   }
-}
 
-if (failures > 0) {
-  console.error(`\n${failures} test(s) failed.`);
-  process.exit(1);
-}
+  if (failures > 0) {
+    console.error(`\n${failures} test(s) failed.`);
+    process.exit(1);
+  }
 
-console.log(`\n${tests.length} test(s) passed.`);
+  console.log(`\n${tests.length} test(s) passed.`);
+};
+
+void main();
 

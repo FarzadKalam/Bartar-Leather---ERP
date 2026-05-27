@@ -37,6 +37,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
   onDataUpdate,
   stockMovementQuickAddSignal = 0,
 }) => {
+  const parentProductHiddenFieldKeys = new Set(['category', 'waste_rate', 'buy_price', 'sell_price']);
   const handleStockUpdated = useCallback((stock: number) => {
     onDataUpdate?.({ stock });
   }, [onDataUpdate]);
@@ -96,7 +97,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
           .filter((f: any) => f.blockId === block.id)
           .filter((f: any) => f.type !== FieldType.PROGRESS_STAGES)
           .filter((f: any) => (canViewField ? canViewField(f.key) !== false : true))
-          .filter((f: any) => !(moduleId === 'products' && data?.catalog_role === 'parent' && String(f.key) === 'category'))
+          .filter((f: any) => !(moduleId === 'products' && data?.catalog_role === 'parent' && parentProductHiddenFieldKeys.has(String(f.key))))
           .map((f: any) => (!f.logic || checkVisibility(f.logic)) && (
             <div key={f.key} className="flex flex-col gap-1">
               <span className="text-xs text-gray-400">{f.labels.fa}</span>

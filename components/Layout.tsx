@@ -28,6 +28,7 @@ import QrScanPopover from './QrScanPopover';
 import NotificationsPopover from './NotificationsPopover';
 import { getRecordTitle } from '../utils/recordTitle';
 import { resolveFilesAccessPermissions } from '../utils/permissions';
+import { normalizeStoragePublicUrl, normalizeStoragePublicUrlsInRecord } from '../utils/storageUrls';
 
 const { Header, Sider, Content } = AntLayout;
 
@@ -64,7 +65,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
           .select('id, full_name, avatar_url, role_id')
           .eq('id', user.id)
           .maybeSingle();
-        setCurrentUserProfile(profile || null);
+        setCurrentUserProfile(normalizeStoragePublicUrlsInRecord(profile) || null);
 
         if (profile?.role_id) {
           const { data: role } = await supabase
@@ -435,7 +436,7 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
                 <div className="cursor-pointer transition-transform hover:scale-105">
                    <Avatar 
                      size="small" 
-                     src={currentUserProfile?.avatar_url || currentUser?.user_metadata?.avatar_url || "https://i.pravatar.cc/150?u=a1"} 
+                     src={normalizeStoragePublicUrl(currentUserProfile?.avatar_url || currentUser?.user_metadata?.avatar_url) || "https://i.pravatar.cc/150?u=a1"} 
                      className="border border-leather-500 shadow-lg" 
                    >
                      {(currentUserProfile?.full_name || currentUser?.email || '').toString().trim()[0]?.toUpperCase()}

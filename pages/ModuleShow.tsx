@@ -50,10 +50,16 @@ import ProductCatalogManager from '../components/products/ProductCatalogManager'
 import ProductSiteSyncModal from '../components/products/ProductSiteSyncModal';
 import { persistProductCatalogData } from '../utils/productCatalogPersistence';
 import {
+  buildCatalogGroupPrefixedName,
+  resolveProductAttributeGroupLabel,
+  shouldPrefixProductAttributeGroup,
+} from '../utils/productCatalog';
+import {
   resolveCatalogProductMatch,
   type ResolveCatalogProductMatchResult,
 } from '../utils/productCatalogResolver';
 import { getAllowNegativeInventory } from '../utils/companySettings';
+import { normalizeStoragePublicUrl, normalizeStoragePublicUrlsInRecord } from '../utils/storageUrls';
 
 const MODULE_SHOW_OPTIONS_CACHE = new Map<string, { dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>();
 const MODULE_SHOW_OPTIONS_INFLIGHT = new Map<string, Promise<{ dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>>();
@@ -666,7 +672,7 @@ const ModuleShow: React.FC = () => {
   const fetchBaseInfo = useCallback(async () => {
       const { data: users } = await supabase.from('profiles').select('id, full_name, avatar_url');
       const { data: roles } = await supabase.from('org_roles').select('id, title');
-      if (users) setAllUsers(users);
+      if (users) setAllUsers(users.map((user: any) => normalizeStoragePublicUrlsInRecord(user)));
       if (roles) setAllRoles(roles);
   }, []);
 
@@ -773,7 +779,7 @@ const ModuleShow: React.FC = () => {
         setAccessDenied(false);
         setCurrentTags(tags);
         
-        let nextRecord: any = record;
+        let nextRecord: any = normalizeStoragePublicUrlsInRecord(record);
         if (moduleId === 'products') {
           const mainUnit = nextRecord?.main_unit;
           const subUnit = nextRecord?.sub_unit;
@@ -1525,7 +1531,7 @@ const ModuleShow: React.FC = () => {
           return {
             module_id: 'production_orders',
             record_id: orderId,
-            file_url: String(file?.file_url || '').trim(),
+            file_url: normalizeStoragePublicUrl(String(file?.file_url || '').trim()),
             file_type: String(file?.file_type || 'file').trim() || 'file',
             file_name: file?.file_name ? String(file.file_name) : null,
             mime_type: file?.mime_type ? String(file.mime_type) : null,
@@ -1569,7 +1575,7 @@ const ModuleShow: React.FC = () => {
           product_category: bom?.product_category ?? data?.product_category ?? null,
           model_name: bom?.model_name ?? data?.model_name ?? null,
           name: bom?.name || data?.name || '',
-          image_url: bom?.image_url ?? null,
+          image_url: normalizeStoragePublicUrl(bom?.image_url) ?? null,
         };
 
         await supabase.from('production_orders').update(patch).eq('id', data.id);
@@ -1691,7 +1697,7 @@ const ModuleShow: React.FC = () => {
               updateData['related_bom'] = bomId;
             }
             updateData['product_category'] = bom?.product_category ?? null;
-            updateData['image_url'] = bom?.image_url ?? null;
+            updateData['image_url'] = normalizeStoragePublicUrl(bom?.image_url) ?? null;
             if (bom.production_stages_draft) {
               updateData['production_stages_draft'] = bom.production_stages_draft;
             }
@@ -1849,7 +1855,8 @@ const ModuleShow: React.FC = () => {
       const { error: upErr } = await supabase.storage.from('images').upload(filePath, file);
       if (upErr) throw upErr;
       const { data: urlData } = supabase.storage.from('images').getPublicUrl(filePath);
-      await supabase.from(moduleId).update({ image_url: urlData.publicUrl }).eq('id', id);
+      const publicUrl = normalizeStoragePublicUrl(urlData.publicUrl) || urlData.publicUrl;
+      await supabase.from(moduleId).update({ image_url: publicUrl }).eq('id', id);
 
       const { error: fileInsertError } = await supabase
         .from('record_files')
@@ -1857,7 +1864,7 @@ const ModuleShow: React.FC = () => {
           {
             module_id: moduleId,
             record_id: id,
-            file_url: urlData.publicUrl,
+            file_url: publicUrl,
             file_type: 'image',
             file_name: file.name || null,
             mime_type: file.type || null,
@@ -1867,7 +1874,7 @@ const ModuleShow: React.FC = () => {
         console.warn('Could not append file entry after image upload', fileInsertError);
       }
 
-      setData((prev: any) => ({ ...prev, image_url: urlData.publicUrl }));
+      setData((prev: any) => ({ ...prev, image_url: publicUrl }));
       msg.success('تصویر بروزرسانی شد');
     } catch (e: any) { msg.error('خطا: ' + e.message); } finally { setUploadingImage(false); }
     return false;
@@ -1923,16 +1930,17 @@ const ModuleShow: React.FC = () => {
 
   const handleMainImageChange = useCallback(async (url: string | null) => {
     if (!canEditModule) return;
+    const normalizedUrl = normalizeStoragePublicUrl(url);
     try {
-      const { error } = await supabase.from(moduleId).update({ image_url: url }).eq('id', id);
+      const { error } = await supabase.from(moduleId).update({ image_url: normalizedUrl }).eq('id', id);
       if (error) throw error;
-      setData((prev: any) => ({ ...prev, image_url: url }));
+      setData((prev: any) => ({ ...prev, image_url: normalizedUrl }));
       await insertChangelog({
         action: 'update',
         fieldName: 'image_url',
         fieldLabel: getFieldLabel('image_url'),
         oldValue: data?.image_url ?? null,
-        newValue: url,
+        newValue: normalizedUrl,
       });
       msg.success('تصویر اصلی بروزرسانی شد');
     } catch (e: any) {
@@ -2244,7 +2252,9 @@ const ModuleShow: React.FC = () => {
     }
     addPart(getFieldValueLabel('brand_name', record?.brand_name));
 
-    return parts.join(' ');
+    const baseName = parts.join(' ');
+    if (!shouldPrefixProductAttributeGroup(record)) return baseName;
+    return buildCatalogGroupPrefixedName(baseName, resolveProductAttributeGroupLabel(record, getFieldValueLabel));
   };
 
   const buildAutoProductionOrderName = (record: any) => {
@@ -3067,7 +3077,7 @@ const ModuleShow: React.FC = () => {
   if (currentAssigneeId) {
       if (currentAssigneeType === 'user') {
           const u = allUsers.find(u => u.id === currentAssigneeId);
-          if (u) { assigneeIcon = u.avatar_url ? <Avatar src={u.avatar_url} size="small" /> : <Avatar icon={<UserOutlined />} size="small" />; }
+          if (u) { assigneeIcon = u.avatar_url ? <Avatar src={normalizeStoragePublicUrl(u.avatar_url)} size="small" /> : <Avatar icon={<UserOutlined />} size="small" />; }
       } else {
           const r = allRoles.find(r => r.id === currentAssigneeId);
           if (r) { assigneeIcon = <Avatar icon={<TeamOutlined />} size="small" className="bg-blue-100 text-blue-600" />; }

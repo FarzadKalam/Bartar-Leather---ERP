@@ -20,6 +20,7 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { checkFieldDuplicate, findDuplicateUniqueFields, getUniqueFieldMessage, isUniqueField } from '../utils/fieldUniqueness';
 import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
 import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
+import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 
 const normalizeDigitsToEnglish = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
@@ -288,7 +289,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       const { error: uploadError } = await supabase.storage.from('images').upload(filePath, file);
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(filePath);
+      const { data: { publicUrl: rawPublicUrl } } = supabase.storage.from('images').getPublicUrl(filePath);
+      const publicUrl = normalizeStoragePublicUrl(rawPublicUrl) || rawPublicUrl;
 
       if (recordId && moduleId) {
         const { error: fileInsertError } = await supabase
@@ -349,7 +351,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         })
         .map((row: any, index: number) => ({
           id: `rf_${row?.id || index}`,
-          url: String(row?.file_url || ''),
+          url: normalizeStoragePublicUrl(String(row?.file_url || '')) || '',
           label: String(row?.file_name || row?.module_id || 'تصویر'),
           createdAt: row?.created_at ? String(row.created_at) : null,
         }))
@@ -359,7 +361,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       const legacyItems = legacyRows
         .map((row: any, index: number) => ({
           id: `legacy_${row?.id || index}`,
-          url: String(row?.image_url || ''),
+          url: normalizeStoragePublicUrl(String(row?.image_url || '')) || '',
           label: `محصول ${String(row?.product_id || '').slice(0, 8) || '-'}`,
           createdAt: row?.created_at ? String(row.created_at) : null,
         }))
@@ -592,7 +594,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             return value ? <Tag color="green">بله</Tag> : <Tag color="red">خیر</Tag>;
         }
         if (fieldType === FieldType.IMAGE && value) {
-            return <Image src={value} width={40} className="rounded border" />;
+            return <Image src={normalizeStoragePublicUrl(value) || value} width={40} className="rounded border" />;
         }
         if (fieldType === FieldType.PRICE) {
           const formatted = value ? formatPersianPrice(value, true) : '۰';
@@ -927,7 +929,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
           return (
             <div className="flex flex-col gap-2">
               {value ? (
-                <img src={String(value)} alt="image" style={{ width: '100%', borderRadius: 8, border: '1px solid #f0f0f0', maxHeight: 120, objectFit: 'cover' }} />
+                <img src={normalizeStoragePublicUrl(String(value)) || String(value)} alt="image" style={{ width: '100%', borderRadius: 8, border: '1px solid #f0f0f0', maxHeight: 120, objectFit: 'cover' }} />
               ) : (
                 <div className="h-16 rounded border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center text-[11px] text-gray-400">
                   تصویری انتخاب نشده است
@@ -970,7 +972,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                   {uploading ? (
                     <div><LoadingOutlined /><div style={{ marginTop: 8 }}>...</div></div>
                   ) : value ? (
-                    <img src={value} alt="avatar" style={{ width: '100%', borderRadius: 8 }} />
+                    <img src={normalizeStoragePublicUrl(value) || value} alt="avatar" style={{ width: '100%', borderRadius: 8 }} />
                   ) : (
                     <div><UploadOutlined /><div style={{ marginTop: 8 }}>آپلود</div></div>
                   )}
@@ -995,8 +997,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                         onClose={() => setIsGalleryOpen(false)}
                         moduleId={String(moduleId || '')}
                         recordId={recordId}
-                        mainImage={value}
-                        onMainImageChange={(url) => onChange(url)}
+                        mainImage={normalizeStoragePublicUrl(value)}
+                        onMainImageChange={(url) => onChange(normalizeStoragePublicUrl(url))}
                         canEdit={!!canEditFilesManager && !!forceEditMode && !isReadonly}
                         canDelete={!!canDeleteFilesManager && !!forceEditMode && !isReadonly}
                       />
@@ -1067,7 +1069,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 setIsGlobalImageGalleryOpen(false);
               }}
             >
-              <img src={item.url} alt={item.label || 'image'} className="w-full h-28 object-cover" />
+              <img src={normalizeStoragePublicUrl(item.url) || item.url} alt={item.label || 'image'} className="w-full h-28 object-cover" />
               <div className="px-2 py-1 text-[11px] text-gray-600 truncate">{item.label || 'تصویر'}</div>
             </button>
           ))}
@@ -1201,8 +1203,9 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   onOk,
 }) => {
   const watchedValues = Form.useWatch([], form);
-  const [modalContentElement, setModalContentElement] = useState<HTMLElement | null>(null);
   const resolvedPopupZIndex = popupZIndex ?? 13020;
+  const resolvedModalZIndex = resolvedPopupZIndex - 20;
+  const quickCreatePopupContainer = typeof document !== 'undefined' ? document.body : null;
 
   return (
     <Modal
@@ -1215,18 +1218,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       confirmLoading={loading}
       forceRender
       destroyOnHidden
-      zIndex={resolvedPopupZIndex - 20}
-      afterOpenChange={(visible) => {
-        if (!visible) {
-          setModalContentElement(null);
-          return;
-        }
-        window.setTimeout(() => {
-          const modalBodies = Array.from(document.querySelectorAll('.ant-modal .ant-modal-content'));
-          const modalBody = modalBodies[modalBodies.length - 1] || null;
-          setModalContentElement(modalBody instanceof HTMLElement ? modalBody : null);
-        }, 0);
-      }}
+      zIndex={resolvedModalZIndex}
     >
       <Form
         form={form}
@@ -1257,7 +1249,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
               compactMode={true}
               allValues={watchedValues || {}}
               moduleId={moduleId}
-              popupContainer={modalContentElement}
+              popupContainer={quickCreatePopupContainer}
               popupZIndex={resolvedPopupZIndex}
             />
           </Form.Item>

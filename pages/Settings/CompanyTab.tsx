@@ -4,6 +4,7 @@ import { Form, Input, Button, message, Upload, Checkbox } from 'antd';
 import { SaveOutlined, UploadOutlined, CloudUploadOutlined, GlobalOutlined } from '@ant-design/icons';
 import { supabase } from '../../supabaseClient';
 import { setCompanyInventoryPolicyCache } from '../../utils/companySettings';
+import { normalizeStoragePublicUrl, normalizeStoragePublicUrlsInRecord } from '../../utils/storageUrls';
 
 const CompanyTab: React.FC = () => {
   const [form] = Form.useForm();
@@ -19,12 +20,13 @@ const CompanyTab: React.FC = () => {
   const fetchData = async () => {
     const { data } = await supabase.from('company_settings').select('*').limit(1).maybeSingle();
     if (data) {
-      form.setFieldsValue(data);
-      setRecordId(data.id);
-      setLogoUrl(data.logo_url);
-      setIconUrl(data.icon_url);
+      const normalizedData = normalizeStoragePublicUrlsInRecord(data);
+      form.setFieldsValue(normalizedData);
+      setRecordId(normalizedData.id);
+      setLogoUrl(normalizeStoragePublicUrl(normalizedData.logo_url));
+      setIconUrl(normalizeStoragePublicUrl(normalizedData.icon_url));
       setCompanyInventoryPolicyCache(supabase as any, {
-        allowNegativeInventory: !!data.allow_negative_inventory,
+        allowNegativeInventory: !!normalizedData.allow_negative_inventory,
       });
     }
   };
@@ -35,13 +37,14 @@ const CompanyTab: React.FC = () => {
           const { error } = await supabase.storage.from('images').upload(fileName, file);
           if (error) throw error;
           const { data } = supabase.storage.from('images').getPublicUrl(fileName);
+          const publicUrl = normalizeStoragePublicUrl(data.publicUrl);
           
           if (type === 'logo') {
-              setLogoUrl(data.publicUrl);
-              form.setFieldValue('logo_url', data.publicUrl);
+              setLogoUrl(publicUrl);
+              form.setFieldValue('logo_url', publicUrl);
           } else {
-              setIconUrl(data.publicUrl);
-              form.setFieldValue('icon_url', data.publicUrl);
+              setIconUrl(publicUrl);
+              form.setFieldValue('icon_url', publicUrl);
           }
           message.success('آپلود شد');
       } catch (e: any) {
@@ -55,8 +58,8 @@ const CompanyTab: React.FC = () => {
     try {
       const payload = {
         ...values,
-        logo_url: logoUrl,
-        icon_url: iconUrl,
+        logo_url: normalizeStoragePublicUrl(logoUrl),
+        icon_url: normalizeStoragePublicUrl(iconUrl),
         allow_negative_inventory: !!values?.allow_negative_inventory,
       };
       if (recordId) {
@@ -86,7 +89,7 @@ const CompanyTab: React.FC = () => {
         <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
             <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 flex items-center gap-4 group hover:border-leather-500 transition-colors">
                 <div className="w-16 h-16 flex items-center justify-center bg-white rounded-lg shadow-sm overflow-hidden">
-                    {logoUrl ? <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" /> : <CloudUploadOutlined className="text-2xl text-gray-300" />}
+                    {logoUrl ? <img src={normalizeStoragePublicUrl(logoUrl) || undefined} alt="Logo" className="w-full h-full object-contain" /> : <CloudUploadOutlined className="text-2xl text-gray-300" />}
                 </div>
                 <div className="flex-1">
                     <div className="mb-1 text-sm font-bold text-gray-700 dark:text-gray-300">لوگوی اصلی</div>
@@ -99,7 +102,7 @@ const CompanyTab: React.FC = () => {
 
             <div className="bg-gray-50 dark:bg-white/5 p-4 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 flex items-center gap-4 group hover:border-leather-500 transition-colors">
                 <div className="w-16 h-16 flex items-center justify-center bg-white rounded-lg shadow-sm overflow-hidden">
-                    {iconUrl ? <img src={iconUrl} alt="Icon" className="w-full h-full object-contain" /> : <GlobalOutlined className="text-2xl text-gray-300" />}
+                    {iconUrl ? <img src={normalizeStoragePublicUrl(iconUrl) || undefined} alt="Icon" className="w-full h-full object-contain" /> : <GlobalOutlined className="text-2xl text-gray-300" />}
                 </div>
                 <div className="flex-1">
                     <div className="mb-1 text-sm font-bold text-gray-700 dark:text-gray-300">آیکون سایت (Favicon)</div>

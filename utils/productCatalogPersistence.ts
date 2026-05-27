@@ -1,10 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildCanonicalVariantIdentity,
+  buildCatalogGroupPrefixedName,
   buildVariantName,
   buildVariantSignature,
   normalizeCatalogProductPayload,
   normalizeProductAttributeRecord,
+  resolveProductAttributeGroupLabel,
+  shouldPrefixProductAttributeGroup,
   type ProductAttributeOptionRecord,
   type ProductAttributeRecord,
   type ProductVariationRecord,
@@ -28,6 +31,10 @@ const PRODUCT_BASE_COPY_EXCLUDED = new Set<string>([
   'system_code',
   'stock',
   'sub_stock',
+  'waste_rate',
+  'buy_price',
+  'sell_price',
+  'bundle_id',
   'site_product_link',
   'site_remote_id',
   'site_sync_status',
@@ -149,7 +156,7 @@ export const loadProductCatalogData = async (
     normalizedProductId
       ? supabase
           .from('products')
-          .select('id, name, system_code, site_code, sell_price, image_url, site_product_link, status, related_bom, stock, site_sync_enabled, site_sync_status, variant_values')
+          .select('id, name, system_code, site_code, waste_rate, buy_price, sell_price, bundle_id, image_url, site_product_link, status, related_bom, stock, site_sync_enabled, site_sync_status, variant_values')
           .eq('parent_product_id', normalizedProductId)
           .eq('catalog_role', 'variant')
           .order('created_at', { ascending: true })
@@ -172,7 +179,10 @@ export const loadProductCatalogData = async (
     id: row.id ? String(row.id) : undefined,
     name: row.name ? String(row.name) : null,
     site_code: row.site_code ? String(row.site_code) : null,
+    waste_rate: toNumberOrNull(row.waste_rate),
+    buy_price: toNumberOrNull(row.buy_price),
     sell_price: toNumberOrNull(row.sell_price),
+    bundle_id: row.bundle_id ? String(row.bundle_id) : null,
     image_url: row.image_url ? String(row.image_url) : null,
     site_product_link: row.site_product_link ? String(row.site_product_link) : null,
     status: row.status ? String(row.status) : 'active',
@@ -234,6 +244,13 @@ export const persistProductCatalogData = async ({
         is_active: attribute?.is_active !== false,
         options: [],
       }, index)
+    );
+  }
+
+  if (productPayload.auto_name_enabled && shouldPrefixProductAttributeGroup(productPayload)) {
+    productPayload.name = buildCatalogGroupPrefixedName(
+      String(productPayload.name || ''),
+      resolveProductAttributeGroupLabel(productPayload),
     );
   }
 
@@ -331,12 +348,20 @@ export const persistProductCatalogData = async ({
       const siteCode = String(rawVariation?.site_code || '').trim();
       const openingStock = toNumberOrNull(rawVariation?.opening_stock);
       const openingShelfId = rawVariation?.opening_shelf_id ? String(rawVariation.opening_shelf_id).trim() : null;
+      const bundleId = rawVariation?.bundle_id ? String(rawVariation.bundle_id).trim() : null;
+      const variationBaseName = buildCatalogGroupPrefixedName(
+        String(parentBase.name || previousRecord?.name || 'محصول'),
+        resolveProductAttributeGroupLabel(parentBase),
+      );
       const payload: Record<string, any> = {
         ...parentBase,
         catalog_role: 'variant',
         parent_product_id: productId,
         site_code: siteCode || null,
+        waste_rate: toNumberOrNull(rawVariation?.waste_rate),
+        buy_price: toNumberOrNull(rawVariation?.buy_price),
         sell_price: toNumberOrNull(rawVariation?.sell_price),
+        bundle_id: bundleId,
         image_url: rawVariation?.image_url || parentBase.image_url || null,
         site_product_link: rawVariation?.site_product_link || null,
         status: rawVariation?.status || 'active',
@@ -352,11 +377,11 @@ export const persistProductCatalogData = async ({
       });
 
       payload.name = values?.auto_name_enabled
-        ? buildVariantName(String(parentBase.name || previousRecord?.name || 'محصول'), variantValues, activeAttributes)
+        ? buildVariantName(variationBaseName, variantValues, activeAttributes)
         : (
           rawVariation?.name
             ? String(rawVariation.name).trim()
-            : buildVariantName(String(parentBase.name || previousRecord?.name || 'محصول'), variantValues, activeAttributes)
+            : buildVariantName(variationBaseName, variantValues, activeAttributes)
         );
       const canonicalIdentity = buildCanonicalVariantIdentity(payload, activeAttributes);
       payload.variant_values = canonicalIdentity.variantValues;
@@ -366,6 +391,7 @@ export const persistProductCatalogData = async ({
         payload,
         openingStock,
         openingShelfId,
+        bundleId,
       };
     });
 
@@ -436,7 +462,7 @@ export const persistProductCatalogData = async ({
         productId: insertedVariationId,
         productMainUnit: insertedVariation?.main_unit ?? item.payload?.main_unit ?? null,
         productSubUnit: insertedVariation?.sub_unit ?? item.payload?.sub_unit ?? null,
-        rows: [{ shelf_id: item.openingShelfId, stock: item.openingStock }],
+        rows: [{ shelf_id: item.openingShelfId, bundle_id: item.bundleId, stock: item.openingStock }],
         userId: userId ?? null,
       });
     }).filter(Boolean) as Promise<any>[];

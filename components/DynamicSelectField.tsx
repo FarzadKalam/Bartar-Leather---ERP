@@ -182,6 +182,9 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     ...dropdownStyle,
     ...popupRootStyle,
   };
+  const basePopupZIndex = Number(mergedDropdownStyle.zIndex) || 13000;
+  const optionModalZIndex = Math.max(basePopupZIndex + 200, 15000);
+  const optionModalPopupZIndex = optionModalZIndex + 20;
 
   const normalizedOptions = useMemo(() => {
     const sourceOptions = isLocalMode ? (localOptions || []) : (options || []);
@@ -577,7 +580,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         cancelText="انصراف"
         confirmLoading={loading}
         okButtonProps={{ disabled: !isLocalMode && !deleteReplacementValue }}
-        zIndex={15000}
+        zIndex={optionModalZIndex}
         destroyOnHidden
       >
         <div className="flex flex-col gap-3">
@@ -600,7 +603,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
               optionFilterProp="label"
               dropdownAlign={mobileDropdownAlign}
               getPopupContainer={resolvedPopupContainer}
-              styles={{ popup: { root: { zIndex: 14000 } } }}
+              styles={{ popup: { root: { zIndex: optionModalPopupZIndex } } }}
             />
           )}
         </div>
@@ -614,7 +617,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         okText="ذخیره"
         cancelText="انصراف"
         confirmLoading={loading}
-        zIndex={15000}
+        zIndex={optionModalZIndex}
         destroyOnHidden
       >
         <div className="flex flex-col gap-3">

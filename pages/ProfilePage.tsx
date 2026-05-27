@@ -17,6 +17,7 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { profilesModule } from '../modules/profilesConfig'; // کانفیگ جدید را ایمپورت کنید
 import { FieldType, ModuleField } from '../types';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
+import { normalizeStoragePublicUrl, normalizeStoragePublicUrlsInRecord } from '../utils/storageUrls';
 
 const ProfilePage: React.FC = () => {
   const { id } = useParams();
@@ -97,12 +98,13 @@ const ProfilePage: React.FC = () => {
             console.error('Error fetching profile:', error);
             message.error('خطا در دریافت پروفایل');
         } else {
+            const normalizedData = normalizeStoragePublicUrlsInRecord(data);
             // 3. ترکیب داده‌ها (ایمیل را به دیتای پروفایل اضافه می‌کنیم تا ماژولار نمایش داده شود)
             setRecord({
-                ...data,
-                email: userEmail || data.email, // اولویت با ایمیل جدول Auth
+                ...normalizedData,
+                email: userEmail || normalizedData.email, // اولویت با ایمیل جدول Auth
                 // هندل کردن رابطه‌ها برای دسترسی راحت‌تر
-                organizations: Array.isArray(data.organizations) ? data.organizations[0] : data.organizations
+                organizations: Array.isArray(normalizedData.organizations) ? normalizedData.organizations[0] : normalizedData.organizations
             });
         }
     }
@@ -125,7 +127,7 @@ const ProfilePage: React.FC = () => {
             return;
         }
         setDrawerMode('edit');
-        setAvatarUrl(record.avatar_url || null);
+        setAvatarUrl(normalizeStoragePublicUrl(record.avatar_url) || null);
         form.setFieldsValue({
             full_name: record.full_name,
             email: record.email,
@@ -155,7 +157,7 @@ const ProfilePage: React.FC = () => {
             const { error } = await supabase.storage.from('images').upload(fileName, file);
             if (error) throw error;
             const { data } = supabase.storage.from('images').getPublicUrl(fileName);
-            setAvatarUrl(data.publicUrl);
+            setAvatarUrl(normalizeStoragePublicUrl(data.publicUrl));
             return false;
         } catch {
             message.error('خطا در آپلود عکس');
@@ -200,7 +202,7 @@ const ProfilePage: React.FC = () => {
                     mobile_1: values.mobile,
                     role_id: values.role_id,
                     role: values.role,
-                    avatar_url: avatarUrl ?? record.avatar_url,
+                    avatar_url: normalizeStoragePublicUrl(avatarUrl ?? record.avatar_url),
                     is_active: values.is_active,
                 }).eq('id', record.id);
                 if (error) throw error;
@@ -222,7 +224,7 @@ const ProfilePage: React.FC = () => {
                     email: values.email,
                     password: values.password,
                     options: {
-                        data: { full_name: values.full_name, avatar_url: avatarUrl || undefined }
+                        data: { full_name: values.full_name, avatar_url: normalizeStoragePublicUrl(avatarUrl) || undefined }
                     }
                 });
                 if (signUpError) throw signUpError;
@@ -236,7 +238,7 @@ const ProfilePage: React.FC = () => {
                     mobile_1: values.mobile,
                     role_id: values.role_id,
                     role: values.role,
-                    avatar_url: avatarUrl,
+                    avatar_url: normalizeStoragePublicUrl(avatarUrl),
                     is_active: true
                 }]);
                 if (error) throw error;
@@ -331,7 +333,7 @@ const ProfilePage: React.FC = () => {
                 <div className="px-6 relative -mt-16">
                     <Avatar 
                         size={128} 
-                        src={record.avatar_url} 
+                        src={normalizeStoragePublicUrl(record.avatar_url)}
                         icon={<UserOutlined />} 
                         className="bg-white border-4 border-white dark:border-[#1a1a1a] shadow-xl text-leather-500 text-5xl mb-4"
                     >
@@ -430,7 +432,7 @@ const ProfilePage: React.FC = () => {
                 <Form form={form} layout="vertical" onFinish={handleSave}>
                     <div className="flex justify-center mb-6">
                         <div className="text-center">
-                            <Avatar size={80} src={avatarUrl} icon={<UserOutlined />} className="mb-2 bg-gray-100" />
+                            <Avatar size={80} src={normalizeStoragePublicUrl(avatarUrl)} icon={<UserOutlined />} className="mb-2 bg-gray-100" />
                             <Upload showUploadList={false} beforeUpload={handleAvatarUpload}>
                                 <Button size="small" icon={<UploadOutlined />}>آپلود عکس</Button>
                             </Upload>
