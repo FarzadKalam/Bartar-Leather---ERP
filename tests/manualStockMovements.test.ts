@@ -75,6 +75,44 @@ runTest('payload builder keeps stock_transfers structure consistent', () => {
   });
 });
 
+runTest('sub quantity is converted to main quantity for convertible units', () => {
+  const movement = normalizeManualStockMovement({
+    productId: 'p1',
+    transferType: 'opening_balance',
+    voucherType: 'incoming',
+    qtyMain: 0,
+    qtySub: 10000,
+    fromShelfId: null,
+    toShelfId: 's1',
+    mainUnit: 'متر مربع',
+    subUnit: 'سانتیمتر مربع',
+  });
+
+  assert.equal(movement.qtyMain, 0.999);
+  assert.deepEqual(buildInventoryDeltasFromMovement(movement), [
+    { productId: 'p1', shelfId: 's1', delta: 0.999, unit: 'متر مربع', bundleId: null },
+  ]);
+});
+
+runTest('stock adjustment accepts zero as the new target stock and does not create a direct delta', () => {
+  const movement = normalizeManualStockMovement({
+    productId: 'p1',
+    transferType: 'stock_adjustment',
+    voucherType: 'stock_adjustment',
+    qtyMain: 0,
+    qtySub: 0,
+    fromShelfId: null,
+    toShelfId: 's1',
+    mainUnit: 'عدد',
+    bundleId: 'b1',
+  });
+
+  assert.equal(movement.voucherType, 'stock_adjustment');
+  assert.equal(movement.qtyMain, 0);
+  assert.deepEqual(buildInventoryDeltasFromMovement(movement), []);
+  assert.equal(buildStockTransferPayloadFromMovement(movement).transfer_type, 'stock_adjustment');
+});
+
 runTest('invalid same-shelf transfer is rejected', () => {
   assert.throws(
     () => normalizeManualStockMovement({

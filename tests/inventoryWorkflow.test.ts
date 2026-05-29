@@ -218,6 +218,28 @@ runTest('opening inventory keeps bundle id on inventory, bundle items, and trans
   assert.equal(supabase.getTable('stock_transfers')[0].bundle_id, 'bundle-1');
 });
 
+runTest('opening inventory accepts sub-unit quantity when main quantity is empty', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر مربع', sub_unit: 'سانتیمتر مربع', stock: 0, sub_stock: 0 }],
+    product_inventory: [],
+    stock_transfers: [],
+    bundle_items: [],
+  });
+
+  await persistProductOpeningInventory({
+    supabase: supabase as any,
+    productId: 'p1',
+    productMainUnit: 'متر مربع',
+    productSubUnit: 'سانتیمتر مربع',
+    rows: [{ shelf_id: 's1', stock: 0, sub_stock: 10000 }],
+    userId: 'u1',
+  });
+
+  assert.equal(supabase.getTable('product_inventory')[0].stock, 0.999);
+  assert.equal(supabase.getTable('stock_transfers')[0].delivered_qty, 0.999);
+  assert.equal(supabase.getTable('stock_transfers')[0].required_qty, 10000);
+});
+
 runTest('applyInventoryDeltas aggregates per product/shelf and blocks negative stock by default', async () => {
   const supabase = new MockSupabase({
     products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 4, sub_stock: 400 }],
@@ -261,6 +283,29 @@ runTest('purchase invoice finalization increases stock and logs incoming transfe
   assert.equal(supabase.getTable('stock_transfers')[0].purchase_invoice_id, 'inv-purchase-1');
   assert.equal(supabase.getTable('stock_transfers')[0].invoice_id ?? null, null);
   assert.equal(supabase.getTable('products')[0].stock, 3);
+});
+
+runTest('invoice finalization accepts sub-unit quantity and applies main-unit stock', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر مربع', sub_unit: 'سانتیمتر مربع', stock: 0, sub_stock: 0 }],
+    product_inventory: [],
+    stock_transfers: [],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'purchase_invoices',
+    recordId: 'inv-purchase-sub-1',
+    previousStatus: 'draft',
+    nextStatus: 'final',
+    invoiceItems: [{ product_id: 'p1', shelf_id: 's1', quantity: 0, sub_quantity: 10000, main_unit: 'متر مربع', sub_unit: 'سانتیمتر مربع' }],
+    userId: 'u1',
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(supabase.getTable('product_inventory')[0].stock, 0.999);
+  assert.equal(supabase.getTable('stock_transfers')[0].delivered_qty, 0.999);
+  assert.equal(supabase.getTable('stock_transfers')[0].required_qty, 10000);
 });
 
 runTest('sales invoice finalization decreases stock and logs outgoing transfer', async () => {

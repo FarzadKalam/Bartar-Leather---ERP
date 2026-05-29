@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { applyInventoryDeltas, syncMultipleProductsStock } from './inventoryTransactions';
-import { convertArea, HARD_CODED_UNIT_OPTIONS, type UnitValue } from './unitConversions';
+import { canConvertUnits, convertArea, convertBetweenUnits, HARD_CODED_UNIT_OPTIONS, type UnitValue } from './unitConversions';
 import { buildStockTransferPayload } from './stockTransferHelpers';
 
 type OpeningInventoryRow = {
@@ -89,22 +89,35 @@ export const persistProductOpeningInventory = async ({
   const normalizedRows = sourceRows.map((row) => {
     const shelfId = normalizeRelationId(row?.shelf_id) || '';
     const bundleId = normalizeRelationId(row?.bundle_id);
-    const qtyMain = toNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
+    const rawQtyMain = toNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
     const qtySub = toNumber(row?.sub_stock ?? 0);
+    const rowMainUnit = normalizeUnit(row?.main_unit);
+    const rowSubUnit = normalizeUnit(row?.sub_unit);
     return {
       shelfId,
       bundleId,
-      qtyMain,
+      qtyMain: rawQtyMain,
       qtySub,
-      rowMainUnit: normalizeUnit(row?.main_unit),
-      rowSubUnit: normalizeUnit(row?.sub_unit),
+      rowMainUnit,
+      rowSubUnit,
     };
   });
 
-  const rowsWithQty = normalizedRows.filter((row) => Math.abs(row.qtyMain) > 0);
+  const mainUnit = normalizeUnit(productMainUnit);
+  const subUnit = normalizeUnit(productSubUnit);
+  const rowsWithQty = normalizedRows
+    .map((row) => {
+      const rowMainUnit = row.rowMainUnit || mainUnit;
+      const rowSubUnit = row.rowSubUnit || subUnit;
+      const convertedMain = !row.qtyMain && row.qtySub && canConvertUnits(rowSubUnit, rowMainUnit)
+        ? convertBetweenUnits(row.qtySub, rowSubUnit, rowMainUnit)
+        : 0;
+      return { ...row, qtyMain: row.qtyMain || convertedMain };
+    })
+    .filter((row) => Math.abs(row.qtyMain) > 0);
   if (!rowsWithQty.length) return;
 
-  const hasNegative = rowsWithQty.some((row) => row.qtyMain < 0);
+  const hasNegative = rowsWithQty.some((row) => row.qtyMain < 0 || row.qtySub < 0);
   if (hasNegative) {
     throw new Error('موجودی اولیه نمی‌تواند منفی باشد.');
   }
@@ -114,8 +127,6 @@ export const persistProductOpeningInventory = async ({
     throw new Error('برای ثبت موجودی اولیه، انتخاب قفسه نگهداری الزامی است.');
   }
 
-  const mainUnit = normalizeUnit(productMainUnit);
-  const subUnit = normalizeUnit(productSubUnit);
   const deltas: Array<{ productId: string; shelfId: string; bundleId?: string | null; delta: number; unit?: string | null }> = [];
   const transfers: Array<Record<string, unknown>> = [];
   const bundleItems = rowsWithQty
@@ -131,7 +142,7 @@ export const persistProductOpeningInventory = async ({
     const rowMainUnit = row.rowMainUnit || mainUnit;
     const rowSubUnit = row.rowSubUnit || subUnit;
     let resolvedSubQty = row.qtySub;
-    if (rowMainUnit && rowSubUnit) {
+    if (!resolvedSubQty && rowMainUnit && rowSubUnit) {
       if (rowMainUnit === rowSubUnit) {
         resolvedSubQty = row.qtyMain;
       } else if (isUnitValue(rowMainUnit) && isUnitValue(rowSubUnit)) {

@@ -8,6 +8,11 @@ import { PRINT_PAPER_DIMENSIONS, PrintPaperSize } from './printSizing';
 import { toPersianNumber, formatPersianPrice, safeJalaliFormat } from '../../utils/persianNumberFormatter';
 import { supabase } from '../../supabaseClient';
 import { MODULES } from '../../moduleRegistry';
+import {
+  BUNDLE_PRODUCTS_PRINT_FIELD,
+  formatBundlePrintItems,
+  mapBundleInventoryRowsToPrintItems,
+} from '../productBundlePrint';
 
 interface UsePrintManagerProps {
   moduleId: string;
@@ -37,11 +42,12 @@ export const usePrintManager = ({
   const [selectedPrintFields, setSelectedPrintFields] = useState<Record<string, string[]>>({});
   const [sellerInfo, setSellerInfo] = useState<any>(null);
   const [customerInfo, setCustomerInfo] = useState<any>(null);
+  const [bundleProductsSummary, setBundleProductsSummary] = useState('');
 
   const printTemplates = useMemo<PrintTemplate[]>(() => {
     let templates: PrintTemplate[] = [];
 
-    if (moduleId === 'products') {
+    if (moduleId === 'products' || moduleId === 'product_bundles') {
       templates = [
         {
           id: 'product_label',
@@ -97,7 +103,7 @@ export const usePrintManager = ({
   }, []);
 
   useEffect(() => {
-    if (moduleId === 'products') {
+    if (moduleId === 'products' || moduleId === 'product_bundles') {
       handlePrintSizeChange('A6');
       return;
     }
@@ -112,6 +118,34 @@ export const usePrintManager = ({
   const pageUrl = typeof window !== 'undefined' ? window.location.href : '';
   const printQrValue = pageUrl;
   const siteQrValue = String(data?.site_product_link || '').trim();
+
+  useEffect(() => {
+    if (moduleId !== 'product_bundles' || !data?.id) {
+      setBundleProductsSummary('');
+      return;
+    }
+
+    let isMounted = true;
+    const loadBundleProducts = async () => {
+      try {
+        const { data: rows, error } = await supabase
+          .from('product_inventory')
+          .select('product_id, stock, products(name, system_code, main_unit)')
+          .eq('bundle_id', data.id);
+        if (error) throw error;
+        if (!isMounted) return;
+        setBundleProductsSummary(formatBundlePrintItems(mapBundleInventoryRowsToPrintItems(rows || [])));
+      } catch (err) {
+        console.error('Load bundle products for print failed', err);
+        if (isMounted) setBundleProductsSummary('');
+      }
+    };
+
+    loadBundleProducts();
+    return () => {
+      isMounted = false;
+    };
+  }, [data?.id, moduleId]);
 
   const productionGridSpecFields = useMemo(() => {
     if (!(moduleId === 'production_boms' || moduleId === 'production_orders')) return [];
@@ -305,8 +339,18 @@ export const usePrintManager = ({
   }, [moduleId, data?.grid_materials, moduleConfig]);
 
   const printableFieldsForTemplate = useMemo(() => {
-    if (selectedTemplateId !== 'production_passport') return printableFields;
-    const merged = [...productionGridSpecFields, ...printableFields];
+    const basePrintableFields = moduleId === 'product_bundles' && bundleProductsSummary
+      ? [
+          ...printableFields,
+          {
+            ...BUNDLE_PRODUCTS_PRINT_FIELD,
+            value: bundleProductsSummary,
+          },
+        ]
+      : printableFields;
+
+    if (selectedTemplateId !== 'production_passport') return basePrintableFields;
+    const merged = [...productionGridSpecFields, ...basePrintableFields];
     const seen = new Set<string>();
     return merged.filter((field: any, index: number) => {
       const key = String(field?.key || `field_${index}`);
@@ -314,7 +358,7 @@ export const usePrintManager = ({
       seen.add(key);
       return true;
     });
-  }, [selectedTemplateId, productionGridSpecFields, printableFields]);
+  }, [bundleProductsSummary, moduleId, selectedTemplateId, productionGridSpecFields, printableFields]);
 
   const hasPrintableValue = useCallback((value: any) => {
     if (value === null || value === undefined) return false;

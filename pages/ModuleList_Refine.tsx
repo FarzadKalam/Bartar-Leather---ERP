@@ -28,6 +28,11 @@ import { ProductLabel } from "../utils/printTemplates/templates/product-label";
 import { ProductPassport } from "../utils/printTemplates/templates/product-passport";
 import { getOptionLabel } from "../utils/optionHelpers";
 import type { PrintPaperSize } from "../utils/printTemplates/printSizing";
+import {
+  BUNDLE_PRODUCTS_PRINT_FIELD,
+  formatBundlePrintItems,
+  mapBundleInventoryRowsToPrintItems,
+} from "../utils/productBundlePrint";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -121,6 +126,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [selectedPrintTemplateId, setSelectedPrintTemplateId] = useState("");
   const [printMode, setPrintMode] = useState(false);
   const [selectedPrintFields, setSelectedPrintFields] = useState<Record<string, string[]>>({});
+  const [bundlePrintSummariesById, setBundlePrintSummariesById] = useState<Record<string, string>>({});
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: resolvedModuleId,
@@ -136,10 +142,19 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const loading = tableQueryResult.isLoading;
   const isRefreshing = tableQueryResult.isFetching && !loading;
   const allData = tableQueryResult.data?.data || [];
-  const selectedRows = useMemo(
+  const selectedRowsBase = useMemo(
     () => allData.filter((row: any) => selectedRowKeys.includes(row.id)),
     [allData, selectedRowKeys]
   );
+  const selectedRows = useMemo(() => (
+    selectedRowsBase.map((row: any) => {
+      if (resolvedModuleId !== "product_bundles") return row;
+      return {
+        ...row,
+        bundle_products_summary: bundlePrintSummariesById[String(row.id)] || "",
+      };
+    })
+  ), [bundlePrintSummariesById, resolvedModuleId, selectedRowsBase]);
   const allSelectedPendingInProductionOrders = useMemo(() => {
     if (resolvedModuleId !== 'production_orders') return false;
     if (!selectedRows.length) return false;
@@ -195,6 +210,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     setSelectedPrintTemplateId("");
     setPrintMode(false);
     setSelectedPrintFields({});
+    setBundlePrintSummariesById({});
   }, [resolvedModuleId, moduleConfig?.defaultViewMode]);
 
   const openSingleCreateForm = useCallback((initialValues?: Record<string, any>) => {
@@ -320,11 +336,11 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
       },
     ];
 
-    if (resolvedModuleId === "products") {
+    if (resolvedModuleId === "products" || resolvedModuleId === "product_bundles") {
       templates.push({
         id: "bulk_product_passport_6up",
         title: "۸تایی شناسنامه کالا",
-        description: "چاپ چندتایی شناسنامه کالا با QR لینک محصول در سایت",
+        description: "چاپ چندتایی شناسنامه با QR رکورد",
       });
     }
 
@@ -746,8 +762,56 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     if (resolvedModuleId === "products") {
       qrFields.push({ key: "__qr_site", type: FieldType.TEXT, labels: { fa: "QR لینک سایت", en: "Site QR" }, order: 100001 });
     }
-    return [...fields, ...qrFields];
+    const bundleFields = resolvedModuleId === "product_bundles"
+      ? [BUNDLE_PRODUCTS_PRINT_FIELD as any]
+      : [];
+    return [...fields, ...bundleFields, ...qrFields];
   }, [canViewField, moduleConfig, resolvedModuleId]);
+
+  useEffect(() => {
+    if (resolvedModuleId !== "product_bundles") return;
+    const bundleIds = selectedRowsBase.map((row: any) => String(row?.id || "")).filter(Boolean);
+    if (!bundleIds.length) {
+      setBundlePrintSummariesById({});
+      return;
+    }
+
+    let cancelled = false;
+    const loadBundlePrintSummaries = async () => {
+      try {
+        const { data: rows, error } = await supabase
+          .from("product_inventory")
+          .select("bundle_id, product_id, stock, products(name, system_code, main_unit)")
+          .in("bundle_id", bundleIds);
+        if (error) throw error;
+        if (cancelled) return;
+
+        const rowsByBundle = new Map<string, any[]>();
+        (rows || []).forEach((row: any) => {
+          const bundleId = String(row?.bundle_id || "");
+          if (!bundleId) return;
+          if (!rowsByBundle.has(bundleId)) rowsByBundle.set(bundleId, []);
+          rowsByBundle.get(bundleId)!.push(row);
+        });
+
+        const next: Record<string, string> = {};
+        bundleIds.forEach((bundleId) => {
+          next[bundleId] = formatBundlePrintItems(
+            mapBundleInventoryRowsToPrintItems(rowsByBundle.get(bundleId) || [])
+          );
+        });
+        setBundlePrintSummariesById(next);
+      } catch (err) {
+        console.error("Load bundle print summaries failed", err);
+        if (!cancelled) setBundlePrintSummariesById({});
+      }
+    };
+
+    loadBundlePrintSummaries();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedModuleId, selectedRowsBase]);
 
   const hasPrintableValue = useCallback((value: any) => {
     if (value === null || value === undefined) return false;
@@ -877,7 +941,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
           renderCard={(record: any) => (
             <ProductLabel
               title={moduleConfig?.titles?.fa || activeTemplate.title}
-              subtitle={String(record?.name || record?.title || record?.system_code || "")}
+              subtitle={String(record?.name || record?.bundle_number || record?.title || record?.system_code || "")}
               qrValue={buildRecordUrl(record)}
               fields={compactFields.map((field) => ({ ...field, value: record?.[field.key] }))}
               formatPrintValue={(field: any, value: any) => formatPrintValue(field, value, record)}
@@ -900,8 +964,8 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
           rotateCards
           renderCard={(record: any) => (
             <ProductPassport
-              title="شناسنامه کالا"
-              subtitle={String(record?.name || moduleConfig?.titles?.fa || "")}
+              title={resolvedModuleId === "product_bundles" ? "شناسنامه بسته محصول" : "شناسنامه کالا"}
+              subtitle={String(record?.name || record?.bundle_number || moduleConfig?.titles?.fa || "")}
               qrValue={String(record?.site_product_link || buildRecordUrl(record) || "")}
               fields={compactFields.map((field) => ({ ...field, value: record?.[field.key] }))}
               formatPrintValue={(field: any, value: any) => formatPrintValue(field, value, record)}

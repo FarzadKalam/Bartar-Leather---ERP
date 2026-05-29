@@ -6,6 +6,7 @@ import { FieldType } from '../../types';
 import SmartFieldRenderer from '../SmartFieldRenderer';
 import DynamicSelectField from '../DynamicSelectField';
 import { supabase } from '../../supabaseClient';
+import { canConvertUnits, convertBetweenUnits } from '../../utils/unitConversions';
 import {
   buildCatalogGroupPrefixedName,
   buildVariantName,
@@ -78,6 +79,7 @@ const VARIATION_COMMON_FIELDS: ModuleField[] = [
     relationConfig: { targetModule: 'product_bundles', targetField: 'bundle_number' },
   },
   { key: 'opening_stock', type: FieldType.NUMBER, labels: { fa: 'موجودی اول دوره' } },
+  { key: 'opening_sub_stock', type: FieldType.NUMBER, labels: { fa: 'موجودی اول دوره (واحد فرعی)' } },
   {
     key: 'opening_shelf_id',
     type: FieldType.RELATION,
@@ -203,6 +205,11 @@ const flattenVariationInputValue = (rawValue: any): any[] => {
   }
   if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return [];
   return [rawValue];
+};
+
+const toNumber = (value: any) => {
+  const parsed = parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const resolveVariationOptionValue = (
@@ -679,6 +686,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
         site_sync_enabled: product?.site_sync_enabled === true,
         site_sync_status: 'idle',
         opening_stock: 0,
+        opening_sub_stock: 0,
         opening_shelf_id: null,
         variant_values: seededValues,
       },
@@ -692,6 +700,20 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
       merged.variant_values = patch.variant_values ? patch.variant_values : variation.variant_values;
       if (product?.auto_name_enabled && patch.variant_values) {
         merged.name = getAutoVariationName(merged.variant_values || {});
+      }
+      const mainUnit = String(product?.main_unit || '').trim();
+      const subUnit = String(product?.sub_unit || '').trim();
+      const canConvertOpeningStock = canConvertUnits(mainUnit, subUnit);
+      if (canConvertOpeningStock && Object.prototype.hasOwnProperty.call(patch, 'opening_sub_stock')) {
+        if (!toNumber(variation.opening_stock)) {
+          const converted = convertBetweenUnits(toNumber((patch as any).opening_sub_stock), subUnit, mainUnit);
+          merged.opening_stock = Number.isFinite(converted) ? converted : 0;
+        }
+      } else if (canConvertOpeningStock && Object.prototype.hasOwnProperty.call(patch, 'opening_stock')) {
+        if (!toNumber(variation.opening_sub_stock)) {
+          const converted = convertBetweenUnits(toNumber((patch as any).opening_stock), mainUnit, subUnit);
+          merged.opening_sub_stock = Number.isFinite(converted) ? converted : 0;
+        }
       }
       return merged;
     }));
@@ -745,6 +767,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
             site_sync_enabled: product?.site_sync_enabled === true,
             site_sync_status: 'idle',
             opening_stock: 0,
+            opening_sub_stock: 0,
             opening_shelf_id: null,
             variant_values: variantValues,
           } satisfies ProductVariationRecord));
@@ -1110,13 +1133,16 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                       );
                     }
 
-                    if (fieldKey === 'waste_rate' || fieldKey === 'buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock') {
+                    if (fieldKey === 'waste_rate' || fieldKey === 'buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock' || fieldKey === 'opening_sub_stock') {
+                      const openingUnitsConvertible = canConvertUnits(product?.main_unit, product?.sub_unit);
+                      const isOpeningSubStock = fieldKey === 'opening_sub_stock';
                       return (
                         <div key={`${variation.id || variationIndex}_${field.key}`}>
                           <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || field.key}</div>
                           <InputNumber
                             className="w-full"
                             controls={false}
+                            disabled={isOpeningSubStock && !openingUnitsConvertible}
                             value={(variation as any)[field.key]}
                             onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
                             placeholder={field.labels?.fa || field.key}

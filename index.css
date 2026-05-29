@@ -533,6 +533,7 @@ body {
 
 .print-value {
   color: #111827;
+  white-space: pre-line;
 }
 
 .print-card--product-passport {

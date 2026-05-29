@@ -139,7 +139,8 @@ export const productBundlesConfig: ModuleDefinition = {
           options: [
             { label: 'ورود', value: 'incoming' },
             { label: 'خروج', value: 'outgoing' },
-            { label: 'جابجایی', value: 'transfer' }
+            { label: 'جابجایی', value: 'transfer' },
+            { label: 'اصلاح موجودی', value: 'stock_adjustment' }
           ]
         },
         {
@@ -152,7 +153,8 @@ export const productBundlesConfig: ModuleDefinition = {
             { label: 'ضایعات', value: 'waste' },
             { label: 'فاکتور فروش', value: 'sales_invoice' },
             { label: 'فاکتور خرید', value: 'purchase_invoice' },
-            { label: 'تولید', value: 'production' }
+            { label: 'تولید', value: 'production' },
+            { label: 'اصلاح موجودی', value: 'stock_adjustment' }
           ]
         },
         {

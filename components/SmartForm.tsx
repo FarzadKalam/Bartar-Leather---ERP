@@ -9,7 +9,7 @@ import GridTable from './GridTable';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType, ModuleField } from '../types';
-import { convertArea } from '../utils/unitConversions';
+import { canConvertUnits, convertArea, convertBetweenUnits } from '../utils/unitConversions';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
@@ -565,11 +565,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
     const mainUnit = String(sourceValues?.main_unit ?? formValues?.main_unit ?? formData?.main_unit ?? '').trim();
     const subUnit = String(sourceValues?.sub_unit ?? formValues?.sub_unit ?? formData?.sub_unit ?? '').trim();
     return (Array.isArray(rows) ? rows : []).map((row: any) => {
-      const stock = toSafeNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
+      const rawStock = toSafeNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
       let subStock = toSafeNumber(row?.sub_stock);
+      let stock = rawStock;
       if (mainUnit && subUnit) {
         if (mainUnit === subUnit) {
           subStock = stock;
+        } else if (!stock && subStock && canConvertUnits(subUnit, mainUnit)) {
+          stock = convertBetweenUnits(subStock, subUnit, mainUnit);
         } else {
           const converted = convertArea(stock, mainUnit as any, subUnit as any);
           if (Number.isFinite(converted) && converted > 0) {
@@ -1272,7 +1275,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                 ? {
                                     ...block,
                                     tableColumns: (block.tableColumns || []).map((col: any) => {
-                                      if (col.key === 'stock') return { ...col, readonly: false };
+                                      if (col.key === 'stock' || col.key === 'sub_stock') return { ...col, readonly: false };
                                        if (col.key === 'main_unit' || col.key === 'sub_unit') {
                                          return {
                                            ...col,

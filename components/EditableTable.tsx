@@ -5,7 +5,7 @@ import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
 import { calculateRow } from '../utils/calculations';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
-import { convertArea } from '../utils/unitConversions';
+import { canConvertUnits, convertArea, convertBetweenUnits } from '../utils/unitConversions';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import SmartTableRenderer from './SmartTableRenderer';
@@ -143,6 +143,50 @@ const EditableTable: React.FC<EditableTableProps> = ({
       ? { zIndex: 4000, width: `min(92vw, ${Math.max(desktopMinWidth, 420)}px)`, maxWidth: 'calc(100vw - 24px)' }
       : { zIndex: 4000, minWidth: desktopMinWidth, maxWidth: 'calc(100vw - 48px)' }
   );
+  const syncMainSubQuantities = (
+    row: any,
+    changedKey: string,
+    keys: { mainQty: string; subQty: string; mainUnit?: string; subUnit?: string }
+  ) => {
+    const mainQtyKey = keys.mainQty;
+    const subQtyKey = keys.subQty;
+    const mainUnit = String(row?.[keys.mainUnit || 'main_unit'] || '').trim();
+    const subUnit = String(row?.[keys.subUnit || 'sub_unit'] || '').trim();
+    const shouldUpdateMain = changedKey === subQtyKey
+      || (['main_unit', 'sub_unit'].includes(changedKey) && !toSafeNumber(row?.[mainQtyKey]) && !!toSafeNumber(row?.[subQtyKey]));
+    const shouldUpdateSub = changedKey === mainQtyKey
+      || (['main_unit', 'sub_unit'].includes(changedKey) && !toSafeNumber(row?.[subQtyKey]) && !!toSafeNumber(row?.[mainQtyKey]));
+    if (!canConvertUnits(mainUnit, subUnit)) {
+      if (mainUnit && subUnit && mainUnit === subUnit) {
+        if (shouldUpdateMain && !toSafeNumber(row?.[mainQtyKey])) {
+          row[mainQtyKey] = toSafeNumber(row?.[subQtyKey]);
+        }
+        if (shouldUpdateSub && !toSafeNumber(row?.[subQtyKey])) {
+          row[subQtyKey] = toSafeNumber(row?.[mainQtyKey]);
+        }
+      }
+      return row;
+    }
+    if (shouldUpdateMain && !toSafeNumber(row?.[mainQtyKey])) {
+      const qtySub = toSafeNumber(row?.[subQtyKey]);
+      const converted = convertBetweenUnits(qtySub, subUnit, mainUnit);
+      row[mainQtyKey] = Number.isFinite(converted) ? converted : 0;
+      return row;
+    }
+    if (!shouldUpdateSub || toSafeNumber(row?.[subQtyKey])) return row;
+    const qtyMain = toSafeNumber(row?.[mainQtyKey]);
+    const converted = convertBetweenUnits(qtyMain, mainUnit, subUnit);
+    row[subQtyKey] = Number.isFinite(converted) ? converted : 0;
+    return row;
+  };
+  const applyDefaultUnitsToRow = (row: any) => {
+    if (!row) return row;
+    const mainUnitColumn = (block.tableColumns || []).find((col: any) => col.key === 'main_unit');
+    const subUnitColumn = (block.tableColumns || []).find((col: any) => col.key === 'sub_unit');
+    if (!row.main_unit && mainUnitColumn?.defaultValue) row.main_unit = mainUnitColumn.defaultValue;
+    if (!row.sub_unit && subUnitColumn?.defaultValue) row.sub_unit = subUnitColumn.defaultValue;
+    return row;
+  };
   const mobileDropdownAlign = isMobileViewport
     ? { overflow: { adjustX: false, adjustY: false } }
     : undefined;
@@ -496,6 +540,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
     const source = isEditing ? tempData : data;
     const newData = [...source];
     newData[index] = { ...newData[index], [key]: value };
+    if (isProductInventory || isShelfInventory || isProductStockMovements || isAnyInvoiceItems || isBundleContents) {
+      applyDefaultUnitsToRow(newData[index]);
+    }
     const row = newData[index] || {};
 
     if (isProductStockMovements) {
@@ -507,14 +554,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
         newData[index]['voucher_type'] = 'outgoing';
         newData[index]['to_shelf_id'] = null;
       }
-      if (['main_quantity', 'main_unit', 'sub_unit'].includes(key)) {
-        const qtyMain = parseFloat(newData[index]?.main_quantity) || 0;
-        const mainUnit = String(newData[index]?.main_unit || '');
-        const subUnit = String(newData[index]?.sub_unit || '');
-        const converted = mainUnit && subUnit
-          ? convertArea(qtyMain, mainUnit as any, subUnit as any)
-          : 0;
-        newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
+      if (['main_quantity', 'sub_quantity', 'main_unit', 'sub_unit'].includes(key)) {
+        syncMainSubQuantities(newData[index], key, { mainQty: 'main_quantity', subQty: 'sub_quantity' });
       }
     }
 
@@ -526,24 +567,16 @@ const EditableTable: React.FC<EditableTableProps> = ({
       }
     }
 
-      if (isAnyInvoiceItems && ['quantity', 'main_unit', 'sub_unit'].includes(key)) {
-        const qtyMain = toSafeNumber(newData[index]?.quantity);
-        const mainUnit = String(newData[index]?.main_unit || '');
-        const subUnit = String(newData[index]?.sub_unit || '');
-        const converted = mainUnit && subUnit
-          ? convertArea(qtyMain, mainUnit as any, subUnit as any)
-          : 0;
-        newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
+      if (isAnyInvoiceItems && ['quantity', 'sub_quantity', 'main_unit', 'sub_unit'].includes(key)) {
+        syncMainSubQuantities(newData[index], key, { mainQty: 'quantity', subQty: 'sub_quantity' });
       }
 
-      if (isBundleContents && ['quantity', 'main_unit', 'sub_unit'].includes(key)) {
-        const qtyMain = toSafeNumber(newData[index]?.quantity);
-        const mainUnit = String(newData[index]?.main_unit || '');
-        const subUnit = String(newData[index]?.sub_unit || '');
-        const converted = mainUnit && subUnit
-          ? convertArea(qtyMain, mainUnit as any, subUnit as any)
-          : 0;
-        newData[index]['sub_quantity'] = Number.isFinite(converted) ? converted : 0;
+      if (isBundleContents && ['quantity', 'sub_quantity', 'main_unit', 'sub_unit'].includes(key)) {
+        syncMainSubQuantities(newData[index], key, { mainQty: 'quantity', subQty: 'sub_quantity' });
+      }
+
+      if ((isProductInventory || isShelfInventory) && ['stock', 'sub_stock', 'main_unit', 'sub_unit'].includes(key)) {
+        syncMainSubQuantities(newData[index], key, { mainQty: 'stock', subQty: 'sub_stock' });
       }
 
     if (key === 'selected_product_id' && !value) {
@@ -641,13 +674,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             if (isAnyInvoiceItems && key === 'product_id') {
               currentRow.main_unit = record?.main_unit || currentRow.main_unit || null;
               currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || null;
-              const qtyMain = toSafeNumber(currentRow?.quantity);
-              const mainUnit = String(currentRow?.main_unit || '');
-              const subUnit = String(currentRow?.sub_unit || '');
-              const converted = mainUnit && subUnit
-                ? convertArea(qtyMain, mainUnit as any, subUnit as any)
-                : 0;
-              currentRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
+              syncMainSubQuantities(currentRow, 'quantity', { mainQty: 'quantity', subQty: 'sub_quantity' });
             }
 
             if (isBundleContents && key === 'product_id') {
@@ -655,13 +682,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
               currentRow.system_code = record?.system_code || currentRow.system_code || '';
               currentRow.main_unit = record?.main_unit || currentRow.main_unit || '';
               currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || '';
-              const qtyMain = toSafeNumber(currentRow?.quantity);
-              const mainUnit = String(currentRow?.main_unit || '');
-              const subUnit = String(currentRow?.sub_unit || '');
-              const converted = mainUnit && subUnit
-                ? convertArea(qtyMain, mainUnit as any, subUnit as any)
-                : 0;
-              currentRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
+              syncMainSubQuantities(currentRow, 'quantity', { mainQty: 'quantity', subQty: 'sub_quantity' });
             }
 
           if (isInvoiceItems && key === 'product_id') {
@@ -782,13 +803,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     });
 
     if (isAnyInvoiceItems) {
-      const qtyMain = toSafeNumber(nextRow?.quantity);
-      const mainUnit = String(nextRow?.main_unit || '');
-      const subUnit = String(nextRow?.sub_unit || '');
-      if (mainUnit && subUnit) {
-        const converted = convertArea(qtyMain, mainUnit as any, subUnit as any);
-        nextRow.sub_quantity = Number.isFinite(converted) ? converted : 0;
-      }
+      syncMainSubQuantities(nextRow, 'quantity', { mainQty: 'quantity', subQty: 'sub_quantity' });
     }
 
     return nextRow;
@@ -866,6 +881,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           fromShelfId: row?.from_shelf_id ? String(row.from_shelf_id) : null,
           toShelfId: row?.to_shelf_id ? String(row.to_shelf_id) : null,
           mainUnit: row?.main_unit ? String(row.main_unit) : (currentProductUnits.mainUnit || null),
+          subUnit: row?.sub_unit ? String(row.sub_unit) : (currentProductUnits.subUnit || null),
           bundleId: row?.bundle_id ? String(row.bundle_id) : null,
         }, { requireProductId: true });
 
@@ -1507,6 +1523,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
         const resolvedText = (isAnyInvoiceItems && col.key === 'total_price')
           ? calculateRow(record, block.rowCalculationType)
           : text;
+        const rowMainUnit = String((record as any)?.main_unit || '').trim();
+        const rowSubUnit = String((record as any)?.sub_unit || '').trim();
+        const canEditSubQuantity = canConvertUnits(rowMainUnit, rowSubUnit);
+        const dynamicSubQuantityReadonly =
+          ((isAnyInvoiceItems || isProductStockMovements || isBundleContents) && col.key === 'sub_quantity' && !canEditSubQuantity)
+          || ((isProductInventory || isShelfInventory) && col.key === 'sub_stock' && !canEditSubQuantity);
 
         const fieldConfig: ModuleField = {
           key: col.key,
@@ -1515,7 +1537,13 @@ const EditableTable: React.FC<EditableTableProps> = ({
           options: col.options,
           relationConfig: col.relationConfig,
           dynamicOptionsCategory: col.dynamicOptionsCategory,
-          readonly: col.readonly
+          readonly: (col.readonly && !(
+              (isAnyInvoiceItems && col.key === 'sub_quantity')
+              || (isProductStockMovements && col.key === 'sub_quantity')
+              || (isBundleContents && col.key === 'sub_quantity')
+              || ((isProductInventory || isShelfInventory) && col.key === 'sub_stock')
+            ))
+            || dynamicSubQuantityReadonly
             || (isProductStockMovements && (record as any)?._readonly)
             || (isProductStockMovements && ['invoice_id', 'production_order_id', 'created_by_name', 'created_at', 'main_unit', 'sub_unit'].includes(col.key))
             || (isProductStockMovements && col.key === 'source' && (record as any)?._readonly)

@@ -1,6 +1,14 @@
 import { buildStockTransferPayload } from './stockTransferHelpers';
+import { canConvertUnits, convertBetweenUnits } from './unitConversions';
 
-export const ALLOWED_MANUAL_STOCK_SOURCES = new Set(['opening_balance', 'inventory_count', 'waste']);
+export const STOCK_ADJUSTMENT_TYPE = 'stock_adjustment';
+
+export const ALLOWED_MANUAL_STOCK_SOURCES = new Set([
+  'opening_balance',
+  'inventory_count',
+  'waste',
+  STOCK_ADJUSTMENT_TYPE,
+]);
 
 export interface ManualStockMovement {
   productId: string;
@@ -11,6 +19,7 @@ export interface ManualStockMovement {
   fromShelfId: string | null;
   toShelfId: string | null;
   mainUnit?: string | null;
+  subUnit?: string | null;
   bundleId?: string | null;
 }
 
@@ -52,18 +61,55 @@ export const normalizeManualStockMovement = (
     throw new Error('برای ثبت دستی فقط منابع موجودی اول دوره، انبارگردانی و ضایعات مجاز است.');
   }
 
+  if (transferType === STOCK_ADJUSTMENT_TYPE) {
+    voucherType = STOCK_ADJUSTMENT_TYPE;
+  }
+
+  if (voucherType === STOCK_ADJUSTMENT_TYPE && transferType !== STOCK_ADJUSTMENT_TYPE) {
+    throw new Error('برای اصلاح موجودی، منبع حواله باید اصلاح موجودی باشد.');
+  }
+
   if (transferType === 'waste') {
     voucherType = 'outgoing';
   }
 
-  const qtyMain = toPositiveNumber(input.qtyMain);
-  if (qtyMain <= 0) {
+  const rawQtyMain = toPositiveNumber(input.qtyMain);
+  const rawQtySub = toPositiveNumber(input.qtySub);
+  const mainUnit = toNullableString(input.mainUnit);
+  const subUnit = toNullableString(input.subUnit);
+  const convertedMainFromSub = !rawQtyMain && rawQtySub && mainUnit && subUnit && canConvertUnits(subUnit, mainUnit)
+    ? convertBetweenUnits(rawQtySub, subUnit, mainUnit)
+    : 0;
+  const qtyMain = rawQtyMain || convertedMainFromSub;
+  if (voucherType === STOCK_ADJUSTMENT_TYPE) {
+    if (!toNullableString(input.toShelfId)) {
+      throw new Error('برای اصلاح موجودی، قفسه موجودی الزامی است.');
+    }
+  } else if (qtyMain <= 0) {
     throw new Error('مقدار واحد اصلی باید بیشتر از صفر باشد.');
   }
 
-  const qtySub = toPositiveNumber(input.qtySub);
+  const convertedSubFromMain = !rawQtySub && qtyMain && mainUnit && subUnit && canConvertUnits(mainUnit, subUnit)
+    ? convertBetweenUnits(qtyMain, mainUnit, subUnit)
+    : 0;
+  const qtySub = rawQtySub || convertedSubFromMain;
   const fromShelfId = toNullableString(input.fromShelfId);
   const toShelfId = toNullableString(input.toShelfId);
+
+  if (voucherType === STOCK_ADJUSTMENT_TYPE) {
+    return {
+      productId,
+      transferType: STOCK_ADJUSTMENT_TYPE,
+      voucherType: STOCK_ADJUSTMENT_TYPE,
+      qtyMain,
+      qtySub,
+      fromShelfId: null,
+      toShelfId,
+      mainUnit,
+      subUnit,
+      bundleId: toNullableString(input.bundleId),
+    };
+  }
 
   if (voucherType === 'incoming' && !toShelfId) {
     throw new Error('برای حواله ورود، قفسه ورود الزامی است.');
@@ -88,7 +134,8 @@ export const normalizeManualStockMovement = (
     qtySub,
     fromShelfId,
     toShelfId,
-    mainUnit: toNullableString(input.mainUnit),
+    mainUnit,
+    subUnit,
     bundleId: toNullableString(input.bundleId),
   };
 };
@@ -108,6 +155,10 @@ export const buildInventoryDeltasFromMovement = (movement: ManualStockMovement, 
     unit: movement.mainUnit || null,
     bundleId: movement.bundleId ?? null,
   };
+
+  if (movement.voucherType === STOCK_ADJUSTMENT_TYPE) {
+    return [];
+  }
 
   if (movement.voucherType === 'incoming' && movement.toShelfId) {
     return [{ ...base, shelfId: movement.toShelfId, delta: qty }];

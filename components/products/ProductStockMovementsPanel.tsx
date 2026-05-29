@@ -6,9 +6,10 @@ import { supabase } from '../../supabaseClient';
 import SmartTableRenderer from '../SmartTableRenderer';
 import { RelationQuickCreateInline } from '../SmartFieldRenderer';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
-import { convertArea } from '../../utils/unitConversions';
+import { canConvertUnits, convertArea, convertBetweenUnits } from '../../utils/unitConversions';
 import {
   ALLOWED_MANUAL_STOCK_SOURCES,
+  STOCK_ADJUSTMENT_TYPE,
   buildInventoryDeltasFromMovement,
   buildStockTransferPayloadFromMovement,
   normalizeManualStockMovement,
@@ -67,6 +68,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   const voucherType = Form.useWatch('voucher_type', quickCreateForm);
   const source = Form.useWatch('source', quickCreateForm);
   const mainQuantity = Form.useWatch('main_quantity', quickCreateForm);
+  const subQuantity = Form.useWatch('sub_quantity', quickCreateForm);
   const mainUnit = Form.useWatch('main_unit', quickCreateForm);
   const subUnit = Form.useWatch('sub_unit', quickCreateForm);
 
@@ -209,8 +211,17 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
 
   useEffect(() => {
     if (!quickCreateOpen) return;
+    if (voucherType === STOCK_ADJUSTMENT_TYPE && source !== STOCK_ADJUSTMENT_TYPE) {
+      quickCreateForm.setFieldValue('source', STOCK_ADJUSTMENT_TYPE);
+    }
+    if (source === STOCK_ADJUSTMENT_TYPE && voucherType !== STOCK_ADJUSTMENT_TYPE) {
+      quickCreateForm.setFieldValue('voucher_type', STOCK_ADJUSTMENT_TYPE);
+    }
     if (source === 'waste' && voucherType !== 'outgoing') {
       quickCreateForm.setFieldValue('voucher_type', 'outgoing');
+    }
+    if (voucherType === STOCK_ADJUSTMENT_TYPE) {
+      quickCreateForm.setFieldValue('from_shelf_id', null);
     }
     if (voucherType === 'incoming') quickCreateForm.setFieldValue('from_shelf_id', null);
     if (voucherType === 'outgoing') quickCreateForm.setFieldValue('to_shelf_id', null);
@@ -220,9 +231,20 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   useEffect(() => {
     if (!quickCreateOpen) return;
     const qtyMain = parseFloat(mainQuantity) || 0;
+    const currentSub = parseFloat(quickCreateForm.getFieldValue('sub_quantity')) || 0;
+    if (!qtyMain || currentSub || !canConvertUnits(mainUnit, subUnit)) return;
     const converted = mainUnit && subUnit ? convertArea(qtyMain, mainUnit as any, subUnit as any) : 0;
     quickCreateForm.setFieldValue('sub_quantity', Number.isFinite(converted) ? converted : 0);
   }, [quickCreateOpen, mainQuantity, mainUnit, subUnit, quickCreateForm]);
+
+  useEffect(() => {
+    if (!quickCreateOpen) return;
+    const qtyMain = parseFloat(mainQuantity) || 0;
+    const qtySub = parseFloat(subQuantity) || 0;
+    if (qtyMain || !qtySub || !canConvertUnits(subUnit, mainUnit)) return;
+    const converted = convertBetweenUnits(qtySub, subUnit, mainUnit);
+    quickCreateForm.setFieldValue('main_quantity', Number.isFinite(converted) ? converted : 0);
+  }, [quickCreateOpen, subQuantity, mainQuantity, mainUnit, subUnit, quickCreateForm]);
 
   const displayFields = useMemo(() => {
   const baseFields = (block.tableColumns || []).map((col: any, index: number) => ({
@@ -355,18 +377,21 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
             ALLOWED_MANUAL_STOCK_SOURCES.has(String(opt?.value || ''))
           );
         }
-        if (['main_unit', 'sub_unit', 'sub_quantity'].includes(String(field.key))) {
+        if (['main_unit', 'sub_unit'].includes(String(field.key))) {
           (next as any).readonly = true;
+        }
+        if (field.key === 'sub_quantity') {
+          (next as any).readonly = !canConvertUnits(productUnits.mainUnit, productUnits.subUnit);
         }
         return next;
       });
-  }, [displayFields]);
+  }, [displayFields, productUnits.mainUnit, productUnits.subUnit]);
 
   const quickCreateFields = useMemo(() => {
     const currentType = String(voucherType || '');
     const currentSource = String(source || '');
     const shouldShowFromShelf = currentType === 'outgoing' || currentType === 'transfer';
-    const shouldShowToShelf = (currentType === 'incoming' || currentType === 'transfer') && currentSource !== 'waste';
+    const shouldShowToShelf = (currentType === 'incoming' || currentType === 'transfer' || currentType === STOCK_ADJUSTMENT_TYPE) && currentSource !== 'waste';
 
     return baseAddFields
       .filter((field: any) => {
@@ -415,18 +440,48 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   }, [rows]);
 
   const normalizeFormMovement = (values: any) => {
+    const isAdjustment = String(values?.voucher_type || '') === STOCK_ADJUSTMENT_TYPE;
     return normalizeManualStockMovement({
       productId: recordId,
-      transferType: values?.source,
+      transferType: isAdjustment ? STOCK_ADJUSTMENT_TYPE : values?.source,
       voucherType: values?.voucher_type,
       qtyMain: values?.main_quantity,
       qtySub: values?.sub_quantity,
       fromShelfId: values?.from_shelf_id,
       toShelfId: values?.to_shelf_id,
       mainUnit: values?.main_unit ? String(values.main_unit) : (productUnits.mainUnit || null),
+      subUnit: values?.sub_unit ? String(values.sub_unit) : (productUnits.subUnit || null),
       bundleId: values?.bundle_id ? String(values.bundle_id) : null,
     }, { requireProductId: true });
   };
+
+  const buildAdjustmentDelta = async (movement: ManualStockMovement) => {
+    if (movement.voucherType !== STOCK_ADJUSTMENT_TYPE || !movement.toShelfId) return [];
+    let query = supabase
+      .from('product_inventory')
+      .select('stock')
+      .eq('product_id', movement.productId)
+      .eq('shelf_id', movement.toShelfId);
+    query = movement.bundleId ? query.eq('bundle_id', movement.bundleId) : query.is('bundle_id', null);
+    const { data: inventoryRow, error } = await query.maybeSingle();
+    if (error) throw error;
+    const currentStock = parseFloat(inventoryRow?.stock) || 0;
+    const delta = movement.qtyMain - currentStock;
+    if (!delta) return [];
+    return [{
+      productId: movement.productId,
+      shelfId: movement.toShelfId,
+      bundleId: movement.bundleId ?? null,
+      delta,
+      unit: movement.mainUnit || null,
+    }];
+  };
+
+  const buildMovementDeltas = async (movement: ManualStockMovement, multiplier = 1) => (
+    movement.voucherType === STOCK_ADJUSTMENT_TYPE
+      ? (multiplier < 0 ? [] : await buildAdjustmentDelta(movement))
+      : buildInventoryDeltasFromMovement(movement, multiplier)
+  );
 
   const buildLogRow = (
     normalized: ManualStockMovement,
@@ -455,8 +510,8 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       if (!productUnits.mainUnit) throw new Error('واحد اصلی محصول مشخص نشده است.');
 
       const normalized = normalizeFormMovement(values);
-      const nextDeltas = buildInventoryDeltasFromMovement(normalized, 1);
-      const rollbackDeltas = editingRow ? buildInventoryDeltasFromMovement(normalizeManualStockMovement({
+      const nextDeltas = await buildMovementDeltas(normalized, 1);
+      const rollbackDeltas = editingRow ? await buildMovementDeltas(normalizeManualStockMovement({
         productId: recordId,
         transferType: editingRow?.source,
         voucherType: editingRow?.voucher_type,
@@ -465,6 +520,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         fromShelfId: editingRow?.from_shelf_id,
         toShelfId: editingRow?.to_shelf_id,
         mainUnit: editingRow?.main_unit ? String(editingRow.main_unit) : (productUnits.mainUnit || null),
+        subUnit: editingRow?.sub_unit ? String(editingRow.sub_unit) : (productUnits.subUnit || null),
         bundleId: editingRow?.bundle_id ? String(editingRow.bundle_id) : null,
       }, { requireProductId: true }), -1) : [];
       if (rollbackDeltas.length || nextDeltas.length) {
@@ -526,7 +582,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       onOk: async () => {
         try {
           setActionRowLoadingId(String(row.id));
-          const rollbackDeltas = buildInventoryDeltasFromMovement(normalizeManualStockMovement({
+          const rollbackDeltas = await buildMovementDeltas(normalizeManualStockMovement({
             productId: recordId,
             transferType: row?.source,
             voucherType: row?.voucher_type,
@@ -535,6 +591,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
             fromShelfId: row?.from_shelf_id,
             toShelfId: row?.to_shelf_id,
             mainUnit: row?.main_unit ? String(row.main_unit) : (productUnits.mainUnit || null),
+            subUnit: row?.sub_unit ? String(row.sub_unit) : (productUnits.subUnit || null),
             bundleId: row?.bundle_id ? String(row.bundle_id) : null,
           }, { requireProductId: true }), -1);
           if (rollbackDeltas.length) {

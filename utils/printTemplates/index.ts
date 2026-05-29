@@ -7,7 +7,7 @@ export interface PrintTemplate {
 export const getAvailableTemplates = (moduleId: string): PrintTemplate[] => {
   const templates: PrintTemplate[] = [];
 
-  if (moduleId === 'products') {
+  if (moduleId === 'products' || moduleId === 'product_bundles') {
     templates.push(
       {
         id: 'product_label',

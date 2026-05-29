@@ -6,7 +6,7 @@ import { supabase } from '../../supabaseClient';
 import SmartTableRenderer from '../SmartTableRenderer';
 import { RelationQuickCreateInline } from '../SmartFieldRenderer';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
-import { convertArea } from '../../utils/unitConversions';
+import { canConvertUnits, convertArea, convertBetweenUnits } from '../../utils/unitConversions';
 import {
   ALLOWED_MANUAL_STOCK_SOURCES,
   buildInventoryDeltasFromMovement,
@@ -63,6 +63,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
   const source = Form.useWatch('source', quickCreateForm);
   const selectedProductId = Form.useWatch('product_id', quickCreateForm);
   const mainQuantity = Form.useWatch('main_quantity', quickCreateForm);
+  const subQuantity = Form.useWatch('sub_quantity', quickCreateForm);
   const mainUnit = Form.useWatch('main_unit', quickCreateForm);
   const subUnit = Form.useWatch('sub_unit', quickCreateForm);
 
@@ -311,12 +312,23 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
   useEffect(() => {
     if (!quickCreateOpen) return;
     const qtyMain = toQty(mainQuantity);
+    const currentSub = parseFloat(quickCreateForm.getFieldValue('sub_quantity')) || 0;
+    if (!qtyMain || currentSub || !canConvertUnits(mainUnit, subUnit)) return;
     const converted = mainUnit && subUnit ? convertArea(qtyMain, mainUnit as any, subUnit as any) : 0;
     const nextValue = Number.isFinite(converted) ? converted : 0;
     if ((parseFloat(quickCreateForm.getFieldValue('sub_quantity')) || 0) !== nextValue) {
       quickCreateForm.setFieldValue('sub_quantity', nextValue);
     }
   }, [mainQuantity, mainUnit, quickCreateForm, quickCreateOpen, subUnit]);
+
+  useEffect(() => {
+    if (!quickCreateOpen) return;
+    const qtyMain = toQty(mainQuantity);
+    const qtySub = toQty(subQuantity);
+    if (qtyMain || !qtySub || !canConvertUnits(subUnit, mainUnit)) return;
+    const converted = convertBetweenUnits(qtySub, subUnit, mainUnit);
+    quickCreateForm.setFieldValue('main_quantity', Number.isFinite(converted) ? converted : 0);
+  }, [mainQuantity, mainUnit, quickCreateForm, quickCreateOpen, subQuantity, subUnit]);
 
   const displayFields = useMemo(() => {
     const baseFields = (block.tableColumns || []).map((col: any, index: number) => ({
@@ -409,12 +421,15 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
             ALLOWED_MANUAL_STOCK_SOURCES.has(String(opt?.value || ''))
           );
         }
-        if (['main_unit', 'sub_unit', 'sub_quantity', 'from_shelf_id'].includes(String(field.key))) {
+        if (['main_unit', 'sub_unit', 'from_shelf_id'].includes(String(field.key))) {
           (next as any).readonly = true;
+        }
+        if (field.key === 'sub_quantity') {
+          (next as any).readonly = !canConvertUnits(mainUnit, subUnit);
         }
         return next;
       });
-  }, [displayFields]);
+  }, [displayFields, mainUnit, subUnit]);
 
   const quickCreateFields = useMemo(() => {
     const currentType = String(voucherType || 'incoming');
@@ -521,6 +536,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
       fromShelfId,
       toShelfId,
       mainUnit: values?.main_unit ? String(values.main_unit) : (productMetaMap[productId]?.mainUnit || null),
+      subUnit: values?.sub_unit ? String(values.sub_unit) : (productMetaMap[productId]?.subUnit || null),
       bundleId: values?.bundle_id ? String(values.bundle_id) : null,
     }, { requireProductId: true });
   };
@@ -564,6 +580,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
             fromShelfId: editingRow?.from_shelf_id ? String(editingRow.from_shelf_id) : null,
             toShelfId: editingRow?.to_shelf_id ? String(editingRow.to_shelf_id) : null,
             mainUnit: editingRow?.main_unit ? String(editingRow.main_unit) : (productMetaMap[String(editingRow?.product_id || '')]?.mainUnit || null),
+            subUnit: editingRow?.sub_unit ? String(editingRow.sub_unit) : (productMetaMap[String(editingRow?.product_id || '')]?.subUnit || null),
             bundleId: editingRow?.bundle_id ? String(editingRow.bundle_id) : null,
           }, { requireProductId: true }), -1)
         : [];
@@ -641,6 +658,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
             fromShelfId: row?.from_shelf_id ? String(row.from_shelf_id) : null,
             toShelfId: row?.to_shelf_id ? String(row.to_shelf_id) : null,
             mainUnit: row?.main_unit ? String(row.main_unit) : (productMetaMap[String(row?.product_id || '')]?.mainUnit || null),
+            subUnit: row?.sub_unit ? String(row.sub_unit) : (productMetaMap[String(row?.product_id || '')]?.subUnit || null),
             bundleId: row?.bundle_id ? String(row.bundle_id) : null,
           }, { requireProductId: true }), -1);
           if (rollbackDeltas.length) {

@@ -29,9 +29,30 @@ const M_IN_CM = 100;
 
 const AREA_UNITS: UnitValue[] = ['فوت مربع', 'سانتیمتر مربع', 'میلیمتر مربع', 'متر مربع'];
 const LENGTH_UNITS: UnitValue[] = ['میلیمتر طول', 'سانتیمتر طول', 'متر طول'];
+const DISCRETE_UNITS = new Set<string>(['عدد', 'بسته']);
 const roundToThree = (value: number) => {
   if (!Number.isFinite(value)) return 0;
   return Math.round((value + Number.EPSILON) * 1000) / 1000;
+};
+
+export const canConvertUnits = (from?: string | null, to?: string | null) => {
+  const source = String(from || '').trim() as UnitValue;
+  const target = String(to || '').trim() as UnitValue;
+  if (!source || !target || source === target) return false;
+  if (DISCRETE_UNITS.has(source) || DISCRETE_UNITS.has(target)) return false;
+  const isArea = AREA_UNITS.includes(source) && AREA_UNITS.includes(target);
+  const isLength = LENGTH_UNITS.includes(source) && LENGTH_UNITS.includes(target);
+  return isArea || isLength;
+};
+
+export const convertBetweenUnits = (value: number, from?: string | null, to?: string | null) => {
+  if (!Number.isFinite(value)) return 0;
+  const source = String(from || '').trim() as UnitValue;
+  const target = String(to || '').trim() as UnitValue;
+  if (!source || !target) return 0;
+  if (source === target) return roundToThree(value);
+  if (!canConvertUnits(source, target)) return 0;
+  return convertArea(value, source, target);
 };
 
 export const convertArea = (value: number, from: UnitValue, to: UnitValue) => {

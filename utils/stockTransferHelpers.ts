@@ -7,6 +7,8 @@ export const SYSTEM_STOCK_TRANSFER_SOURCES = new Set([
   'production_stage',
 ]);
 
+export const STOCK_ADJUSTMENT_TRANSFER_TYPE = 'stock_adjustment';
+
 export const buildStockTransferReferencePayload = (params: {
   invoiceId?: string | null;
   purchaseInvoiceId?: string | null;
@@ -64,6 +66,13 @@ export const mapStockTransferRowToEditorRow = (
   const toShelf = row?.to_shelf_id ? String(row.to_shelf_id) : null;
   const creatorId = row?.sender_id || row?.receiver_id || null;
   const refs = getStockTransferLinkedRecordIds(row);
+  const voucherType = transferType === STOCK_ADJUSTMENT_TRANSFER_TYPE
+    ? STOCK_ADJUSTMENT_TRANSFER_TYPE
+    : fromShelf && toShelf
+      ? 'transfer'
+      : toShelf
+        ? 'incoming'
+        : 'outgoing';
 
   return {
     id: row?.id,
@@ -71,7 +80,7 @@ export const mapStockTransferRowToEditorRow = (
     product_id: row?.product_id ? String(row.product_id) : null,
     product_name: row?.products?.name ? String(row.products.name) : null,
     product_system_code: row?.products?.system_code ? String(row.products.system_code) : null,
-    voucher_type: fromShelf && toShelf ? 'transfer' : toShelf ? 'incoming' : 'outgoing',
+    voucher_type: voucherType,
     source: transferType,
     main_unit: options.mainUnit ?? null,
     main_quantity: Math.abs(parseFloat(row?.delivered_qty) || 0),
@@ -88,7 +97,9 @@ export const mapStockTransferRowToEditorRow = (
       ? (options.userMap?.get(String(creatorId)) || String(creatorId))
       : '-',
     created_at: row?.created_at || null,
-    _readonly: typeof options.readonly === 'boolean' ? options.readonly : isSystemStockTransferRow(row),
+    _readonly: typeof options.readonly === 'boolean'
+      ? options.readonly
+      : transferType === STOCK_ADJUSTMENT_TRANSFER_TYPE || isSystemStockTransferRow(row),
   };
 };
 

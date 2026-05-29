@@ -347,6 +347,7 @@ export const persistProductCatalogData = async ({
         : {};
       const siteCode = String(rawVariation?.site_code || '').trim();
       const openingStock = toNumberOrNull(rawVariation?.opening_stock);
+      const openingSubStock = toNumberOrNull(rawVariation?.opening_sub_stock);
       const openingShelfId = rawVariation?.opening_shelf_id ? String(rawVariation.opening_shelf_id).trim() : null;
       const bundleId = rawVariation?.bundle_id ? String(rawVariation.bundle_id).trim() : null;
       const variationBaseName = buildCatalogGroupPrefixedName(
@@ -390,6 +391,7 @@ export const persistProductCatalogData = async ({
         existingId: rawVariation?.id ? String(rawVariation.id).trim() : null,
         payload,
         openingStock,
+        openingSubStock,
         openingShelfId,
         bundleId,
       };
@@ -454,7 +456,7 @@ export const persistProductCatalogData = async ({
     const openingInventoryJobs = newVariationPayloads.map((item, index) => {
       const insertedVariation = insertedVariationsByIndex.get(index);
       const insertedVariationId = String(insertedVariation?.id || '').trim();
-      if (!insertedVariationId || !item.openingStock || item.openingStock <= 0 || !item.openingShelfId) {
+      if (!insertedVariationId || (!item.openingStock && !item.openingSubStock) || !item.openingShelfId) {
         return null;
       }
       return persistProductOpeningInventory({
@@ -462,7 +464,7 @@ export const persistProductCatalogData = async ({
         productId: insertedVariationId,
         productMainUnit: insertedVariation?.main_unit ?? item.payload?.main_unit ?? null,
         productSubUnit: insertedVariation?.sub_unit ?? item.payload?.sub_unit ?? null,
-        rows: [{ shelf_id: item.openingShelfId, bundle_id: item.bundleId, stock: item.openingStock }],
+        rows: [{ shelf_id: item.openingShelfId, bundle_id: item.bundleId, stock: item.openingStock, sub_stock: item.openingSubStock }],
         userId: userId ?? null,
       });
     }).filter(Boolean) as Promise<any>[];

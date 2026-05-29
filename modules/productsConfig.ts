@@ -405,6 +405,7 @@ export const createProductStockMovementsTableColumns = () => {
         { label: 'ورود', value: 'incoming' },
         { label: 'خروج', value: 'outgoing' },
         { label: 'جابجایی', value: 'transfer' },
+        { label: 'اصلاح موجودی', value: 'stock_adjustment' },
       ],
     },
     {
@@ -418,6 +419,7 @@ export const createProductStockMovementsTableColumns = () => {
         { label: 'فاکتور فروش', value: 'sales_invoice' },
         { label: 'فاکتور خرید', value: 'purchase_invoice' },
         { label: 'تولید', value: 'production' },
+        { label: 'اصلاح موجودی', value: 'stock_adjustment' },
       ],
     },
     {

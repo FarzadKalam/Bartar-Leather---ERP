@@ -46,6 +46,7 @@ export interface ProductVariationRecord {
   site_sync_enabled?: boolean;
   site_sync_status?: string | null;
   opening_stock?: number | null;
+  opening_sub_stock?: number | null;
   opening_shelf_id?: string | null;
   variant_values: Record<string, any>;
 }
@@ -85,6 +86,7 @@ const PRODUCT_TRANSIENT_FORM_KEYS = new Set<string>([
   '__requireInventoryShelf',
   '__skipBomConfirm',
   'opening_stock',
+  'opening_sub_stock',
   'opening_shelf_id',
   'bundle_id',
   'product_inventory',

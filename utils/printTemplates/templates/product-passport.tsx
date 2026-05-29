@@ -46,8 +46,8 @@ export const ProductPassport: React.FC<ProductPassportProps> = ({
     return formatPrintValue(field, field.value);
   };
 
-  const productName = getFormattedValue('name');
-  const productCode = getFormattedValue('system_code') || getFormattedValue('manual_code');
+  const productName = getFormattedValue('name') || getFormattedValue('bundle_number');
+  const productCode = getFormattedValue('system_code') || getFormattedValue('manual_code') || getFormattedValue('bundle_number');
   const chipItems = [
     { label: 'نوع کالا', value: getFormattedValue('product_type') },
     { label: 'دسته', value: getFormattedValue('category') || getFormattedValue('product_category') },
