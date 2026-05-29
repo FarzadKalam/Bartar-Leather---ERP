@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Popover, Input, Button } from 'antd';
 import type { ButtonProps } from 'antd';
 import { QrcodeOutlined } from '@ant-design/icons';
-import type { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 
 interface QrScanResult {
   raw: string;
@@ -16,6 +16,46 @@ interface QrScanPopoverProps {
   buttonClassName?: string;
   buttonProps?: ButtonProps;
 }
+
+const SCAN_BOX_SIZE = { width: 220, height: 220 };
+const SCAN_CONFIG = { fps: 10, qrbox: SCAN_BOX_SIZE };
+
+const pickPreferredCamera = async () => {
+  const cameras = await Html5Qrcode.getCameras();
+  if (!cameras.length) return null;
+
+  const preferredCamera = cameras.find((camera) => /back|rear|environment|traseira|trasera/i.test(camera.label));
+  return preferredCamera ?? cameras[0];
+};
+
+const startScannerWithFallback = async (
+  scanner: Html5Qrcode,
+  onSuccess: (decodedText: string) => void,
+) => {
+  const onError = () => undefined;
+
+  try {
+    await scanner.start(
+      { facingMode: { exact: 'environment' } },
+      SCAN_CONFIG,
+      onSuccess,
+      onError,
+    );
+    return;
+  } catch (primaryError) {
+    const fallbackCamera = await pickPreferredCamera();
+    if (!fallbackCamera) {
+      throw primaryError;
+    }
+
+    await scanner.start(
+      fallbackCamera.id,
+      SCAN_CONFIG,
+      onSuccess,
+      onError,
+    );
+  }
+};
 
 const parseQr = (raw: string): QrScanResult => {
   const trimmed = raw.trim();
@@ -36,7 +76,7 @@ const QrScanPopover: React.FC<QrScanPopoverProps> = ({ onScan, label = 'اسکن
   const [open, setOpen] = useState(false);
   const mergedClassName = [buttonProps?.className, buttonClassName].filter(Boolean).join(' ');
   const scannerId = useMemo(() => `qr-reader-${Math.random().toString(36).slice(2)}`, []);
-  const qrRef = useRef<Html5Qrcode | null>(null);
+  const qrRef = useRef<InstanceType<typeof Html5Qrcode> | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
 
   const handleSubmit = () => {
@@ -86,19 +126,16 @@ const QrScanPopover: React.FC<QrScanPopoverProps> = ({ onScan, label = 'اسکن
 
         const element = document.getElementById(scannerId);
         if (!element) return;
-        const { Html5Qrcode } = await import('html5-qrcode');
         const scanner = new Html5Qrcode(scannerId);
         qrRef.current = scanner;
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 220, height: 220 } },
+        await startScannerWithFallback(
+          scanner,
           (decodedText) => {
             if (cancelled) return;
             const parsed = parseQr(decodedText);
             onScan(parsed);
             setOpen(false);
-          },
-          () => undefined
+          }
         );
       } catch (err: any) {
         if (cancelled) return;

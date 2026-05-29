@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { convertArea, type UnitValue } from './unitConversions';
-import { toPersianNumber } from './persianNumberFormatter';
 import { getAllowNegativeInventory } from './companySettings';
 
 export interface InventoryDelta {
@@ -50,34 +49,7 @@ const toNumber = (value: any) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const DISCRETE_UNITS = new Set<string>(['عدد', 'بسته']);
-
 const normalizeUnit = (value: any) => String(value || '').trim();
-
-const formatQtyWithUnit = (qty: number, unit: string) => {
-  const rounded = Math.round((Math.abs(toNumber(qty)) + Number.EPSILON) * 1000) / 1000;
-  const formatted = toPersianNumber(rounded.toLocaleString('en-US'));
-  return `${formatted} ${unit}`.trim();
-};
-
-const defaultConfirmUnitMismatch: UnitMismatchConfirmHandler = async ({
-  productName,
-  sourceUnit,
-  productMainUnit,
-  sourceQty,
-  convertedQty,
-}) => {
-  if (typeof window === 'undefined') return true;
-  const message = [
-    'عدم تطابق واحد',
-    `محصول: ${productName || '-'}`,
-    'واحد اصلی فرمی که ثبت کرده اید، با واحد اصلی محصول متفاوت است.',
-    `مقدار ثبت شده: ${formatQtyWithUnit(sourceQty, sourceUnit)}`,
-    `مقدار واقعی کسر/افزودن به موجودی: ${formatQtyWithUnit(convertedQty, productMainUnit)}`,
-    'آیا ادامه می‌دهید؟',
-  ].join('\n');
-  return window.confirm(message);
-};
 
 const getProductMeta = async (
   supabase: SupabaseClient,
@@ -115,47 +87,14 @@ export const normalizeQuantityToProductMainUnit = async (
   if (!sourceUnit) return qty;
 
   const productMetaCache = options.productMetaCache || new Map<string, ProductUnitMeta>();
-  const decisionCache = options.decisionCache || new Map<string, boolean>();
-  const confirmHandler = options.confirmUnitMismatch === false
-    ? null
-    : (typeof options.confirmUnitMismatch === 'function'
-      ? options.confirmUnitMismatch
-      : defaultConfirmUnitMismatch);
-
   const productMeta = await getProductMeta(supabase, productId, productMetaCache);
   const productMainUnit = normalizeUnit(productMeta.mainUnit);
   if (!productMainUnit || productMainUnit === sourceUnit) return qty;
 
-  if (DISCRETE_UNITS.has(sourceUnit) || DISCRETE_UNITS.has(productMainUnit)) {
-    throw new Error(`تبدیل واحد "${sourceUnit}" به "${productMainUnit}" برای محصول "${productMeta.name || productId}" ممکن نیست.`);
-  }
-
-  const convertedAbs = convertArea(Math.abs(qty), sourceUnit as UnitValue, productMainUnit as UnitValue);
-  const normalizedConverted = toNumber(convertedAbs);
-  if (!normalizedConverted) {
-    throw new Error(`تبدیل واحد "${sourceUnit}" به "${productMainUnit}" برای محصول "${productMeta.name || productId}" ممکن نیست.`);
-  }
-
-  if (confirmHandler) {
-    const decisionKey = `${productId}::${sourceUnit}::${productMainUnit}`;
-    if (!decisionCache.has(decisionKey)) {
-      const accepted = await confirmHandler({
-        productId,
-        productName: productMeta.name || productId,
-        sourceUnit,
-        productMainUnit,
-        sourceQty: Math.abs(qty),
-        convertedQty: normalizedConverted,
-      });
-      decisionCache.set(decisionKey, accepted);
-    }
-    const accepted = decisionCache.get(decisionKey);
-    if (!accepted) {
-      throw new Error('عملیات توسط کاربر لغو شد.');
-    }
-  }
-
-  return qty < 0 ? -normalizedConverted : normalizedConverted;
+  throw new Error(
+    `واحد اصلی ردیف (${sourceUnit}) با واحد اصلی محصول "${productMeta.name || productId}" (${productMainUnit}) یکسان نیست. ` +
+    'ابتدا مقدار را با دکمه محاسبه واحد به واحد اصلی محصول تبدیل کنید.'
+  );
 };
 
 export const aggregateInventoryDeltas = (deltas: InventoryDelta[]) => {
@@ -236,23 +175,17 @@ export const applyInventoryDeltas = async (
       throw new Error('موجودی قفسه کافی نیست');
     }
 
-    const payload: any = {
-      product_id: productId,
-      shelf_id: shelfId,
-      bundle_id: bundleId,   // ← اضافه شد
-      stock: nextStock,
-    };
-    if (existing?.warehouse_id !== undefined) {
-      payload.warehouse_id = existing.warehouse_id;
+    if (existing) {
+      const { error: updateError } = await supabase
+        .from('product_inventory')
+        .update({ stock: nextStock })
+        .eq('id', existing.id);
+      if (updateError) throw updateError;
+    } else {
+      const insertPayload: any = { product_id: productId, shelf_id: shelfId, bundle_id: bundleId, stock: nextStock };
+      const { error: insertError } = await supabase.from('product_inventory').insert(insertPayload);
+      if (insertError) throw insertError;
     }
-
-    const { error: upsertError } = await supabase
-      .from('product_inventory')
-      .upsert(payload, {
-        onConflict: 'product_id,shelf_id,bundle_id',  // ← اصلاح شد
-      });
-
-    if (upsertError) throw upsertError;
   }
 };
 

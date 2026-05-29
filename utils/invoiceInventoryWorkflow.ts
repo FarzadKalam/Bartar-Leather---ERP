@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { applyInventoryDeltas, syncMultipleProductsStock } from './inventoryTransactions';
 import { buildStockTransferPayload } from './stockTransferHelpers';
-import { canConvertUnits, convertBetweenUnits } from './unitConversions';
 
 const toNumber = (value: any) => {
   const parsed = parseFloat(value);
@@ -72,15 +71,11 @@ export const applyInvoiceFinalizationInventory = async ({
     const shelfIdRaw = item?.source_shelf_id || item?.shelf_id || item?.selected_shelf_id || null;
     const shelfId = shelfIdRaw ? String(shelfIdRaw) : '';
     const mainUnit = item?.main_unit ? String(item.main_unit) : null;
-    const subUnit = item?.sub_unit ? String(item.sub_unit) : null;
     const rawQty = Math.abs(toNumber(item?.quantity ?? item?.qty ?? item?.count));
     const subQty = Math.abs(toNumber(item?.sub_quantity));
-    const convertedQty = !rawQty && subQty && canConvertUnits(subUnit, mainUnit)
-      ? convertBetweenUnits(subQty, subUnit, mainUnit)
-      : 0;
-    const qty = rawQty || convertedQty;
+    const qty = rawQty;
     const unit = mainUnit;
-    const requiredQty = subQty || (qty && canConvertUnits(mainUnit, subUnit) ? convertBetweenUnits(qty, mainUnit, subUnit) : qty);
+    const requiredQty = subQty;
 
     if (!productId || qty <= 0) return;
     if (!shelfId) {

@@ -103,6 +103,7 @@ const adjustStock = async (
     .select('id, stock, warehouse_id')
     .eq('product_id', productId)
     .eq('shelf_id', shelfId)
+    .is('bundle_id', null)
     .maybeSingle();
 
   if (error) throw error;
@@ -122,17 +123,28 @@ const adjustStock = async (
     );
   }
 
-  const payload = {
-    product_id: productId,
-    shelf_id: shelfId,
-    warehouse_id: warehouseId ?? row?.warehouse_id ?? null,
-    stock: next,
-  };
+  if (row?.id) {
+    const { error: updateError } = await supabase
+      .from('product_inventory')
+      .update({
+        warehouse_id: warehouseId ?? row?.warehouse_id ?? null,
+        stock: next,
+      })
+      .eq('id', row.id);
+    if (updateError) throw updateError;
+    return;
+  }
 
-  const { error: upsertError } = await supabase
+  const { error: insertError } = await supabase
     .from('product_inventory')
-    .upsert(payload, { onConflict: 'product_id,shelf_id' });
-  if (upsertError) throw upsertError;
+    .insert({
+      product_id: productId,
+      shelf_id: shelfId,
+      bundle_id: null,
+      warehouse_id: warehouseId ?? null,
+      stock: next,
+    });
+  if (insertError) throw insertError;
 };
 
 export const applyProductionMoves = async (moves: ProductionMove[]) => {

@@ -127,6 +127,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [printMode, setPrintMode] = useState(false);
   const [selectedPrintFields, setSelectedPrintFields] = useState<Record<string, string[]>>({});
   const [bundlePrintSummariesById, setBundlePrintSummariesById] = useState<Record<string, string>>({});
+  const closeWorkflowsModal = useCallback(() => {
+    setIsWorkflowsModalOpen(false);
+  }, []);
 
   const { tableProps, tableQueryResult, setFilters, filters } = useTable({
     resource: resolvedModuleId,
@@ -1359,7 +1362,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
       <WorkflowsManager
         inline={false}
         open={isWorkflowsModalOpen}
-        onClose={() => setIsWorkflowsModalOpen(false)}
+        onClose={closeWorkflowsModal}
         defaultModuleId={resolvedModuleId}
         context="module_list"
       />

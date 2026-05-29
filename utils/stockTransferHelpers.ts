@@ -5,6 +5,7 @@ export const SYSTEM_STOCK_TRANSFER_SOURCES = new Set([
   'purchase_invoice',
   'production',
   'production_stage',
+  'inventory_row_deletion',
 ]);
 
 export const STOCK_ADJUSTMENT_TRANSFER_TYPE = 'stock_adjustment';

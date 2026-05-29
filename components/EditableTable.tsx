@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { App, Table, Button, Space, Empty, Typography, Spin, Select } from 'antd';
-import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined, CopyOutlined } from '@ant-design/icons';
+import { App, Table, Button, Space, Empty, Typography, Spin, Select, Tooltip } from 'antd';
+import { CalculatorOutlined, EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined, CopyOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
 import { calculateRow } from '../utils/calculations';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
-import { canConvertUnits, convertArea, convertBetweenUnits } from '../utils/unitConversions';
+import { canConvertUnits, convertArea } from '../utils/unitConversions';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
+import {
+  calculateUnitQuantity,
+  getUnitQuantityConversion,
+} from '../utils/unitQuantityConversion';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import SmartTableRenderer from './SmartTableRenderer';
 import QrScanPopover from './QrScanPopover';
@@ -24,7 +28,10 @@ import {
   normalizeManualStockMovement,
 } from '../utils/manualStockMovements';
 import { mapStockTransferRowToEditorRow } from '../utils/stockTransferHelpers';
-import { syncOpeningBalanceTransfersForInventoryRows } from '../utils/productOpeningInventory';
+import {
+  recordInventoryRowDeletionTransfers,
+  syncOpeningBalanceTransfersForInventoryRows,
+} from '../utils/productOpeningInventory';
 
 const { Text } = Typography;
 
@@ -74,6 +81,7 @@ interface EditableTableProps {
   canViewField?: (fieldKey: string) => boolean;
   isMobile?: boolean;
   readOnly?: boolean;
+  refreshSignal?: number;
 }
 
 const EditableTable: React.FC<EditableTableProps> = ({
@@ -91,8 +99,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
   canEditModule,
   canViewField,
   readOnly,
+  refreshSignal,
 }) => {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const isReadOnly = block?.readonly === true || readOnly === true || canEditModule === false;
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
   const isProductInventory = moduleId === 'products' && block?.id === 'product_inventory';
@@ -114,6 +123,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const [data, setData] = useState<any[]>(initialData || []);
   const [tempData, setTempData] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
+  const [deletingInventoryRowId, setDeletingInventoryRowId] = useState<string | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [expandedProducts, setExpandedProducts] = useState<Record<string, { loading: boolean; data: any[] }>>({});
@@ -143,41 +153,34 @@ const EditableTable: React.FC<EditableTableProps> = ({
       ? { zIndex: 4000, width: `min(92vw, ${Math.max(desktopMinWidth, 420)}px)`, maxWidth: 'calc(100vw - 24px)' }
       : { zIndex: 4000, minWidth: desktopMinWidth, maxWidth: 'calc(100vw - 48px)' }
   );
-  const syncMainSubQuantities = (
-    row: any,
-    changedKey: string,
-    keys: { mainQty: string; subQty: string; mainUnit?: string; subUnit?: string }
-  ) => {
-    const mainQtyKey = keys.mainQty;
-    const subQtyKey = keys.subQty;
-    const mainUnit = String(row?.[keys.mainUnit || 'main_unit'] || '').trim();
-    const subUnit = String(row?.[keys.subUnit || 'sub_unit'] || '').trim();
-    const shouldUpdateMain = changedKey === subQtyKey
-      || (['main_unit', 'sub_unit'].includes(changedKey) && !toSafeNumber(row?.[mainQtyKey]) && !!toSafeNumber(row?.[subQtyKey]));
-    const shouldUpdateSub = changedKey === mainQtyKey
-      || (['main_unit', 'sub_unit'].includes(changedKey) && !toSafeNumber(row?.[subQtyKey]) && !!toSafeNumber(row?.[mainQtyKey]));
-    if (!canConvertUnits(mainUnit, subUnit)) {
-      if (mainUnit && subUnit && mainUnit === subUnit) {
-        if (shouldUpdateMain && !toSafeNumber(row?.[mainQtyKey])) {
-          row[mainQtyKey] = toSafeNumber(row?.[subQtyKey]);
-        }
-        if (shouldUpdateSub && !toSafeNumber(row?.[subQtyKey])) {
-          row[subQtyKey] = toSafeNumber(row?.[mainQtyKey]);
-        }
-      }
-      return row;
+
+  const getActiveRows = () => (mode === 'local' ? data : (isEditing ? tempData : data));
+  const getTableUnitConversion = (fieldKey: string) => getUnitQuantityConversion(fieldKey, {
+    availableKeys: (block.tableColumns || []).map((col: any) => String(col?.key || '')),
+  });
+
+  const commitActiveRows = (nextRows: any[]) => {
+    if (mode === 'local') {
+      setData(nextRows);
+      setTempData(nextRows);
+      if (onChange) onChange(nextRows);
+      return;
     }
-    if (shouldUpdateMain && !toSafeNumber(row?.[mainQtyKey])) {
-      const qtySub = toSafeNumber(row?.[subQtyKey]);
-      const converted = convertBetweenUnits(qtySub, subUnit, mainUnit);
-      row[mainQtyKey] = Number.isFinite(converted) ? converted : 0;
-      return row;
+    if (isEditing) setTempData(nextRows);
+    else setData(nextRows);
+  };
+
+  const applyManualUnitConversion = (index: number, fieldKey: string) => {
+    const conversion = getTableUnitConversion(fieldKey);
+    if (!conversion) return;
+    const source = getActiveRows();
+    const row = source[index] || {};
+    try {
+      const converted = calculateUnitQuantity(row, conversion);
+      updateRow(index, conversion.targetQtyKey, converted);
+    } catch (err: any) {
+      message.error(err?.message || 'خطا در محاسبه واحد');
     }
-    if (!shouldUpdateSub || toSafeNumber(row?.[subQtyKey])) return row;
-    const qtyMain = toSafeNumber(row?.[mainQtyKey]);
-    const converted = convertBetweenUnits(qtyMain, mainUnit, subUnit);
-    row[subQtyKey] = Number.isFinite(converted) ? converted : 0;
-    return row;
   };
   const applyDefaultUnitsToRow = (row: any) => {
     if (!row) return row;
@@ -263,7 +266,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   useEffect(() => {
     if (userToggledCollapse) return;
-    const source = isEditing ? tempData : data;
+    const source = getActiveRows();
     const empty = !Array.isArray(source) || source.length === 0;
     if (isAnyInvoiceItems || isShelfInventoryBlock || isProductStockMovements) {
       setIsCollapsed(false);
@@ -485,7 +488,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     };
 
     fetchInventoryRows();
-  }, [mode, recordId, isProductInventory, isShelfInventory, isProductStockMovements]);
+  }, [mode, recordId, isProductInventory, isShelfInventory, isProductStockMovements, refreshSignal]);
 
   useEffect(() => {
     const categories = new Set<string>();
@@ -524,7 +527,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   useEffect(() => {
     if (!isInvoiceItems) return;
-    const sourceRows = isEditing ? tempData : data;
+    const sourceRows = getActiveRows();
     sourceRows.forEach((row: any, index: number) => {
       const productId = row?.product_id ? String(row.product_id) : null;
       if (!productId) return;
@@ -537,7 +540,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   }, [isInvoiceItems, isEditing, tempData, data, shelfOptionsByRow]);
 
   const updateRow = (index: number, key: string, value: any) => {
-    const source = isEditing ? tempData : data;
+    const source = getActiveRows();
     const newData = [...source];
     newData[index] = { ...newData[index], [key]: value };
     if (isProductInventory || isShelfInventory || isProductStockMovements || isAnyInvoiceItems || isBundleContents) {
@@ -554,9 +557,6 @@ const EditableTable: React.FC<EditableTableProps> = ({
         newData[index]['voucher_type'] = 'outgoing';
         newData[index]['to_shelf_id'] = null;
       }
-      if (['main_quantity', 'sub_quantity', 'main_unit', 'sub_unit'].includes(key)) {
-        syncMainSubQuantities(newData[index], key, { mainQty: 'main_quantity', subQty: 'sub_quantity' });
-      }
     }
 
     if (isInvoiceItems && key === 'product_id') {
@@ -566,18 +566,6 @@ const EditableTable: React.FC<EditableTableProps> = ({
         loadShelvesForRow(rowKey, String(value));
       }
     }
-
-      if (isAnyInvoiceItems && ['quantity', 'sub_quantity', 'main_unit', 'sub_unit'].includes(key)) {
-        syncMainSubQuantities(newData[index], key, { mainQty: 'quantity', subQty: 'sub_quantity' });
-      }
-
-      if (isBundleContents && ['quantity', 'sub_quantity', 'main_unit', 'sub_unit'].includes(key)) {
-        syncMainSubQuantities(newData[index], key, { mainQty: 'quantity', subQty: 'sub_quantity' });
-      }
-
-      if ((isProductInventory || isShelfInventory) && ['stock', 'sub_stock', 'main_unit', 'sub_unit'].includes(key)) {
-        syncMainSubQuantities(newData[index], key, { mainQty: 'stock', subQty: 'sub_stock' });
-      }
 
     if (key === 'selected_product_id' && !value) {
       newData[index]['selected_shelf_id'] = null;
@@ -596,12 +584,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       newData[index]['total_price'] = calculateRow(newData[index], block.rowCalculationType);
     }
 
-    if (isEditing) {
-      setTempData(newData);
-    } else {
-      setData(newData);
-    }
-    if (mode === 'local' && onChange) onChange(newData);
+    commitActiveRows(newData);
 
     if (isProductionOrder && isBomItemBlock) {
       const filterableKeys = new Set((block.tableColumns || []).filter((c: any) => c.filterable).map((c: any) => c.key));
@@ -622,7 +605,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   };
 
   const clearSelectedProduct = (rowIndex: number) => {
-    const source = isEditing ? tempData : data;
+    const source = getActiveRows();
     const baseRow = source[rowIndex] || {};
     const nextRow: any = { ...baseRow };
     nextRow.selected_product_id = null;
@@ -637,9 +620,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
     const newData = [...source];
     newData[rowIndex] = nextRow;
-    if (isEditing) setTempData(newData);
-    else setData(newData);
-    if (mode === 'local' && onChange) onChange(newData);
+    commitActiveRows(newData);
   };
 
   const handleRelationChange = async (index: number, key: string, value: any, relationConfig: any) => {
@@ -658,7 +639,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           .single();
 
         if (!error && record) {
-          const sourceRows = isEditing ? tempData : data;
+          const sourceRows = getActiveRows();
           const newData = [...sourceRows];
           const currentRow = { ...newData[index], [key]: value };
 
@@ -674,7 +655,6 @@ const EditableTable: React.FC<EditableTableProps> = ({
             if (isAnyInvoiceItems && key === 'product_id') {
               currentRow.main_unit = record?.main_unit || currentRow.main_unit || null;
               currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || null;
-              syncMainSubQuantities(currentRow, 'quantity', { mainQty: 'quantity', subQty: 'sub_quantity' });
             }
 
             if (isBundleContents && key === 'product_id') {
@@ -682,7 +662,6 @@ const EditableTable: React.FC<EditableTableProps> = ({
               currentRow.system_code = record?.system_code || currentRow.system_code || '';
               currentRow.main_unit = record?.main_unit || currentRow.main_unit || '';
               currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || '';
-              syncMainSubQuantities(currentRow, 'quantity', { mainQty: 'quantity', subQty: 'sub_quantity' });
             }
 
           if (isInvoiceItems && key === 'product_id') {
@@ -692,9 +671,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           currentRow['total_price'] = calculateRow(currentRow, block.rowCalculationType);
 
           newData[index] = currentRow;
-          if (isEditing) setTempData(newData);
-          else setData(newData);
-          if (mode === 'local' && onChange) onChange(newData);
+          commitActiveRows(newData);
 
           if (isInvoiceItems && key === 'product_id' && value) {
             const rowKey = String(currentRow.key || currentRow.id || index);
@@ -745,23 +722,86 @@ const EditableTable: React.FC<EditableTableProps> = ({
       newRow.sub_quantity = parseFloat(newRow.sub_quantity) || 0;
     }
 
-    const newData = [...tempData, newRow];
-    setTempData(newData);
-    if (mode === 'local' && onChange) onChange(newData);
+    const newData = [...getActiveRows(), newRow];
+    commitActiveRows(newData);
   };
 
   const removeRow = (index: number) => {
     if (isReadOnly) return;
-    if (isProductStockMovements && tempData[index]?._readonly) return;
-    const newData = [...tempData];
-    newData.splice(index, 1);
-    setTempData(newData);
-    if (mode === 'local' && onChange) onChange(newData);
+    const source = getActiveRows();
+    if (isProductStockMovements && source[index]?._readonly) return;
+    const applyRemove = () => {
+      const newData = [...getActiveRows()];
+      newData.splice(index, 1);
+      commitActiveRows(newData);
+    };
+    if ((isProductInventory || isShelfInventory) && source[index]?.id) {
+      modal.confirm({
+        title: 'حذف ردیف موجودی',
+        content: 'این ردیف از موجودی محصول، قفسه و بسته محصول حذف خواهد شد و یک ردیف خروجی در ورود/خروج کالا ثبت می‌شود.',
+        okText: 'حذف',
+        okType: 'danger',
+        cancelText: 'انصراف',
+        onOk: applyRemove,
+      });
+      return;
+    }
+    applyRemove();
+  };
+
+  const deleteInventoryRow = (row: any) => {
+    if (!(isProductInventory || isShelfInventory) || !row?.id || canEditModule === false) return;
+    modal.confirm({
+      title: 'حذف ردیف موجودی',
+      content: 'این ردیف از موجودی محصول، قفسه و بسته محصول حذف خواهد شد و یک ردیف خروجی در ورود/خروج کالا ثبت می‌شود.',
+      okText: 'حذف',
+      okType: 'danger',
+      cancelText: 'انصراف',
+      onOk: async () => {
+        try {
+          const rowId = String(row.id);
+          setDeletingInventoryRowId(rowId);
+          const { error: deleteError } = await supabase
+            .from('product_inventory')
+            .delete()
+            .eq('id', rowId);
+          if (deleteError) throw deleteError;
+
+          const { data: authData } = await supabase.auth.getUser();
+          const currentUserId = authData?.user?.id || null;
+          await recordInventoryRowDeletionTransfers({
+            supabase: supabase as any,
+            removedRows: [{
+              product_id: row.product_id,
+              shelf_id: row.shelf_id,
+              bundle_id: row.bundle_id ?? null,
+              stock: row.stock,
+            }],
+            userId: currentUserId,
+          });
+
+          const productId = row?.product_id ? String(row.product_id) : (isProductInventory && recordId ? String(recordId) : '');
+          if (productId) {
+            await syncMultipleProductsStock(supabase as any, [productId]);
+          }
+
+          const nextRows = data.filter((item: any) => String(item?.id || '') !== rowId);
+          setData(nextRows);
+          if (onSaveSuccess) onSaveSuccess(nextRows);
+          message.success('ردیف موجودی حذف شد');
+        } catch (err: any) {
+          message.error(err?.message || 'خطا در حذف ردیف موجودی');
+        } finally {
+          setDeletingInventoryRowId(null);
+        }
+      },
+    });
   };
 
   const copyRow = (index: number) => {
     if (isReadOnly) return;
-    const sourceRow = tempData[index];
+    const source = getActiveRows();
+    const sourceRow = source[index];
     if (!sourceRow) return;
     if (isProductStockMovements && sourceRow?._readonly) return;
 
@@ -769,10 +809,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
       ...sourceRow,
       key: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     };
-    const newData = [...tempData];
+    const newData = [...source];
     newData.splice(index + 1, 0, copiedRow);
-    setTempData(newData);
-    if (mode === 'local' && onChange) onChange(newData);
+    commitActiveRows(newData);
   };
 
   const normalizeRowForEdit = (row: any) => {
@@ -801,10 +840,6 @@ const EditableTable: React.FC<EditableTableProps> = ({
         nextRow[key] = String(value);
       }
     });
-
-    if (isAnyInvoiceItems) {
-      syncMainSubQuantities(nextRow, 'quantity', { mainQty: 'quantity', subQty: 'sub_quantity' });
-    }
 
     return nextRow;
   };
@@ -1073,6 +1108,13 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
         const { data: authData } = await supabase.auth.getUser();
         const currentUserId = authData?.user?.id || null;
+        if (removedRows.length > 0) {
+          await recordInventoryRowDeletionTransfers({
+            supabase: supabase as any,
+            removedRows,
+            userId: currentUserId,
+          });
+        }
         await syncOpeningBalanceTransfersForInventoryRows({
           supabase: supabase as any,
           inventoryRows: payload,
@@ -1229,6 +1271,22 @@ const EditableTable: React.FC<EditableTableProps> = ({
   };
 
   const getColWidth = (col: any) => {
+    const quantityLikeKeys = new Set([
+      'quantity',
+      'sub_quantity',
+      'main_quantity',
+      'stock',
+      'sub_stock',
+      'opening_stock',
+      'opening_sub_stock',
+      'required_qty',
+      'delivered_qty',
+    ]);
+    const hasUnitConversion = !!getTableUnitConversion(String(col.key || ''));
+    if (col.type === FieldType.STOCK || quantityLikeKeys.has(String(col.key || ''))) {
+      const minWidth = hasUnitConversion ? 170 : 140;
+      return Math.max(Number(col.width) || 0, minWidth);
+    }
     if (col.width) return col.width;
     if (col.type === FieldType.RELATION) return 240;
     if (col.type === FieldType.SELECT || col.type === FieldType.MULTI_SELECT || col.type === FieldType.STATUS) return 170;
@@ -1241,7 +1299,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
   const getRowKey = (row: any) => String(row.key || row.id || '');
   const resolveRowIndex = (rowKey: React.Key) => {
-    const source = isEditing ? tempData : data;
+    const source = getActiveRows();
     return source.findIndex((row: any) => String(row.key || row.id || '') === String(rowKey));
   };
 
@@ -1304,7 +1362,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   const applySelectedProduct = (rowIndex: number, rowKey: string, selected: any) => {
     if (rowIndex < 0 || !selected) return;
 
-    const source = isEditing ? tempData : data;
+    const source = getActiveRows();
     const baseRow = source[rowIndex] || {};
     const nextRow: any = { ...baseRow };
 
@@ -1335,9 +1393,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
     const newData = [...source];
     newData[rowIndex] = nextRow;
-    if (isEditing) setTempData(newData);
-    else setData(newData);
-    if (mode === 'local' && onChange) onChange(newData);
+    commitActiveRows(newData);
 
     if (selected?.id) {
       loadShelvesForRow(rowKey, selected.id);
@@ -1512,6 +1568,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       dataIndex: col.key,
       key: col.key,
       width: getColWidth(col),
+      showTotal: col.showTotal,
       render: (text: any, record: any, index: number) => {
         const rowKey = getRowKey(record);
 
@@ -1525,7 +1582,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           : text;
         const rowMainUnit = String((record as any)?.main_unit || '').trim();
         const rowSubUnit = String((record as any)?.sub_unit || '').trim();
-        const canEditSubQuantity = canConvertUnits(rowMainUnit, rowSubUnit);
+        const canEditSubQuantity = !!rowMainUnit && !!rowSubUnit && (rowMainUnit === rowSubUnit || canConvertUnits(rowMainUnit, rowSubUnit));
         const dynamicSubQuantityReadonly =
           ((isAnyInvoiceItems || isProductStockMovements || isBundleContents) && col.key === 'sub_quantity' && !canEditSubQuantity)
           || ((isProductInventory || isShelfInventory) && col.key === 'sub_stock' && !canEditSubQuantity);
@@ -1584,6 +1641,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
             updateRow(index, col.key, val);
           }
         };
+        const unitConversion = getTableUnitConversion(col.key);
+        const showUnitConversionButton = isEditing
+          && !!unitConversion
+          && !fieldConfig.readonly;
 
         const typeKey = col.key === 'discount' ? 'discount_type' : col.key === 'vat' ? 'vat_type' : null;
         const typeValue = typeKey ? (record as any)[typeKey] : null;
@@ -1626,7 +1687,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
         }
 
         const fieldNode = (
-          <div className="flex items-center gap-1 w-full min-w-0 max-w-full overflow-hidden">
+          <div className="flex items-center gap-1 w-full min-w-0 max-w-full overflow-hidden flex-nowrap">
             <div className="flex-1 min-w-0 overflow-hidden">
                 <SmartFieldRenderer
                   field={fieldConfig}
@@ -1653,6 +1714,21 @@ const EditableTable: React.FC<EditableTableProps> = ({
                 {typeValue === 'percent' ? '٪' : 'تومان'}
               </Button>
             )}
+            {showUnitConversionButton && unitConversion && (
+              <Tooltip title={unitConversion.title}>
+                <Button
+                  size="small"
+                  type="text"
+                  className="px-1 text-[10px] whitespace-nowrap shrink-0"
+                  icon={<CalculatorOutlined />}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    applyManualUnitConversion(index, col.key);
+                  }}
+                />
+              </Tooltip>
+            )}
           </div>
         );
         if (invoiceQuantityWarning) {
@@ -1668,6 +1744,30 @@ const EditableTable: React.FC<EditableTableProps> = ({
         return fieldNode;
       },
     })) || []),
+    ...(!isEditing && (isProductInventory || isShelfInventory) && canEditModule !== false
+      ? [
+          {
+            title: '',
+            key: 'inventory_delete',
+            width: 48,
+            render: (_: any, row: any) => (
+              <Tooltip title="حذف ردیف موجودی">
+                <Button
+                  danger
+                  type="text"
+                  icon={<DeleteOutlined />}
+                  loading={deletingInventoryRowId === String(row?.id || '')}
+                  disabled={!row?.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    deleteInventoryRow(row);
+                  }}
+                />
+              </Tooltip>
+            ),
+          },
+        ]
+      : []),
     ...(isEditing
         ? [
           {
@@ -1732,7 +1832,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
       {!isCollapsed && (
         <Table
-          dataSource={isEditing ? tempData : data}
+          dataSource={getActiveRows()}
           columns={columns}
           pagination={false}
           size="middle"
@@ -1863,7 +1963,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
                 return;
               }
 
-              if (col.showTotal || ['total_price', 'amount', 'quantity', 'usage', 'stock'].includes(col.key)) {
+              if (col.showTotal || ['total_price', 'amount', 'quantity', 'sub_quantity', 'usage', 'stock', 'sub_stock', 'main_quantity', 'required_qty'].includes(col.key)) {
                 let total = 0;
                 if (isAnyInvoiceItems && (col.key === 'discount' || col.key === 'vat')) {
                   total = pageData.reduce((prev: number, current: any) => {
@@ -1971,6 +2071,13 @@ const EditableTable: React.FC<EditableTableProps> = ({
         .editable-table-main .ant-table-cell .ant-input,
         .editable-table-main .ant-table-cell .ant-input-number,
         .editable-table-main .ant-table-cell .ant-picker {
+          max-width: 100% !important;
+        }
+        .editable-table-main .ant-table-cell .smart-number-input.ant-input-number,
+        .editable-table-main .ant-table-cell .smart-number-input .ant-input-number-input-wrap,
+        .editable-table-main .ant-table-cell .smart-number-input .ant-input-number-input {
+          width: 100% !important;
+          min-width: 0 !important;
           max-width: 100% !important;
         }
         .editable-table-main .ant-table-cell .ant-select-selector {

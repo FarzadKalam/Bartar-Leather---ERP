@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Tabs } from 'antd';
 import EditableTable from '../EditableTable';
 import { FieldType } from '../../types';
@@ -38,8 +38,17 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
   stockMovementQuickAddSignal = 0,
 }) => {
   const parentProductHiddenFieldKeys = new Set(['category', 'waste_rate', 'buy_price', 'sell_price']);
+  const inventoryRefreshSignalRef = useRef(0);
+  const [inventoryRefreshSignal, setInventoryRefreshSignal] = useState(0);
+
   const handleStockUpdated = useCallback((stock: number) => {
     onDataUpdate?.({ stock });
+  }, [onDataUpdate]);
+
+  const handleInventoryUpdated = useCallback((inventory: any[]) => {
+    onDataUpdate?.({ product_inventory: inventory });
+    inventoryRefreshSignalRef.current += 1;
+    setInventoryRefreshSignal(inventoryRefreshSignalRef.current);
   }, [onDataUpdate]);
   const taskShelfId = moduleId === 'tasks'
     ? (data?.production_shelf_id || data?.recurrence_info?.production_shelf_id || null)
@@ -147,6 +156,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
                 (canViewField ? canViewField(fieldKey) !== false : true)
               }
               readOnly={moduleId === 'products' && block.id === 'product_inventory'}
+              refreshSignal={moduleId === 'products' && block.id === 'product_inventory' ? inventoryRefreshSignal : undefined}
             />
           )}
         </div>
@@ -166,6 +176,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
               isParentProduct={data?.catalog_role === 'parent'}
               canEditModule={data?.catalog_role === 'parent' ? false : canEditModule}
               onProductStockUpdated={handleStockUpdated}
+              onInventoryUpdated={handleInventoryUpdated}
               openQuickAddSignal={stockMovementQuickAddSignal}
             />
           </div>

@@ -24,6 +24,7 @@ export const stockTransfersConfig: ModuleDefinition = {
         { label: 'انبارگردانی', value: 'inventory_count' },
         { label: 'موجودی اول دوره', value: 'opening_balance' },
         { label: 'ضایعات', value: 'waste' },
+        { label: 'حذف ردیف موجودی', value: 'inventory_row_deletion' },
         { label: 'اصلاح موجودی', value: 'stock_adjustment' },
       ],
     },

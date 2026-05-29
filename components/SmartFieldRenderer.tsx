@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button } from 'antd';
-import { UploadOutlined, LoadingOutlined, QrcodeOutlined, PlusOutlined } from '@ant-design/icons';
+import { CalculatorOutlined, UploadOutlined, LoadingOutlined, QrcodeOutlined, PlusOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 import { supabase } from '../supabaseClient';
@@ -21,6 +21,10 @@ import { checkFieldDuplicate, findDuplicateUniqueFields, getUniqueFieldMessage, 
 import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
 import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
+import {
+  calculateUnitQuantity,
+  getUnitQuantityConversion,
+} from '../utils/unitQuantityConversion';
 
 const normalizeDigitsToEnglish = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
@@ -701,11 +705,12 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         return (
             <InputNumber 
                 {...commonProps}
-                className="w-full persian-number" 
+                className="w-full min-w-0 max-w-full persian-number smart-number-input" 
+                style={{ ...commonProps.style, minWidth: 0, maxWidth: '100%' }}
                 controls={false}
                 stringMode
                 inputMode="decimal"
-                formatter={(val, info) => formatNumericForInput(info?.input ?? val, true)}
+                formatter={(val, info) => formatNumericForInput(info?.userTyping ? info.input : val, true)}
                 parser={(val) => normalizeNumericString(val)}
             />
         );
@@ -1022,7 +1027,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     }
   };
 
-  const canRelationQuickCreate = fieldType === FieldType.RELATION
+  const canRelationQuickCreate = !compactMode
+    && fieldType === FieldType.RELATION
     && !!field.relationConfig?.targetModule;
   const globalImageGalleryModalNode = (
     <Modal
@@ -1202,6 +1208,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   onCancel,
   onOk,
 }) => {
+  const { message: inlineMsg } = App.useApp();
   const watchedValues = Form.useWatch([], form);
   const resolvedPopupZIndex = popupZIndex ?? 13020;
   const resolvedModalZIndex = resolvedPopupZIndex - 20;
@@ -1226,34 +1233,72 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
         onFinish={onOk}
         className="max-h-[60vh] overflow-y-auto pr-1"
       >
-        {fields.map((field) => (
-          <Form.Item
-            key={field.key}
-            name={field.key}
-            label={field.labels?.fa || field.key}
-            valuePropName={field.type === FieldType.CHECKBOX ? 'checked' : 'value'}
-            rules={field.validation?.required ? [{ required: true, message: 'الزامی است' }] : undefined}
-          >
-            <SmartFieldRenderer
-              field={field}
-              value={(watchedValues as any)?.[field.key]}
-              onChange={(val) => form.setFieldValue(field.key, val)}
-              options={
-                field.type === FieldType.RELATION
-                  ? (relationOptions[field.key] || [])
-                  : field.dynamicOptionsCategory
-                    ? (dynamicOptions[field.dynamicOptionsCategory] || [])
-                    : (field.options || [])
-              }
-              forceEditMode={true}
-              compactMode={true}
-              allValues={watchedValues || {}}
-              moduleId={moduleId}
-              popupContainer={quickCreatePopupContainer}
-              popupZIndex={resolvedPopupZIndex}
-            />
-          </Form.Item>
-        ))}
+        {fields.map((field) => {
+          return (
+            <Form.Item
+              key={field.key}
+              noStyle
+              shouldUpdate
+            >
+              {() => {
+                const conversion = getUnitQuantityConversion(field.key, {
+                  availableKeys: fields.map((item) => String(item.key || '')),
+                });
+                const currentValues = (form.getFieldsValue(true) || watchedValues || {}) as Record<string, unknown>;
+                return (
+                  <div className="flex items-start gap-1">
+                    <div className="flex-1 min-w-0">
+                      <Form.Item
+                        name={field.key}
+                        label={field.labels?.fa || field.key}
+                        valuePropName={field.type === FieldType.CHECKBOX ? 'checked' : 'value'}
+                        rules={field.validation?.required ? [{ required: true, message: 'الزامی است' }] : undefined}
+                      >
+                        <SmartFieldRenderer
+                          field={field}
+                          value={(currentValues as any)?.[field.key]}
+                          onChange={(val) => form.setFieldsValue({ [field.key]: val })}
+                          options={
+                            field.type === FieldType.RELATION
+                              ? (relationOptions[field.key] || [])
+                              : field.dynamicOptionsCategory
+                                ? (dynamicOptions[field.dynamicOptionsCategory] || [])
+                                : (field.options || [])
+                          }
+                          forceEditMode={true}
+                          compactMode={true}
+                          allValues={currentValues}
+                          moduleId={moduleId}
+                          popupContainer={quickCreatePopupContainer}
+                          popupZIndex={resolvedPopupZIndex}
+                        />
+                      </Form.Item>
+                    </div>
+                    {conversion && !(field as any).readonly && (
+                      <Button
+                        htmlType="button"
+                        size="small"
+                        className="mt-8"
+                        icon={<CalculatorOutlined />}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          try {
+                            const latestValues = form.getFieldsValue(true) || currentValues;
+                            const converted = calculateUnitQuantity(latestValues, conversion);
+                            form.setFieldsValue({ [conversion.targetQtyKey]: converted });
+                          } catch (err: any) {
+                            inlineMsg.error(err?.message || 'خطا در محاسبه واحد');
+                          }
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              }}
+            </Form.Item>
+          );
+        })}
       </Form>
       <div className="text-xs text-gray-400 mt-1">
         فیلدهای کلیدی، هدر، الزامی و ستون‌های لیست برای ثبت سریع نمایش داده شده‌اند.

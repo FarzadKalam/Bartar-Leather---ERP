@@ -46,6 +46,8 @@ const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
   context = 'module_list',
 }) => {
   const { message } = App.useApp();
+  const messageRef = React.useRef(message);
+  React.useEffect(() => { messageRef.current = message; }, [message]);
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState<WorkflowRecord[]>([]);
   const [moduleFilter, setModuleFilter] = useState<string>(defaultModuleId || 'all');
@@ -115,11 +117,19 @@ const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
       if (error) throw error;
       setRecords((data || []) as WorkflowRecord[]);
     } catch (err: any) {
-      message.error(`خطا در دریافت گردش کارها: ${err?.message || 'نامشخص'}`);
+      messageRef.current.error(`خطا در دریافت گردش کارها: ${err?.message || 'نامشخص'}`);
     } finally {
       setLoading(false);
     }
-  }, [message, moduleFilter]);
+  }, [moduleFilter]);
+
+  const closeEditor = useCallback(() => {
+    setEditorOpen(false);
+  }, []);
+
+  const handleEditorSaved = useCallback(() => {
+    fetchRecords();
+  }, [fetchRecords]);
 
   useEffect(() => {
     fetchPermissions();
@@ -289,20 +299,26 @@ const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
         />
       )}
 
-      <WorkflowEditorModal
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        onSaved={() => fetchRecords()}
-        initialModuleId={defaultModuleId}
-        record={editingRecord}
-        canEdit={canEdit}
-        moduleOptions={moduleOptions}
-      />
+      {editorOpen && (
+        <WorkflowEditorModal
+          open={editorOpen}
+          onClose={closeEditor}
+          onSaved={handleEditorSaved}
+          initialModuleId={defaultModuleId}
+          record={editingRecord}
+          canEdit={canEdit}
+          moduleOptions={moduleOptions}
+        />
+      )}
     </div>
   );
 
   if (inline) {
     return content;
+  }
+
+  if (!open) {
+    return null;
   }
 
   return (
@@ -317,7 +333,7 @@ const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
       }
       footer={null}
       width={1200}
-      destroyOnHidden={false}
+      destroyOnHidden
     >
       {content}
     </Modal>

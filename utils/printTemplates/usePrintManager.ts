@@ -130,7 +130,7 @@ export const usePrintManager = ({
       try {
         const { data: rows, error } = await supabase
           .from('product_inventory')
-          .select('product_id, stock, products(name, system_code, main_unit)')
+          .select('product_id, stock, sub_stock, products(name, system_code, main_unit, sub_unit)')
           .eq('bundle_id', data.id);
         if (error) throw error;
         if (!isMounted) return;

@@ -428,7 +428,17 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
              if (field.type === FieldType.STOCK) {
                const reorderPoint = record.reorder_point || 10;
                const color = value <= 0 ? 'red' : value <= reorderPoint ? 'orange' : 'green';
-               return <span style={{ color }} className="font-bold text-xs persian-number">{persianNum}</span>;
+               const unit = field.key === 'sub_stock'
+                 ? String(record?.sub_unit || '').trim()
+                 : field.key === 'stock'
+                   ? String(record?.main_unit || '').trim()
+                   : '';
+               return (
+                 <span style={{ color }} className="inline-flex items-baseline gap-1 font-bold text-xs persian-number">
+                   <span>{persianNum}</span>
+                   {unit ? <span className="text-[10px] font-medium opacity-75">{unit}</span> : null}
+                 </span>
+               );
              }
              return <span className="text-xs text-gray-600 dark:text-gray-300 persian-number">{persianNum}</span>;
         }

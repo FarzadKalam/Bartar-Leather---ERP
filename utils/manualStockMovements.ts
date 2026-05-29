@@ -1,5 +1,4 @@
 import { buildStockTransferPayload } from './stockTransferHelpers';
-import { canConvertUnits, convertBetweenUnits } from './unitConversions';
 
 export const STOCK_ADJUSTMENT_TYPE = 'stock_adjustment';
 
@@ -77,10 +76,7 @@ export const normalizeManualStockMovement = (
   const rawQtySub = toPositiveNumber(input.qtySub);
   const mainUnit = toNullableString(input.mainUnit);
   const subUnit = toNullableString(input.subUnit);
-  const convertedMainFromSub = !rawQtyMain && rawQtySub && mainUnit && subUnit && canConvertUnits(subUnit, mainUnit)
-    ? convertBetweenUnits(rawQtySub, subUnit, mainUnit)
-    : 0;
-  const qtyMain = rawQtyMain || convertedMainFromSub;
+  const qtyMain = rawQtyMain;
   if (voucherType === STOCK_ADJUSTMENT_TYPE) {
     if (!toNullableString(input.toShelfId)) {
       throw new Error('برای اصلاح موجودی، قفسه موجودی الزامی است.');
@@ -89,10 +85,7 @@ export const normalizeManualStockMovement = (
     throw new Error('مقدار واحد اصلی باید بیشتر از صفر باشد.');
   }
 
-  const convertedSubFromMain = !rawQtySub && qtyMain && mainUnit && subUnit && canConvertUnits(mainUnit, subUnit)
-    ? convertBetweenUnits(qtyMain, mainUnit, subUnit)
-    : 0;
-  const qtySub = rawQtySub || convertedSubFromMain;
+  const qtySub = rawQtySub;
   const fromShelfId = toNullableString(input.fromShelfId);
   const toShelfId = toNullableString(input.toShelfId);
 

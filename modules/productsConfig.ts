@@ -228,7 +228,7 @@ const fieldsArray: any[] = [
 
   // --- سایر فیلدها ---
   { key: 'stock', labels: { fa: 'موجودی', en: 'Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5, nature: FieldNature.PREDEFINED, readonly: true, description: 'محاسبه خودکار از موجودی قفسه‌ها', isTableColumn: true },
-  { key: 'sub_stock', labels: { fa: 'موجودی (واحد فرعی)', en: 'Sub Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5.1, nature: FieldNature.PREDEFINED, readonly: true },
+  { key: 'sub_stock', labels: { fa: 'موجودی (واحد فرعی)', en: 'Sub Stock' }, type: FieldType.STOCK, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 5.1, nature: FieldNature.PREDEFINED, readonly: true, isTableColumn: true },
   { key: 'waste_rate', labels: { fa: 'نرخ پرت', en: 'waste_rate' }, type: FieldType.NUMBER, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 7, nature: FieldNature.PREDEFINED },
   { key: 'buy_price', labels: { fa: 'قیمت خرید', en: 'Buy Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 8, nature: FieldNature.PREDEFINED, isTableColumn: true },
   { key: 'sell_price', labels: { fa: 'قیمت فروش', en: 'Sell Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 9, nature: FieldNature.PREDEFINED, isTableColumn: true },
@@ -419,6 +419,7 @@ export const createProductStockMovementsTableColumns = () => {
         { label: 'فاکتور فروش', value: 'sales_invoice' },
         { label: 'فاکتور خرید', value: 'purchase_invoice' },
         { label: 'تولید', value: 'production' },
+        { label: 'حذف ردیف موجودی', value: 'inventory_row_deletion' },
         { label: 'اصلاح موجودی', value: 'stock_adjustment' },
       ],
     },
@@ -513,7 +514,15 @@ export const createShelfItemsTableColumns = () => {
       dynamicOptionsCategory: 'main_unit',
       readonly: true
     },
-    { key: 'stock', title: 'موجودی در قفسه', type: FieldType.NUMBER, showTotal: true }
+    { key: 'stock', title: 'موجودی در قفسه', type: FieldType.NUMBER, showTotal: true },
+    {
+      key: 'sub_unit',
+      title: 'واحد فرعی',
+      type: FieldType.SELECT,
+      options: HARD_CODED_UNIT_OPTIONS,
+      readonly: true
+    },
+    { key: 'sub_stock', title: 'موجودی در قفسه (فرعی)', type: FieldType.NUMBER, showTotal: true, readonly: true }
   ];
 };
 

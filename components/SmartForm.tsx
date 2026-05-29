@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Form, Button, message, Spin, Divider, Select, Space, Modal, Checkbox } from 'antd';
-import { UserOutlined, TeamOutlined } from '@ant-design/icons';
+import { CalculatorOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
@@ -9,7 +9,10 @@ import GridTable from './GridTable';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType, ModuleField } from '../types';
-import { canConvertUnits, convertArea, convertBetweenUnits } from '../utils/unitConversions';
+import {
+  calculateUnitQuantity,
+  getUnitQuantityConversion,
+} from '../utils/unitQuantityConversion';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
@@ -525,24 +528,6 @@ const SmartForm: React.FC<SmartFormProps> = ({
     setFormData((prev: any) => ({ ...prev, name: nextName }));
   }, [module.id, watchedValues, relationOptions, dynamicOptions]);
 
-  useEffect(() => {
-    if (module.id !== 'products') return;
-    const currentValues = watchedValues || formData;
-    const mainUnit = currentValues?.main_unit;
-    const subUnit = currentValues?.sub_unit;
-    const stock = parseFloat(currentValues?.stock) || 0;
-    if (!mainUnit || !subUnit) return;
-    const subStock = convertArea(stock, mainUnit, subUnit);
-    const currentSubStock = parseFloat(currentValues?.sub_stock);
-    if (
-      Number.isFinite(subStock) &&
-      (!Number.isFinite(currentSubStock) || Math.abs((currentSubStock as number) - subStock) > 0.0005)
-    ) {
-      form.setFieldValue('sub_stock', subStock);
-      setFormData((prev: any) => ({ ...prev, sub_stock: subStock }));
-    }
-  }, [module.id, watchedValues, formData, form]);
-
   const normalizeNumericInput = (raw: any) => {
     if (raw === null || raw === undefined) return '';
     return String(raw)
@@ -566,20 +551,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
     const subUnit = String(sourceValues?.sub_unit ?? formValues?.sub_unit ?? formData?.sub_unit ?? '').trim();
     return (Array.isArray(rows) ? rows : []).map((row: any) => {
       const rawStock = toSafeNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
-      let subStock = toSafeNumber(row?.sub_stock);
-      let stock = rawStock;
-      if (mainUnit && subUnit) {
-        if (mainUnit === subUnit) {
-          subStock = stock;
-        } else if (!stock && subStock && canConvertUnits(subUnit, mainUnit)) {
-          stock = convertBetweenUnits(subStock, subUnit, mainUnit);
-        } else {
-          const converted = convertArea(stock, mainUnit as any, subUnit as any);
-          if (Number.isFinite(converted) && converted > 0) {
-            subStock = converted;
-          }
-        }
-      }
+      const subStock = toSafeNumber(row?.sub_stock);
+      const stock = rawStock;
       return {
         ...row,
         main_unit: mainUnit || row?.main_unit || null,
@@ -598,6 +571,89 @@ const SmartForm: React.FC<SmartFormProps> = ({
     } as ModuleField;
   };
 
+  const applyFormUnitConversion = (fieldKey: string) => {
+    const conversion = getUnitQuantityConversion(fieldKey, {
+      availableKeys: module.fields.map((field) => String(field.key || '')),
+    });
+    if (!conversion) return;
+    const values = {
+      ...formData,
+      ...form.getFieldsValue(true),
+    };
+    try {
+      const converted = calculateUnitQuantity(values, conversion);
+      form.setFieldsValue({ [conversion.targetQtyKey]: converted });
+      setFormData((prev: any) => ({
+        ...prev,
+        [conversion.targetQtyKey]: converted,
+      }));
+    } catch (err: any) {
+      message.error(err?.message || 'خطا در محاسبه واحد');
+    }
+  };
+
+  const hydrateStockTransferProductUnits = async (productId: any) => {
+    if (module.id !== 'stock_transfers') return null;
+    if (!productId) return { main_unit: null, sub_unit: null };
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('main_unit, sub_unit')
+        .eq('id', productId)
+        .single();
+      if (error) throw error;
+      return {
+        main_unit: data?.main_unit || null,
+        sub_unit: data?.sub_unit || null,
+      };
+    } catch (err) {
+      console.warn('Could not load stock transfer product units', err);
+      return null;
+    }
+  };
+
+  const handleSmartFieldValueChange = async (field: ModuleField, val: any, isReadOnly = false) => {
+    if (isReadOnly) return;
+    const normalizedValue = normalizeStateFieldValue(val);
+    form.setFieldValue(field.key, normalizedValue);
+    setFormData((prev: any) => ({
+      ...prev,
+      [field.key]: normalizedValue,
+    }));
+
+    if (module.id === 'stock_transfers' && field.key === 'product_id') {
+      const unitPatch = await hydrateStockTransferProductUnits(normalizedValue);
+      if (unitPatch) {
+        form.setFieldsValue(unitPatch);
+        setFormData((prev: any) => ({ ...prev, ...unitPatch }));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (module.id !== 'stock_transfers') return;
+    const productId = (watchedValues as any)?.product_id || formData?.product_id;
+    if (!productId) return;
+    if (formData?.main_unit && formData?.sub_unit) return;
+
+    let cancelled = false;
+    const loadUnits = async () => {
+      const unitPatch = await hydrateStockTransferProductUnits(productId);
+      if (cancelled || !unitPatch) return;
+      const hasChanged =
+        unitPatch.main_unit !== (formData?.main_unit || null)
+        || unitPatch.sub_unit !== (formData?.sub_unit || null);
+      if (!hasChanged) return;
+      form.setFieldsValue(unitPatch);
+      setFormData((prev: any) => ({ ...prev, ...unitPatch }));
+    };
+    void loadUnits();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [module.id, (watchedValues as any)?.product_id, formData?.product_id, formData?.main_unit, formData?.sub_unit]);
+
   // --- تابع کمکی: دریافت دیتای خلاصه (Summary) ---
   const getSummaryData = (currentData: any) => {
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
@@ -615,6 +671,13 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const handleFinish = async (values: any) => {
     setLoading(true);
     try {
+      const blockValues = (module.blocks || []).reduce((acc: Record<string, any>, block: any) => {
+        if (formData?.[block.id] !== undefined) {
+          acc[block.id] = formData[block.id];
+        }
+        return acc;
+      }, {});
+      values = { ...blockValues, ...values };
       if (module.id === 'production_orders' && !recordId) {
         values = { ...formData, ...values };
       }
@@ -625,17 +688,6 @@ const SmartForm: React.FC<SmartFormProps> = ({
           __product_global_attributes: formData?.__product_global_attributes ?? values?.__product_global_attributes ?? [],
           __product_variations: formData?.__product_variations ?? values?.__product_variations ?? [],
         };
-      }
-      if (module.id === 'products') {
-        const mainUnit = values?.main_unit ?? formData?.main_unit;
-        const subUnit = values?.sub_unit ?? formData?.sub_unit;
-        const stock = parseFloat(values?.stock ?? formData?.stock ?? 0) || 0;
-        if (mainUnit && subUnit) {
-          const computedSubStock = convertArea(stock, mainUnit, subUnit);
-          if (Number.isFinite(computedSubStock)) {
-            values.sub_stock = computedSubStock;
-          }
-        }
       }
       const assigneeCombo = values?.assignee_combo ?? formData?.assignee_combo;
       if (assigneeCombo) {
@@ -680,6 +732,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
       }
       if (module.fields?.some((field: any) => field.type === FieldType.TAGS) && values?.tags !== undefined) {
         delete values.tags;
+      }
+      if (module.id === 'stock_transfers') {
+        delete values.main_unit;
+        delete values.sub_unit;
       }
 
       if (module.id === 'products' && values.auto_name_enabled) {
@@ -839,10 +895,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
             if (insertedError) throw insertedError;
             inserted = insertedProduct;
           } else {
+            const insertSelect = module.id === 'products' ? 'id, main_unit, sub_unit' : 'id';
             const { data: insertedRow, error } = await supabase
               .from(module.table)
               .insert(values)
-              .select('id, main_unit, sub_unit')
+              .select(insertSelect)
               .single();
             if (error) throw error;
             inserted = insertedRow;
@@ -1121,25 +1178,40 @@ const SmartForm: React.FC<SmartFormProps> = ({
                        if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
                        if (field.type === FieldType.RELATION) options = relationOptions[field.key];
                        const resolvedField = normalizeFieldForBulkEdit(field as ModuleField);
+                       const conversion = getUnitQuantityConversion(field.key, {
+                         availableKeys: module.fields.map((item) => String(item.key || '')),
+                       });
+                       const canShowConversion = canEditModule !== false && !!conversion;
                        return (
                           <div key={field.key} className={field.type === FieldType.IMAGE ? 'row-span-2' : ''}>
+                            <div className="flex items-start gap-1">
+                              <div className="flex-1 min-w-0">
                               <SmartFieldRenderer 
                                 field={resolvedField} 
                                 value={formData[field.key]} 
                                 onChange={(val) => {
-                                  const normalizedValue = normalizeStateFieldValue(val);
-                                  form.setFieldValue(field.key, normalizedValue);
-                                  setFormData((prev: any) => ({
-                                    ...prev,
-                                    [field.key]: normalizedValue,
-                                  }));
+                                  void handleSmartFieldValueChange(resolvedField, val);
                                 }}
                               forceEditMode={true}
                               options={options}
                             moduleId={module.id}
                             recordId={recordId}
-                            allValues={formData}
+                            allValues={{ ...formData, ...currentValues }}
                           />
+                              </div>
+                              {conversion && canShowConversion && !(resolvedField as any).readonly && (
+                                <Button
+                                  size="small"
+                                  className="mt-8 px-2 text-xs"
+                                  icon={<CalculatorOutlined />}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    applyFormUnitConversion(field.key);
+                                  }}
+                                />
+                              )}
+                            </div>
                         </div>
                      );
                   })}
@@ -1223,7 +1295,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     .filter(f => f.nature !== 'system') // 👈 این خط اضافه شد: حذف کامل فیلدهای سیستمی از گرید
                     .filter(f => canViewField(f.key))
                     .filter(f => f.key !== 'assignee_id' && f.key !== 'assignee_type')
-                    .filter(f => !(module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && ['category', 'waste_rate', 'buy_price', 'sell_price'].includes(String(f.key))))
+                    .filter(f => !(module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && (
+                      String(f.key) === 'category'
+                        ? (currentValues as any)?.product_type !== 'raw'
+                        : ['waste_rate', 'buy_price', 'sell_price'].includes(String(f.key))
+                    )))
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
                   return (
@@ -1244,68 +1320,78 @@ const SmartForm: React.FC<SmartFormProps> = ({
                              if (field.dynamicOptionsCategory) options = dynamicOptions[field.dynamicOptionsCategory];
                              if (field.type === FieldType.RELATION) options = relationOptions[field.key];
                             const resolvedField = normalizeFieldForBulkEdit(field as ModuleField);
+                            const conversion = getUnitQuantityConversion(field.key, {
+                              availableKeys: module.fields.map((item) => String(item.key || '')),
+                            });
+                            const canShowConversion = !isReadOnly && !!conversion;
                             return (
-                              <SmartFieldRenderer 
-                                key={field.key}
-                                field={resolvedField}
-                                value={fieldValue}
-                                recordId={recordId}
-                                onChange={(val) => {
-                                  if (!isReadOnly) {
-                                    const normalizedValue = normalizeStateFieldValue(val);
-                                    form.setFieldValue(field.key, normalizedValue);
-                                    setFormData((prev: any) => ({
-                                      ...prev,
-                                      [field.key]: normalizedValue,
-                                    }));
-                                  }
-                                }}
-                               forceEditMode={true} options={options}
-                               moduleId={module.id}
-                               allValues={formData}
-                             />
+                              <div key={field.key} className="flex items-start gap-1">
+                                <div className="flex-1 min-w-0">
+                                  <SmartFieldRenderer 
+                                    field={resolvedField}
+                                    value={fieldValue}
+                                    recordId={recordId}
+                                    onChange={(val) => {
+                                      void handleSmartFieldValueChange(resolvedField, val, isReadOnly);
+                                    }}
+                                   forceEditMode={true} options={options}
+                                   moduleId={module.id}
+                                   allValues={{ ...formData, ...currentValues }}
+                                 />
+                                </div>
+                                {conversion && canShowConversion && !(resolvedField as any).readonly && (
+                                  <Button
+                                    size="small"
+                                    className="mt-8 px-2 text-xs"
+                                    icon={<CalculatorOutlined />}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      applyFormUnitConversion(field.key);
+                                    }}
+                                  />
+                                )}
+                              </div>
                            );
                         })}
                       </div>
                       {block.tableColumns && (
                         <div className="mt-6">
-                          <Form.Item name={block.id} noStyle>
-                            <EditableTable
-                              block={module.id === 'products' && block.id === 'product_inventory'
-                                ? {
-                                    ...block,
-                                    tableColumns: (block.tableColumns || []).map((col: any) => {
-                                      if (col.key === 'stock' || col.key === 'sub_stock') return { ...col, readonly: false };
-                                       if (col.key === 'main_unit' || col.key === 'sub_unit') {
-                                         return {
-                                           ...col,
-                                           defaultValue: formData?.[col.key] ?? col.defaultValue,
-                                         };
-                                       }
-                                      return col;
-                                    }),
-                                  }
-                                : block}
-                              initialData={formData[block.id] || []}
-                              mode="local"
-                              moduleId={module.id}
-                              relationOptions={relationOptions}
-                              dynamicOptions={dynamicOptions}
-                              canEditModule={canEditModule}
-                              canViewField={(fieldKey) =>
-                                canViewField(`${block.id}.${fieldKey}`) && canViewField(fieldKey)
-                              }
-                              readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
-                              onChange={(newData: any[]) => {
-                                const normalizedData = module.id === 'products' && block.id === 'product_inventory'
-                                  ? normalizeProductInventoryRows(newData, form.getFieldsValue())
-                                  : newData;
-                                const newFormData = { ...formData, [block.id]: normalizedData };
-                                setFormData(newFormData);
-                                form.setFieldValue(block.id, normalizedData);
-                              }}
-                            />
-                          </Form.Item>
+                          <EditableTable
+                            block={module.id === 'products' && block.id === 'product_inventory'
+                              ? {
+                                  ...block,
+                                  tableColumns: (block.tableColumns || []).map((col: any) => {
+                                    if (col.key === 'stock' || col.key === 'sub_stock') return { ...col, readonly: false };
+                                     if (col.key === 'main_unit' || col.key === 'sub_unit') {
+                                       return {
+                                         ...col,
+                                         defaultValue: formData?.[col.key] ?? col.defaultValue,
+                                       };
+                                     }
+                                    return col;
+                                  }),
+                                }
+                              : block}
+                            initialData={formData[block.id] || []}
+                            mode="local"
+                            moduleId={module.id}
+                            relationOptions={relationOptions}
+                            dynamicOptions={dynamicOptions}
+                            canEditModule={canEditModule}
+                            canViewField={(fieldKey) =>
+                              canViewField(`${block.id}.${fieldKey}`) && canViewField(fieldKey)
+                            }
+                            readOnly={module.id === 'products' && block.id === 'product_inventory' && !!recordId}
+                            onChange={(newData: any[]) => {
+                              const normalizedData = module.id === 'products' && block.id === 'product_inventory'
+                                ? normalizeProductInventoryRows(newData, form.getFieldsValue())
+                                : newData;
+                              const newFormData = { ...formData, [block.id]: normalizedData };
+                              setFormData(newFormData);
+                              form.setFieldValue(block.id, normalizedData);
+                            }}
+                          />
                         </div>
                       )}
                     </div>

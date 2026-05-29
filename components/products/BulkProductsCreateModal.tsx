@@ -8,8 +8,7 @@ import { FieldLocation, FieldNature, FieldType, LogicOperator, ModuleField } fro
 import { supabase } from '../../supabaseClient';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
 import { normalizeCatalogProductPayload } from '../../utils/productCatalog';
-import { convertArea, HARD_CODED_UNIT_OPTIONS, type UnitValue } from '../../utils/unitConversions';
-import { buildStockTransferPayload } from '../../utils/stockTransferHelpers';
+import { syncOpeningBalanceTransfersForInventoryRows } from '../../utils/productOpeningInventory';
 
 interface BulkProductsCreateModalProps {
   open: boolean;
@@ -53,8 +52,6 @@ const UNSUPPORTED_TYPES = new Set<FieldType>([
   FieldType.LOCATION,
 ]);
 
-const UNIT_VALUES = new Set<UnitValue>(HARD_CODED_UNIT_OPTIONS.map((u) => u.value));
-const isUnitValue = (v: unknown): v is UnitValue => typeof v === 'string' && UNIT_VALUES.has(v as UnitValue);
 const makeKey = () => `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 const isEmpty = (v: unknown) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0);
 const toNum = (v: unknown) => {
@@ -325,7 +322,6 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       }
       const productIds: string[] = [];
       const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null; bundleId?: string | null }> = [];
-      const transfers: Record<string, unknown>[] = [];
       const bundleItems: Record<string, unknown>[] = [];
       const changelogs: Record<string, unknown>[] = [];
       const preparedRows: Array<{
@@ -385,7 +381,6 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
 
         if (prepared.openingStock > 0 && prepared.openingShelfId) {
           const mainUnit = inserted?.main_unit ? String(inserted.main_unit).trim() : '';
-          const subUnit = inserted?.sub_unit ? String(inserted.sub_unit).trim() : '';
           deltas.push({
             productId: pid,
             shelfId: prepared.openingShelfId,
@@ -393,21 +388,6 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
             unit: mainUnit || null,
             bundleId: prepared.bundleId,
           });
-          const subQty = !mainUnit || !subUnit
-            ? 0
-            : (mainUnit === subUnit
-              ? prepared.openingStock
-              : (isUnitValue(mainUnit) && isUnitValue(subUnit) ? convertArea(prepared.openingStock, mainUnit, subUnit) : 0));
-          transfers.push(buildStockTransferPayload({
-            transferType: 'opening_balance',
-            productId: pid,
-            bundleId: prepared.bundleId,
-            deliveredQty: prepared.openingStock,
-            requiredQty: Number.isFinite(subQty) ? subQty : 0,
-            fromShelfId: null,
-            toShelfId: prepared.openingShelfId,
-            userId: actorProfileId,
-          }));
           if (prepared.bundleId) {
             bundleItems.push({
               bundle_id: prepared.bundleId,
@@ -420,7 +400,18 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
 
       if (deltas.length) await applyInventoryDeltas(supabase as never, deltas);
       if (productIds.length) await syncMultipleProductsStock(supabase as never, productIds);
-      if (transfers.length) { const { error: tErr } = await supabase.from('stock_transfers').insert(transfers); if (tErr) throw tErr; }
+      if (deltas.length) {
+        await syncOpeningBalanceTransfersForInventoryRows({
+          supabase: supabase as never,
+          inventoryRows: deltas.map(d => ({
+            product_id: d.productId,
+            shelf_id: d.shelfId,
+            bundle_id: d.bundleId ?? null,
+            stock: d.delta,
+          })),
+          userId: actorProfileId,
+        });
+      }
       if (bundleItems.length) {
         const { error: bundleErr } = await supabase.from('bundle_items').upsert(bundleItems, { onConflict: 'bundle_id,product_id' });
         if (bundleErr) throw bundleErr;

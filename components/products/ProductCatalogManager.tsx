@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, App, Button, Divider, Input, InputNumber, Modal, Select, Space, Switch, Tag } from 'antd';
-import { DeleteOutlined, LinkOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
+import { CalculatorOutlined, DeleteOutlined, LinkOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ModuleField } from '../../types';
 import { FieldType } from '../../types';
 import SmartFieldRenderer from '../SmartFieldRenderer';
 import DynamicSelectField from '../DynamicSelectField';
 import { supabase } from '../../supabaseClient';
-import { canConvertUnits, convertBetweenUnits } from '../../utils/unitConversions';
+import { canConvertUnits } from '../../utils/unitConversions';
+import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
 import {
   buildCatalogGroupPrefixedName,
   buildVariantName,
@@ -205,11 +206,6 @@ const flattenVariationInputValue = (rawValue: any): any[] => {
   }
   if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') return [];
   return [rawValue];
-};
-
-const toNumber = (value: any) => {
-  const parsed = parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const resolveVariationOptionValue = (
@@ -701,22 +697,26 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
       if (product?.auto_name_enabled && patch.variant_values) {
         merged.name = getAutoVariationName(merged.variant_values || {});
       }
-      const mainUnit = String(product?.main_unit || '').trim();
-      const subUnit = String(product?.sub_unit || '').trim();
-      const canConvertOpeningStock = canConvertUnits(mainUnit, subUnit);
-      if (canConvertOpeningStock && Object.prototype.hasOwnProperty.call(patch, 'opening_sub_stock')) {
-        if (!toNumber(variation.opening_stock)) {
-          const converted = convertBetweenUnits(toNumber((patch as any).opening_sub_stock), subUnit, mainUnit);
-          merged.opening_stock = Number.isFinite(converted) ? converted : 0;
-        }
-      } else if (canConvertOpeningStock && Object.prototype.hasOwnProperty.call(patch, 'opening_stock')) {
-        if (!toNumber(variation.opening_sub_stock)) {
-          const converted = convertBetweenUnits(toNumber((patch as any).opening_stock), mainUnit, subUnit);
-          merged.opening_sub_stock = Number.isFinite(converted) ? converted : 0;
-        }
-      }
       return merged;
     }));
+  };
+
+  const calculateVariationUnit = (index: number, fieldKey: string) => {
+    const conversion = getUnitQuantityConversion(fieldKey, {
+      availableKeys: ['opening_stock', 'opening_sub_stock'],
+    });
+    const variation = variations[index];
+    if (!conversion || !variation) return;
+    try {
+      const converted = calculateUnitQuantity({
+        ...variation,
+        main_unit: product?.main_unit,
+        sub_unit: product?.sub_unit,
+      }, conversion);
+      updateVariation(index, { [conversion.targetQtyKey]: converted } as Partial<ProductVariationRecord>);
+    } catch (err: any) {
+      message.error(err?.message || 'خطا در محاسبه واحد');
+    }
   };
 
   const removeVariation = (index: number) => {
@@ -1134,19 +1134,36 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                     }
 
                     if (fieldKey === 'waste_rate' || fieldKey === 'buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock' || fieldKey === 'opening_sub_stock') {
-                      const openingUnitsConvertible = canConvertUnits(product?.main_unit, product?.sub_unit);
+                      const openingUnitsConvertible = !!product?.main_unit && !!product?.sub_unit
+                        && (String(product.main_unit) === String(product.sub_unit) || canConvertUnits(product.main_unit, product.sub_unit));
                       const isOpeningSubStock = fieldKey === 'opening_sub_stock';
+                      const conversion = getUnitQuantityConversion(fieldKey, {
+                        availableKeys: ['opening_stock', 'opening_sub_stock'],
+                      });
                       return (
                         <div key={`${variation.id || variationIndex}_${field.key}`}>
                           <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || field.key}</div>
-                          <InputNumber
-                            className="w-full"
-                            controls={false}
-                            disabled={isOpeningSubStock && !openingUnitsConvertible}
-                            value={(variation as any)[field.key]}
-                            onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
-                            placeholder={field.labels?.fa || field.key}
-                          />
+                          <div className="flex items-center gap-1">
+                            <InputNumber
+                              className="w-full"
+                              controls={false}
+                              disabled={isOpeningSubStock && !openingUnitsConvertible}
+                              value={(variation as any)[field.key]}
+                              onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
+                              placeholder={field.labels?.fa || field.key}
+                            />
+                            {conversion && openingUnitsConvertible && (
+                              <Button
+                                size="small"
+                                icon={<CalculatorOutlined />}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  calculateVariationUnit(variationIndex, fieldKey);
+                                }}
+                              />
+                            )}
+                          </div>
                         </div>
                       );
                     }

@@ -790,6 +790,23 @@ const ModuleShow: React.FC = () => {
               nextRecord = { ...nextRecord, sub_stock: computedSubStock };
             }
           }
+          if (Array.isArray(nextRecord?.product_inventory)) {
+            nextRecord = {
+              ...nextRecord,
+              product_inventory: nextRecord.product_inventory.map((row: any) => {
+                const stockVal = parseFloat(row?.stock) || 0;
+                const subStock = mainUnit && subUnit
+                  ? convertArea(stockVal, mainUnit as any, subUnit as any)
+                  : 0;
+                return {
+                  ...row,
+                  main_unit: mainUnit || null,
+                  sub_unit: subUnit || null,
+                  sub_stock: Number.isFinite(subStock) ? subStock : 0,
+                };
+              }),
+            };
+          }
         }
         
         if (moduleId === 'customers') {

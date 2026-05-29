@@ -73,6 +73,23 @@ body {
   font-feature-settings: "ss01";
 }
 
+.smart-number-input.ant-input-number {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden;
+}
+
+.smart-number-input .ant-input-number-input {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  direction: ltr;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-inline: 6px !important;
+}
+
 .ant-btn {
   border-radius: 12px !important;
   font-weight: 700;

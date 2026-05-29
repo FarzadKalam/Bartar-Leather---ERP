@@ -49,7 +49,7 @@ export const getCompanyInventoryPolicy = async (
       inventoryPolicyCache.set(key, policy);
       return policy;
     } catch (error) {
-      console.warn('Could not load company inventory policy; using defaults.', error);
+      console.debug('Could not load company inventory policy; using defaults.', error);
       return { allowNegativeInventory: false };
     } finally {
       inventoryPolicyInflight.delete(key);

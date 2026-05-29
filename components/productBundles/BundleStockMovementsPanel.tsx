@@ -6,7 +6,7 @@ import { supabase } from '../../supabaseClient';
 import SmartTableRenderer from '../SmartTableRenderer';
 import { RelationQuickCreateInline } from '../SmartFieldRenderer';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
-import { canConvertUnits, convertArea, convertBetweenUnits } from '../../utils/unitConversions';
+import { canConvertUnits } from '../../utils/unitConversions';
 import {
   ALLOWED_MANUAL_STOCK_SOURCES,
   STOCK_ADJUSTMENT_TYPE,
@@ -63,8 +63,6 @@ const BundleStockMovementsPanel: React.FC<BundleStockMovementsPanelProps> = ({
   const voucherType = Form.useWatch('voucher_type', quickCreateForm);
   const source = Form.useWatch('source', quickCreateForm);
   const selectedProductId = Form.useWatch('product_id', quickCreateForm);
-  const mainQuantity = Form.useWatch('main_quantity', quickCreateForm);
-  const subQuantity = Form.useWatch('sub_quantity', quickCreateForm);
   const mainUnit = Form.useWatch('main_unit', quickCreateForm);
   const subUnit = Form.useWatch('sub_unit', quickCreateForm);
 
@@ -302,7 +300,6 @@ const BundleStockMovementsPanel: React.FC<BundleStockMovementsPanelProps> = ({
     if (!productId) {
       quickCreateForm.setFieldValue('main_unit', null);
       quickCreateForm.setFieldValue('sub_unit', null);
-      quickCreateForm.setFieldValue('sub_quantity', 0);
       return;
     }
 
@@ -323,27 +320,6 @@ const BundleStockMovementsPanel: React.FC<BundleStockMovementsPanelProps> = ({
       cancelled = true;
     };
   }, [fetchProductMeta, productMetaMap, quickCreateForm, quickCreateOpen, selectedProductId]);
-
-  useEffect(() => {
-    if (!quickCreateOpen) return;
-    const qtyMain = toQty(mainQuantity);
-    const currentSub = parseFloat(quickCreateForm.getFieldValue('sub_quantity')) || 0;
-    if (!qtyMain || currentSub || !canConvertUnits(mainUnit, subUnit)) return;
-    const converted = mainUnit && subUnit ? convertArea(qtyMain, mainUnit as any, subUnit as any) : 0;
-    const nextValue = Number.isFinite(converted) ? converted : 0;
-    if ((parseFloat(quickCreateForm.getFieldValue('sub_quantity')) || 0) !== nextValue) {
-      quickCreateForm.setFieldValue('sub_quantity', nextValue);
-    }
-  }, [mainQuantity, mainUnit, quickCreateForm, quickCreateOpen, subUnit]);
-
-  useEffect(() => {
-    if (!quickCreateOpen) return;
-    const qtyMain = toQty(mainQuantity);
-    const qtySub = toQty(subQuantity);
-    if (qtyMain || !qtySub || !canConvertUnits(subUnit, mainUnit)) return;
-    const converted = convertBetweenUnits(qtySub, subUnit, mainUnit);
-    quickCreateForm.setFieldValue('main_quantity', Number.isFinite(converted) ? converted : 0);
-  }, [mainQuantity, mainUnit, quickCreateForm, quickCreateOpen, subQuantity, subUnit]);
 
   const displayFields = useMemo(() => {
     const baseFields = (block.tableColumns || []).map((col: any, index: number) => ({
@@ -422,7 +398,8 @@ const BundleStockMovementsPanel: React.FC<BundleStockMovementsPanelProps> = ({
           (next as any).readonly = true;
         }
         if (field.key === 'sub_quantity') {
-          (next as any).readonly = !canConvertUnits(mainUnit, subUnit);
+          const sameUnit = !!mainUnit && !!subUnit && mainUnit === subUnit;
+          (next as any).readonly = !(sameUnit || canConvertUnits(mainUnit, subUnit));
         }
         return next;
       });

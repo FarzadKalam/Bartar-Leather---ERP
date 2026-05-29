@@ -1,10 +1,14 @@
 import * as assert from 'node:assert/strict';
 import { applyInventoryDeltas } from '../utils/inventoryTransactions';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
-import { persistProductOpeningInventory, reconcileMissingOpeningBalanceTransfers } from '../utils/productOpeningInventory';
+import {
+  persistProductOpeningInventory,
+  reconcileMissingOpeningBalanceTransfers,
+  recordInventoryRowDeletionTransfers,
+} from '../utils/productOpeningInventory';
 
 type Row = Record<string, any>;
-type Filter = { type: 'eq' | 'is'; column: string; value: any };
+type Filter = { type: 'eq' | 'is' | 'in'; column: string; value: any };
 
 const tests: Array<{ name: string; fn: () => Promise<void> | void }> = [];
 const runTest = (name: string, fn: () => Promise<void> | void) => {
@@ -29,6 +33,11 @@ class MockQuery {
 
   is(column: string, value: any) {
     this.filters.push({ type: 'is', column, value });
+    return this;
+  }
+
+  in(column: string, value: any[]) {
+    this.filters.push({ type: 'in', column, value });
     return this;
   }
 
@@ -95,6 +104,7 @@ class MockQuery {
   private executeSelect() {
     let rows = this.db.getTable(this.table).filter((row) => this.filters.every((filter) => {
       if (filter.type === 'eq') return row?.[filter.column] === filter.value;
+      if (filter.type === 'in') return (filter.value || []).includes(row?.[filter.column]);
       return (row?.[filter.column] ?? null) === filter.value;
     }));
     if (typeof this.limitValue === 'number') {
@@ -160,6 +170,7 @@ class MockSupabase {
     target.forEach((row, index) => {
       const matches = filters.every((filter) => {
         if (filter.type === 'eq') return row?.[filter.column] === filter.value;
+        if (filter.type === 'in') return (filter.value || []).includes(row?.[filter.column]);
         return (row?.[filter.column] ?? null) === filter.value;
       });
       if (!matches) return;
@@ -218,7 +229,7 @@ runTest('opening inventory keeps bundle id on inventory, bundle items, and trans
   assert.equal(supabase.getTable('stock_transfers')[0].bundle_id, 'bundle-1');
 });
 
-runTest('opening inventory accepts sub-unit quantity when main quantity is empty', async () => {
+runTest('opening inventory does not convert sub-unit quantity when main quantity is empty', async () => {
   const supabase = new MockSupabase({
     products: [{ id: 'p1', name: 'Leather', main_unit: 'متر مربع', sub_unit: 'سانتیمتر مربع', stock: 0, sub_stock: 0 }],
     product_inventory: [],
@@ -235,9 +246,8 @@ runTest('opening inventory accepts sub-unit quantity when main quantity is empty
     userId: 'u1',
   });
 
-  assert.equal(supabase.getTable('product_inventory')[0].stock, 0.999);
-  assert.equal(supabase.getTable('stock_transfers')[0].delivered_qty, 0.999);
-  assert.equal(supabase.getTable('stock_transfers')[0].required_qty, 10000);
+  assert.equal(supabase.getTable('product_inventory').length, 0);
+  assert.equal(supabase.getTable('stock_transfers').length, 0);
 });
 
 runTest('applyInventoryDeltas aggregates per product/shelf and blocks negative stock by default', async () => {
@@ -285,7 +295,7 @@ runTest('purchase invoice finalization increases stock and logs incoming transfe
   assert.equal(supabase.getTable('products')[0].stock, 3);
 });
 
-runTest('invoice finalization accepts sub-unit quantity and applies main-unit stock', async () => {
+runTest('invoice finalization does not convert sub-unit quantity when main quantity is empty', async () => {
   const supabase = new MockSupabase({
     products: [{ id: 'p1', name: 'Leather', main_unit: 'متر مربع', sub_unit: 'سانتیمتر مربع', stock: 0, sub_stock: 0 }],
     product_inventory: [],
@@ -302,10 +312,9 @@ runTest('invoice finalization accepts sub-unit quantity and applies main-unit st
     userId: 'u1',
   });
 
-  assert.equal(result.applied, true);
-  assert.equal(supabase.getTable('product_inventory')[0].stock, 0.999);
-  assert.equal(supabase.getTable('stock_transfers')[0].delivered_qty, 0.999);
-  assert.equal(supabase.getTable('stock_transfers')[0].required_qty, 10000);
+  assert.equal(result.applied, false);
+  assert.equal(supabase.getTable('product_inventory').length, 0);
+  assert.equal(supabase.getTable('stock_transfers').length, 0);
 });
 
 runTest('sales invoice finalization decreases stock and logs outgoing transfer', async () => {
@@ -439,6 +448,28 @@ runTest('bundle inventory stays isolated from normal shelf inventory for the sam
 
   assert.equal(normalRow?.stock, 7);
   assert.equal(bundleRow?.stock, 2);
+});
+
+runTest('inventory row deletion is logged as outgoing stock movement', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر طول', sub_unit: 'سانتیمتر طول', stock: 5, sub_stock: 500 }],
+    stock_transfers: [],
+  });
+
+  await recordInventoryRowDeletionTransfers({
+    supabase: supabase as any,
+    removedRows: [{ product_id: 'p1', shelf_id: 's1', bundle_id: 'b1', stock: 2 }],
+    userId: 'u1',
+  });
+
+  const transfer = supabase.getTable('stock_transfers')[0];
+  assert.equal(transfer.transfer_type, 'inventory_row_deletion');
+  assert.equal(transfer.product_id, 'p1');
+  assert.equal(transfer.bundle_id, 'b1');
+  assert.equal(transfer.from_shelf_id, 's1');
+  assert.equal(transfer.to_shelf_id, null);
+  assert.equal(transfer.delivered_qty, 2);
+  assert.equal(transfer.required_qty, 200);
 });
 
 let failures = 0;

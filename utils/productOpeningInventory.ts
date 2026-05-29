@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { applyInventoryDeltas, syncMultipleProductsStock } from './inventoryTransactions';
-import { canConvertUnits, convertArea, convertBetweenUnits, HARD_CODED_UNIT_OPTIONS, type UnitValue } from './unitConversions';
+import { convertArea, HARD_CODED_UNIT_OPTIONS, type UnitValue } from './unitConversions';
 import { buildStockTransferPayload } from './stockTransferHelpers';
 
 type OpeningInventoryRow = {
@@ -29,6 +29,8 @@ type InventoryBalanceRow = {
   bundle_id?: string | null;
   stock?: unknown;
 };
+
+export const INVENTORY_ROW_DELETION_TRANSFER_TYPE = 'inventory_row_deletion';
 
 const UNIT_VALUES = new Set<UnitValue>(HARD_CODED_UNIT_OPTIONS.map((item) => item.value));
 
@@ -76,7 +78,6 @@ export const persistProductOpeningInventory = async ({
   supabase,
   productId,
   productMainUnit,
-  productSubUnit,
   rows,
   userId,
 }: PersistProductOpeningInventoryParams) => {
@@ -92,27 +93,19 @@ export const persistProductOpeningInventory = async ({
     const rawQtyMain = toNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
     const qtySub = toNumber(row?.sub_stock ?? 0);
     const rowMainUnit = normalizeUnit(row?.main_unit);
-    const rowSubUnit = normalizeUnit(row?.sub_unit);
     return {
       shelfId,
       bundleId,
       qtyMain: rawQtyMain,
       qtySub,
       rowMainUnit,
-      rowSubUnit,
     };
   });
 
   const mainUnit = normalizeUnit(productMainUnit);
-  const subUnit = normalizeUnit(productSubUnit);
   const rowsWithQty = normalizedRows
     .map((row) => {
-      const rowMainUnit = row.rowMainUnit || mainUnit;
-      const rowSubUnit = row.rowSubUnit || subUnit;
-      const convertedMain = !row.qtyMain && row.qtySub && canConvertUnits(rowSubUnit, rowMainUnit)
-        ? convertBetweenUnits(row.qtySub, rowSubUnit, rowMainUnit)
-        : 0;
-      return { ...row, qtyMain: row.qtyMain || convertedMain };
+      return { ...row, qtyMain: row.qtyMain };
     })
     .filter((row) => Math.abs(row.qtyMain) > 0);
   if (!rowsWithQty.length) return;
@@ -128,7 +121,6 @@ export const persistProductOpeningInventory = async ({
   }
 
   const deltas: Array<{ productId: string; shelfId: string; bundleId?: string | null; delta: number; unit?: string | null }> = [];
-  const transfers: Array<Record<string, unknown>> = [];
   const bundleItems = rowsWithQty
     .filter(row => row.bundleId) // فقط ردیف‌هایی که بسته دارند
     .map(row => ({
@@ -140,37 +132,13 @@ export const persistProductOpeningInventory = async ({
 
   rowsWithQty.forEach((row) => {
     const rowMainUnit = row.rowMainUnit || mainUnit;
-    const rowSubUnit = row.rowSubUnit || subUnit;
-    let resolvedSubQty = row.qtySub;
-    if (!resolvedSubQty && rowMainUnit && rowSubUnit) {
-      if (rowMainUnit === rowSubUnit) {
-        resolvedSubQty = row.qtyMain;
-      } else if (isUnitValue(rowMainUnit) && isUnitValue(rowSubUnit)) {
-        const converted = convertArea(row.qtyMain, rowMainUnit, rowSubUnit);
-        if (Number.isFinite(converted) && converted > 0) {
-          resolvedSubQty = converted;
-        }
-      }
-    }
-
     deltas.push({
       productId: normalizedProductId,
       shelfId: row.shelfId,
-      bundleId: row.bundleId ?? null, 
+      bundleId: row.bundleId ?? null,
       delta: row.qtyMain,
       unit: rowMainUnit || null,
     });
-
-    transfers.push(buildStockTransferPayload({
-      transferType: 'opening_balance',
-      productId: normalizedProductId,
-      bundleId: row.bundleId ?? null,
-      deliveredQty: row.qtyMain,
-      requiredQty: Math.abs(resolvedSubQty || 0),
-      fromShelfId: null,
-      toShelfId: row.shelfId,
-      userId: userId || null,
-    }));
   });
 
   if (deltas.length) {
@@ -189,10 +157,16 @@ export const persistProductOpeningInventory = async ({
     }
   }
 
-  if (transfers.length) {
-    const { error } = await supabase.from('stock_transfers').insert(transfers);
-    if (error) throw error;
-  }
+  await syncOpeningBalanceTransfersForInventoryRows({
+    supabase,
+    inventoryRows: rowsWithQty.map(row => ({
+      product_id: normalizedProductId,
+      shelf_id: row.shelfId,
+      bundle_id: row.bundleId ?? null,
+      stock: row.qtyMain,
+    })),
+    userId,
+  });
 
 };
 
@@ -437,4 +411,69 @@ export const syncOpeningBalanceTransfersForInventoryRows = async ({
   }
 
   return { inserted: toInsert.length, updated: toUpdate.length, deleted: toDeleteIds.length };
+};
+
+export const recordInventoryRowDeletionTransfers = async ({
+  supabase,
+  removedRows,
+  userId,
+}: {
+  supabase: SupabaseClient;
+  removedRows?: InventoryBalanceRow[];
+  userId?: string | null;
+}) => {
+  const rows = (removedRows || [])
+    .map((row) => ({
+      productId: String(row?.product_id || '').trim(),
+      shelfId: String(row?.shelf_id || '').trim(),
+      bundleId: normalizeRelationId(row?.bundle_id),
+      stock: Math.abs(toNumber(row?.stock)),
+    }))
+    .filter((row) => row.productId && row.shelfId && row.stock > 0);
+
+  if (!rows.length) return { inserted: 0 };
+
+  const productIds = Array.from(new Set(rows.map((row) => row.productId)));
+  const { data: products, error: productsError } = await supabase
+    .from('products')
+    .select('id, main_unit, sub_unit')
+    .in('id', productIds);
+  if (productsError) throw productsError;
+
+  const productUnits = new Map(
+    (products || []).map((row: any) => [
+      String(row?.id || ''),
+      {
+        mainUnit: normalizeUnit(row?.main_unit),
+        subUnit: normalizeUnit(row?.sub_unit),
+      },
+    ])
+  );
+
+  const payload = rows.map((row) => {
+    const unitMeta = productUnits.get(row.productId) || { mainUnit: '', subUnit: '' };
+    let subQty = row.stock;
+    if (unitMeta.mainUnit && unitMeta.subUnit && unitMeta.mainUnit !== unitMeta.subUnit) {
+      if (isUnitValue(unitMeta.mainUnit) && isUnitValue(unitMeta.subUnit)) {
+        const converted = convertArea(row.stock, unitMeta.mainUnit, unitMeta.subUnit);
+        subQty = Number.isFinite(converted) ? converted : row.stock;
+      }
+    }
+
+    return buildStockTransferPayload({
+      transferType: INVENTORY_ROW_DELETION_TRANSFER_TYPE,
+      productId: row.productId,
+      bundleId: row.bundleId,
+      deliveredQty: row.stock,
+      requiredQty: Math.abs(subQty || 0),
+      fromShelfId: row.shelfId,
+      toShelfId: null,
+      userId: userId || null,
+    });
+  });
+
+  const { error } = await supabase.from('stock_transfers').insert(payload);
+  if (error) throw error;
+
+  return { inserted: payload.length };
 };

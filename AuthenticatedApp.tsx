@@ -125,6 +125,7 @@ function AuthenticatedApp() {
       options={{
         syncWithLocation: true,
         warnWhenUnsavedChanges: true,
+        disableTelemetry: true,
       }}
     >
       <Suspense fallback={<FullScreenLoader />}>

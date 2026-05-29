@@ -154,6 +154,7 @@ export const productBundlesConfig: ModuleDefinition = {
             { label: 'فاکتور فروش', value: 'sales_invoice' },
             { label: 'فاکتور خرید', value: 'purchase_invoice' },
             { label: 'تولید', value: 'production' },
+            { label: 'حذف ردیف موجودی', value: 'inventory_row_deletion' },
             { label: 'اصلاح موجودی', value: 'stock_adjustment' }
           ]
         },

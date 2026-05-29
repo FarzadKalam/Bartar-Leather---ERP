@@ -6,6 +6,8 @@ export interface ProductBundlePrintItem {
   systemCode: string;
   stock: number;
   mainUnit: string;
+  subStock: number;
+  subUnit: string;
 }
 
 const toNumber = (value: any) => {
@@ -22,8 +24,10 @@ export const mapBundleInventoryRowsToPrintItems = (rows: any[]): ProductBundlePr
 
     const existing = items.get(productId);
     const stock = toNumber(row?.stock);
+    const subStock = toNumber(row?.sub_stock);
     if (existing) {
       existing.stock += stock;
+      existing.subStock += subStock;
       return;
     }
 
@@ -33,6 +37,8 @@ export const mapBundleInventoryRowsToPrintItems = (rows: any[]): ProductBundlePr
       systemCode: String(row?.products?.system_code || ''),
       stock,
       mainUnit: String(row?.products?.main_unit || ''),
+      subStock,
+      subUnit: String(row?.products?.sub_unit || ''),
     });
   });
 
@@ -46,7 +52,12 @@ export const mapBundleInventoryRowsToPrintItems = (rows: any[]): ProductBundlePr
 export const formatBundlePrintItems = (items: ProductBundlePrintItem[]) => (
   (items || []).map((item, index) => {
     const code = item.systemCode || '-';
-    const stock = `${toPersianNumber(item.stock)} ${item.mainUnit}`.trim();
+    const mainStock = `${toPersianNumber(item.stock)} ${item.mainUnit}`.trim();
+    const hasSecondaryUnit = item.subUnit && item.subUnit !== item.mainUnit;
+    const subStock = hasSecondaryUnit
+      ? ` (${toPersianNumber(item.subStock)} ${item.subUnit})`
+      : '';
+    const stock = `${mainStock}${subStock}`.trim();
     return `${toPersianNumber(index + 1)}. ${code} | ${item.name} | موجودی: ${stock}`;
   }).join('\n')
 );

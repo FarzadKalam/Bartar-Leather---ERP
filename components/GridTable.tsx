@@ -1609,11 +1609,13 @@ const GridTable: React.FC<GridTableProps> = ({
                           title: 'طول',
                           dataIndex: 'length',
                           key: 'length',
+                          width: 130,
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit
                               ? (
                                 <InputNumber
-                                  className="font-medium persian-number"
+                                  className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
+                                  style={{ minWidth: 0, maxWidth: '100%' }}
                                   value={val}
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { length: v })}
                                   formatter={(v) => formatGroupedInput(v)}
@@ -1628,11 +1630,13 @@ const GridTable: React.FC<GridTableProps> = ({
                           title: 'عرض',
                           dataIndex: 'width',
                           key: 'width',
+                          width: 130,
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit
                               ? (
                                 <InputNumber
-                                  className="font-medium persian-number"
+                                  className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
+                                  style={{ minWidth: 0, maxWidth: '100%' }}
                                   value={val}
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { width: v })}
                                   formatter={(v) => formatGroupedInput(v)}
@@ -1647,11 +1651,13 @@ const GridTable: React.FC<GridTableProps> = ({
                           title: 'تعداد',
                           dataIndex: 'quantity',
                           key: 'quantity',
+                          width: 130,
                           render: (val: any, _record: any, pieceIndex: number) => (
                             rowCanEdit
                               ? (
                                 <InputNumber
-                                  className="font-medium persian-number"
+                                  className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
+                                  style={{ minWidth: 0, maxWidth: '100%' }}
                                   value={val}
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { quantity: v })}
                                   formatter={(v) => formatGroupedInput(v)}
@@ -1671,7 +1677,8 @@ const GridTable: React.FC<GridTableProps> = ({
                             rowCanEdit
                               ? (
                                 <InputNumber
-                                  className="font-medium persian-number"
+                                  className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
+                                  style={{ minWidth: 0, maxWidth: '100%' }}
                                   value={val}
                                   onChange={(v) => updatePiece(rowIndex, pieceIndex, { waste_rate: v })}
                                   formatter={(v) => formatGroupedInput(v)}
@@ -1778,7 +1785,8 @@ const GridTable: React.FC<GridTableProps> = ({
                               rowCanEdit
                                 ? (
                                   <InputNumber
-                                    className="font-medium persian-number"
+                                    className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
+                                    style={{ minWidth: 0, maxWidth: '100%' }}
                                     value={val}
                                     onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })}
                                     formatter={(v) => formatGroupedInput(v)}

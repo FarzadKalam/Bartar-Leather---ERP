@@ -4,6 +4,7 @@ import {
   buildStockTransferPayloadFromMovement,
   normalizeManualStockMovement,
 } from '../utils/manualStockMovements';
+import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 
 const tests: Array<{ name: string; fn: () => void }> = [];
 const runTest = (name: string, fn: () => void) => {
@@ -75,23 +76,21 @@ runTest('payload builder keeps stock_transfers structure consistent', () => {
   });
 });
 
-runTest('sub quantity is converted to main quantity for convertible units', () => {
-  const movement = normalizeManualStockMovement({
-    productId: 'p1',
-    transferType: 'opening_balance',
-    voucherType: 'incoming',
-    qtyMain: 0,
-    qtySub: 10000,
-    fromShelfId: null,
-    toShelfId: 's1',
-    mainUnit: 'متر مربع',
-    subUnit: 'سانتیمتر مربع',
-  });
-
-  assert.equal(movement.qtyMain, 0.999);
-  assert.deepEqual(buildInventoryDeltasFromMovement(movement), [
-    { productId: 'p1', shelfId: 's1', delta: 0.999, unit: 'متر مربع', bundleId: null },
-  ]);
+runTest('sub quantity alone is not converted implicitly to main quantity', () => {
+  assert.throws(
+    () => normalizeManualStockMovement({
+      productId: 'p1',
+      transferType: 'opening_balance',
+      voucherType: 'incoming',
+      qtyMain: 0,
+      qtySub: 10000,
+      fromShelfId: null,
+      toShelfId: 's1',
+      mainUnit: 'متر مربع',
+      subUnit: 'سانتیمتر مربع',
+    }),
+    /مقدار واحد اصلی باید بیشتر از صفر باشد/,
+  );
 });
 
 runTest('stock adjustment accepts zero as the new target stock and does not create a direct delta', () => {
@@ -126,6 +125,54 @@ runTest('invalid same-shelf transfer is rejected', () => {
     }),
     /قفسه برداشت و قفسه ورود نباید یکسان باشند/,
   );
+});
+
+runTest('unit conversion resolves invoice sub quantity against quantity in table context', () => {
+  const conversion = getUnitQuantityConversion('quantity', {
+    availableKeys: ['product_id', 'quantity', 'main_unit', 'sub_unit', 'sub_quantity'],
+  });
+
+  assert.equal(conversion?.targetQtyKey, 'sub_quantity');
+  assert.equal(calculateUnitQuantity({
+    quantity: 2,
+    main_unit: 'متر مربع',
+    sub_unit: 'سانتیمتر مربع',
+  }, conversion!), 20000);
+});
+
+runTest('unit conversion resolves movement sub quantity against main_quantity in table context', () => {
+  const conversion = getUnitQuantityConversion('sub_quantity', {
+    availableKeys: ['main_quantity', 'main_unit', 'sub_unit', 'sub_quantity'],
+  });
+
+  assert.equal(conversion?.targetQtyKey, 'main_quantity');
+  assert.equal(calculateUnitQuantity({
+    sub_quantity: 200,
+    main_unit: 'فوت',
+    sub_unit: 'سانتیمتر مربع',
+  }, conversion!), 0.215);
+});
+
+runTest('unit conversion handles square millimeter and square foot both ways', () => {
+  const mainToSub = getUnitQuantityConversion('quantity', {
+    availableKeys: ['quantity', 'main_unit', 'sub_unit', 'sub_quantity'],
+  });
+  const subToMain = getUnitQuantityConversion('sub_quantity', {
+    availableKeys: ['quantity', 'main_unit', 'sub_unit', 'sub_quantity'],
+  });
+
+  assert.equal(calculateUnitQuantity({
+    quantity: 200,
+    main_unit: 'میلیمتر مربع',
+    sub_unit: 'فوت مربع',
+    sub_quantity: 99,
+  }, mainToSub!), 0.002);
+  assert.equal(calculateUnitQuantity({
+    quantity: 99,
+    main_unit: 'میلیمتر مربع',
+    sub_unit: 'فوت مربع',
+    sub_quantity: 200,
+  }, subToMain!), 18580608);
 });
 
 let failures = 0;

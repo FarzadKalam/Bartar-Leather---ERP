@@ -64,6 +64,7 @@ const BLOCKS = {
         title: 'مقدار واحد فرعی',
         type: FieldType.NUMBER,
         width: 130,
+        showTotal: true,
       },
       { key: 'unit_price', title: 'قیمت واحد (تومان)', type: FieldType.PRICE, width: 150 },
       { key: 'discount', title: 'تخفیف (تومان/٪)', type: FieldType.PERCENTAGE_OR_AMOUNT, width: 130, showTotal: true },

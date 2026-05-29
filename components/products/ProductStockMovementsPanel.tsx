@@ -6,7 +6,7 @@ import { supabase } from '../../supabaseClient';
 import SmartTableRenderer from '../SmartTableRenderer';
 import { RelationQuickCreateInline } from '../SmartFieldRenderer';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
-import { canConvertUnits, convertArea, convertBetweenUnits } from '../../utils/unitConversions';
+import { canConvertUnits, convertArea } from '../../utils/unitConversions';
 import {
   ALLOWED_MANUAL_STOCK_SOURCES,
   STOCK_ADJUSTMENT_TYPE,
@@ -27,6 +27,7 @@ interface ProductStockMovementsPanelProps {
   isParentProduct?: boolean;
   canEditModule?: boolean;
   onProductStockUpdated?: (stock: number) => void;
+  onInventoryUpdated?: (inventory: any[]) => void;
   openQuickAddSignal?: number;
 }
 
@@ -38,6 +39,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   isParentProduct = false,
   canEditModule = true,
   onProductStockUpdated,
+  onInventoryUpdated,
   openQuickAddSignal = 0,
 }) => {
   const { message: msg, modal } = App.useApp();
@@ -51,11 +53,17 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   const [editingRow, setEditingRow] = useState<any | null>(null);
   const [actionRowLoadingId, setActionRowLoadingId] = useState<string | null>(null);
   const onProductStockUpdatedRef = useRef(onProductStockUpdated);
+  const onInventoryUpdatedRef = useRef(onInventoryUpdated);
   const messageRef = useRef(msg);
+  const lastFetchedUnitsRef = useRef<{ mainUnit: string | null; subUnit: string | null }>({ mainUnit: null, subUnit: null });
 
   useEffect(() => {
     onProductStockUpdatedRef.current = onProductStockUpdated;
   }, [onProductStockUpdated]);
+
+  useEffect(() => {
+    onInventoryUpdatedRef.current = onInventoryUpdated;
+  }, [onInventoryUpdated]);
 
   useEffect(() => {
     messageRef.current = msg;
@@ -67,10 +75,6 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
 
   const voucherType = Form.useWatch('voucher_type', quickCreateForm);
   const source = Form.useWatch('source', quickCreateForm);
-  const mainQuantity = Form.useWatch('main_quantity', quickCreateForm);
-  const subQuantity = Form.useWatch('sub_quantity', quickCreateForm);
-  const mainUnit = Form.useWatch('main_unit', quickCreateForm);
-  const subUnit = Form.useWatch('sub_unit', quickCreateForm);
 
   const getRelationOptions = useCallback(
     (key: string, targetModule?: string) => {
@@ -99,6 +103,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
         subUnit: productMeta?.sub_unit || null,
       };
       setProductUnits(nextUnits);
+      lastFetchedUnitsRef.current = nextUnits;
       let transferRows: any[] = [];
       let nextStock = parseFloat(productMeta?.stock) || 0;
 
@@ -173,6 +178,28 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     loadRows();
   }, [loadRows]);
 
+  const refreshInventoryCallback = useCallback(async () => {
+    if (!onInventoryUpdatedRef.current || !recordId) return;
+    try {
+      const { data: invRows } = await supabase
+        .from('product_inventory')
+        .select('*')
+        .eq('product_id', recordId);
+      const { mainUnit, subUnit } = lastFetchedUnitsRef.current;
+      const injected = (invRows || []).map((row: any) => {
+        const stockVal = parseFloat(row?.stock) || 0;
+        const subStock = mainUnit && subUnit ? convertArea(stockVal, mainUnit as any, subUnit as any) : 0;
+        return {
+          ...row,
+          main_unit: mainUnit || null,
+          sub_unit: subUnit || null,
+          sub_stock: Number.isFinite(subStock) ? subStock : 0,
+        };
+      });
+      onInventoryUpdatedRef.current(injected);
+    } catch { /* silent */ }
+  }, [recordId]);
+
   useEffect(() => {
     if (!quickCreateOpen) return;
     if (editingRow) {
@@ -227,24 +254,6 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     if (voucherType === 'outgoing') quickCreateForm.setFieldValue('to_shelf_id', null);
     if (source === 'waste') quickCreateForm.setFieldValue('to_shelf_id', null);
   }, [quickCreateOpen, source, voucherType, quickCreateForm]);
-
-  useEffect(() => {
-    if (!quickCreateOpen) return;
-    const qtyMain = parseFloat(mainQuantity) || 0;
-    const currentSub = parseFloat(quickCreateForm.getFieldValue('sub_quantity')) || 0;
-    if (!qtyMain || currentSub || !canConvertUnits(mainUnit, subUnit)) return;
-    const converted = mainUnit && subUnit ? convertArea(qtyMain, mainUnit as any, subUnit as any) : 0;
-    quickCreateForm.setFieldValue('sub_quantity', Number.isFinite(converted) ? converted : 0);
-  }, [quickCreateOpen, mainQuantity, mainUnit, subUnit, quickCreateForm]);
-
-  useEffect(() => {
-    if (!quickCreateOpen) return;
-    const qtyMain = parseFloat(mainQuantity) || 0;
-    const qtySub = parseFloat(subQuantity) || 0;
-    if (qtyMain || !qtySub || !canConvertUnits(subUnit, mainUnit)) return;
-    const converted = convertBetweenUnits(qtySub, subUnit, mainUnit);
-    quickCreateForm.setFieldValue('main_quantity', Number.isFinite(converted) ? converted : 0);
-  }, [quickCreateOpen, subQuantity, mainQuantity, mainUnit, subUnit, quickCreateForm]);
 
   const displayFields = useMemo(() => {
   const baseFields = (block.tableColumns || []).map((col: any, index: number) => ({
@@ -381,7 +390,8 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
           (next as any).readonly = true;
         }
         if (field.key === 'sub_quantity') {
-          (next as any).readonly = !canConvertUnits(productUnits.mainUnit, productUnits.subUnit);
+          const sameUnit = !!productUnits.mainUnit && !!productUnits.subUnit && productUnits.mainUnit === productUnits.subUnit;
+          (next as any).readonly = !(sameUnit || canConvertUnits(productUnits.mainUnit, productUnits.subUnit));
         }
         return next;
       });
@@ -552,6 +562,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
 
       await syncMultipleProductsStock(supabase as any, [recordId]);
       await loadRows();
+      await refreshInventoryCallback();
       setQuickCreateOpen(false);
       setEditingRow(null);
       quickCreateForm.resetFields();
@@ -609,6 +620,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
           );
           await syncMultipleProductsStock(supabase as any, [recordId]);
           await loadRows();
+          await refreshInventoryCallback();
           msg.success('حواله حذف شد');
         } catch (err: any) {
           msg.error(err?.message || 'خطا در حذف حواله');
