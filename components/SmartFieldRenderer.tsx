@@ -128,13 +128,15 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     ? { overflow: { adjustX: false, adjustY: false } }
     : undefined;
   const resolvedPopupZIndex = popupZIndex ?? 13000;
-  const resolvePopupContainer = (trigger?: HTMLElement | null) => {
+  const resolvedModalContainer = popupContainer ?? (typeof document !== 'undefined' ? document.body : null);
+  const resolvePopupContainer = (trigger?: HTMLElement | null): HTMLElement => {
     if (popupContainer) return popupContainer;
+    if (typeof document === 'undefined') return (trigger || ({} as HTMLElement)) as HTMLElement;
     if (isMobileViewport) return document.body;
-    const overlayParent = trigger?.closest(
-      '.ant-modal-root, .ant-modal-wrap, .ant-drawer-root, .ant-drawer-content-wrapper',
+    const insideOverlay = trigger?.closest(
+      '.ant-modal, .ant-modal-wrap, .ant-modal-root, .ant-drawer, .ant-drawer-root, .ant-drawer-content-wrapper',
     );
-    if (overlayParent instanceof HTMLElement) return overlayParent;
+    if (insideOverlay) return document.body;
     return document.body;
   };
 
@@ -839,6 +841,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 <QrScanPopover
                   label=""
                   buttonClassName="shrink-0"
+                  popupContainer={resolvedModalContainer}
+                  popupZIndex={resolvedPopupZIndex + 40}
                   onScan={({ raw, moduleId, recordId }) => {
                     if (recordId && moduleId === field.relationConfig?.targetModule) {
                       onChange(recordId);
@@ -1027,8 +1031,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     }
   };
 
-  const canRelationQuickCreate = !compactMode
-    && fieldType === FieldType.RELATION
+  const canRelationQuickCreate = fieldType === FieldType.RELATION
     && !!field.relationConfig?.targetModule;
   const globalImageGalleryModalNode = (
     <Modal
@@ -1038,6 +1041,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       footer={null}
       width={980}
       zIndex={12000}
+      getContainer={resolvedModalContainer || undefined}
       destroyOnHidden
     >
       <div className="mb-3 flex items-center justify-between">
@@ -1110,6 +1114,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 onCancel={() => setIsScanModalOpen(false)} 
                 footer={null}
                 zIndex={10000}
+                getContainer={resolvedModalContainer || undefined}
             >
                 <Input 
                     autoFocus 
@@ -1164,6 +1169,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             onCancel={() => setIsScanModalOpen(false)} 
             footer={null}
             zIndex={10000}
+            getContainer={resolvedModalContainer || undefined}
         >
             <Input 
                 autoFocus 
@@ -1226,6 +1232,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
       forceRender
       destroyOnHidden
       zIndex={resolvedModalZIndex}
+      getContainer={quickCreatePopupContainer || undefined}
     >
       <Form
         form={form}

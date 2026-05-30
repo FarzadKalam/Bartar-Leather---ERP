@@ -15,6 +15,8 @@ interface QrScanPopoverProps {
   label?: string;
   buttonClassName?: string;
   buttonProps?: ButtonProps;
+  popupContainer?: HTMLElement | null;
+  popupZIndex?: number;
 }
 
 const SCAN_BOX_SIZE = { width: 220, height: 220 };
@@ -71,13 +73,22 @@ const parseQr = (raw: string): QrScanResult => {
   return { raw: trimmed };
 };
 
-const QrScanPopover: React.FC<QrScanPopoverProps> = ({ onScan, label = 'اسکن', buttonClassName, buttonProps }) => {
+const QrScanPopover: React.FC<QrScanPopoverProps> = ({
+  onScan,
+  label = 'اسکن',
+  buttonClassName,
+  buttonProps,
+  popupContainer,
+  popupZIndex,
+}) => {
   const [value, setValue] = useState('');
   const [open, setOpen] = useState(false);
   const mergedClassName = [buttonProps?.className, buttonClassName].filter(Boolean).join(' ');
   const scannerId = useMemo(() => `qr-reader-${Math.random().toString(36).slice(2)}`, []);
   const qrRef = useRef<InstanceType<typeof Html5Qrcode> | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const resolvedPopupContainer = popupContainer ?? (typeof document !== 'undefined' ? document.body : null);
+  const resolvedPopupZIndex = popupZIndex ?? 16000;
 
   const handleSubmit = () => {
     if (!value.trim()) return;
@@ -156,8 +167,8 @@ const QrScanPopover: React.FC<QrScanPopoverProps> = ({ onScan, label = 'اسکن
       trigger="click"
       open={open}
       onOpenChange={setOpen}
-      getPopupContainer={() => document.body}
-      overlayStyle={{ zIndex: 6000 }}
+      getPopupContainer={() => resolvedPopupContainer || document.body}
+      overlayStyle={{ zIndex: resolvedPopupZIndex }}
       content={
         <div className="w-72">
           <div className="rounded-lg overflow-hidden border border-gray-200 bg-black/90">

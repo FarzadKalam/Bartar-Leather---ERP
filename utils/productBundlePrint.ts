@@ -68,3 +68,30 @@ export const BUNDLE_PRODUCTS_PRINT_FIELD = {
   labels: { fa: 'محصولات داخل بسته', en: 'Bundle Products' },
   order: 1000,
 };
+
+export const upsertBundleProductsPrintField = (fields: any[], summary: string) => {
+  const safeFields = Array.isArray(fields) ? fields.filter(Boolean) : [];
+  const fieldIndex = safeFields.findIndex(
+    (field: any) => String(field?.key || '') === BUNDLE_PRODUCTS_PRINT_FIELD.key
+  );
+
+  if (!summary) {
+    return fieldIndex >= 0
+      ? safeFields.filter((field: any) => String(field?.key || '') !== BUNDLE_PRODUCTS_PRINT_FIELD.key)
+      : safeFields;
+  }
+
+  const nextField = {
+    ...BUNDLE_PRODUCTS_PRINT_FIELD,
+    ...(fieldIndex >= 0 ? safeFields[fieldIndex] : {}),
+    value: summary,
+  };
+
+  if (fieldIndex >= 0) {
+    const nextFields = [...safeFields];
+    nextFields[fieldIndex] = nextField;
+    return nextFields;
+  }
+
+  return [...safeFields, nextField];
+};

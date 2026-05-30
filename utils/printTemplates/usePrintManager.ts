@@ -9,9 +9,9 @@ import { toPersianNumber, formatPersianPrice, safeJalaliFormat } from '../../uti
 import { supabase } from '../../supabaseClient';
 import { MODULES } from '../../moduleRegistry';
 import {
-  BUNDLE_PRODUCTS_PRINT_FIELD,
   formatBundlePrintItems,
   mapBundleInventoryRowsToPrintItems,
+  upsertBundleProductsPrintField,
 } from '../productBundlePrint';
 
 interface UsePrintManagerProps {
@@ -339,14 +339,8 @@ export const usePrintManager = ({
   }, [moduleId, data?.grid_materials, moduleConfig]);
 
   const printableFieldsForTemplate = useMemo(() => {
-    const basePrintableFields = moduleId === 'product_bundles' && bundleProductsSummary
-      ? [
-          ...printableFields,
-          {
-            ...BUNDLE_PRODUCTS_PRINT_FIELD,
-            value: bundleProductsSummary,
-          },
-        ]
+    const basePrintableFields = moduleId === 'product_bundles'
+      ? upsertBundleProductsPrintField(printableFields, bundleProductsSummary)
       : printableFields;
 
     if (selectedTemplateId !== 'production_passport') return basePrintableFields;

@@ -170,8 +170,8 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   const resolvedPopupContainer = (trigger: HTMLElement) => {
     if (typeof getPopupContainer === 'function') return getPopupContainer(trigger);
     if (isMobileViewport) return document.body;
-    const modalParent = trigger?.closest('.ant-modal-root, .ant-modal-wrap, .ant-drawer-root, .ant-drawer-content-wrapper');
-    if (modalParent instanceof HTMLElement) return modalParent;
+    const insideOverlay = trigger?.closest('.ant-modal, .ant-modal-root, .ant-modal-wrap, .ant-drawer, .ant-drawer-root, .ant-drawer-content-wrapper');
+    if (insideOverlay) return document.body;
     return document.body;
   };
 
@@ -581,6 +581,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         confirmLoading={loading}
         okButtonProps={{ disabled: !isLocalMode && !deleteReplacementValue }}
         zIndex={optionModalZIndex}
+        getContainer={typeof document !== 'undefined' ? document.body : undefined}
         destroyOnHidden
       >
         <div className="flex flex-col gap-3">
@@ -618,6 +619,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         cancelText="انصراف"
         confirmLoading={loading}
         zIndex={optionModalZIndex}
+        getContainer={typeof document !== 'undefined' ? document.body : undefined}
         destroyOnHidden
       >
         <div className="flex flex-col gap-3">

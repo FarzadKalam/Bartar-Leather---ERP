@@ -784,7 +784,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
       try {
         const { data: rows, error } = await supabase
           .from("product_inventory")
-          .select("bundle_id, product_id, stock, products(name, system_code, main_unit)")
+          .select("bundle_id, product_id, stock, sub_stock, products(name, system_code, main_unit, sub_unit)")
           .in("bundle_id", bundleIds);
         if (error) throw error;
         if (cancelled) return;

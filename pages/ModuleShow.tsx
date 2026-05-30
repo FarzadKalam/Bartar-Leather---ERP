@@ -60,6 +60,7 @@ import {
 } from '../utils/productCatalogResolver';
 import { getAllowNegativeInventory } from '../utils/companySettings';
 import { normalizeStoragePublicUrl, normalizeStoragePublicUrlsInRecord } from '../utils/storageUrls';
+import { BUNDLE_PRODUCTS_PRINT_FIELD } from '../utils/productBundlePrint';
 
 const MODULE_SHOW_OPTIONS_CACHE = new Map<string, { dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>();
 const MODULE_SHOW_OPTIONS_INFLIGHT = new Map<string, Promise<{ dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>>();
@@ -2363,6 +2364,9 @@ const ModuleShow: React.FC = () => {
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(f => ({ ...f, value: data[f.key] }))
       .filter(f => hasValue(f.value));
+    const bundleFields: any[] = moduleId === 'product_bundles'
+      ? [BUNDLE_PRODUCTS_PRINT_FIELD as any]
+      : [];
     const qrFields: any[] = [];
     if (typeof window !== 'undefined' && window.location.href) {
       qrFields.push({ key: '__qr_system', type: FieldType.TEXT, labels: { fa: 'QR سیستمی', en: 'System QR' }, value: window.location.href, order: 100000 });
@@ -2370,7 +2374,7 @@ const ModuleShow: React.FC = () => {
     if (moduleId === 'products' && String(data?.site_product_link || '').trim()) {
       qrFields.push({ key: '__qr_site', type: FieldType.TEXT, labels: { fa: 'QR لینک سایت', en: 'Site QR' }, value: String(data?.site_product_link || '').trim(), order: 100001 });
     }
-    return [...fields, ...qrFields];
+    return [...fields, ...bundleFields, ...qrFields];
   }, [moduleConfig, data, dynamicOptions, relationOptions, moduleId]);
 
   // ✅ استفاده از custom hook برای مدیریت print

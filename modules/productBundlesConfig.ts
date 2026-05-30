@@ -42,7 +42,7 @@ export const productBundlesConfig: ModuleDefinition = {
     // --- هدر ---
     {
       key: 'bundle_number',
-      labels: { fa: 'کد دستی', en: 'Bundle Number' },
+      labels: { fa: 'شماره بسته محصول', en: 'Bundle Number' },
       type: FieldType.TEXT,
       location: FieldLocation.HEADER,
       order: 1,
