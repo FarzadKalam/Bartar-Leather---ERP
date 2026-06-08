@@ -2,6 +2,7 @@ import * as assert from 'node:assert/strict';
 import { applyInventoryDeltas } from '../utils/inventoryTransactions';
 import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
 import {
+  partitionRemovedInventoryRows,
   persistProductOpeningInventory,
   reconcileMissingOpeningBalanceTransfers,
   recordInventoryRowDeletionTransfers,
@@ -470,6 +471,19 @@ runTest('inventory row deletion is logged as outgoing stock movement', async () 
   assert.equal(transfer.to_shelf_id, null);
   assert.equal(transfer.delivered_qty, 2);
   assert.equal(transfer.required_qty, 200);
+});
+
+runTest('changing a row shelf keeps it out of deletion transfer candidates', () => {
+  const result = partitionRemovedInventoryRows({
+    previousRows: [{ id: 'pi1', product_id: 'p1', shelf_id: 's3', bundle_id: 'b1', stock: 2 }],
+    nextRows: [{ id: 'pi1', product_id: 'p1', shelf_id: 's4', bundle_id: 'b1', stock: 2 }],
+  });
+
+  assert.deepEqual(result.removedRows, [
+    { id: 'pi1', product_id: 'p1', shelf_id: 's3', bundle_id: 'b1', stock: 2 },
+  ]);
+  assert.deepEqual(result.deletedRows, []);
+  assert.deepEqual(result.rekeyedRowIds, ['pi1']);
 });
 
 let failures = 0;

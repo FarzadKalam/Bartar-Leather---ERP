@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Table, Tag, Avatar, Input, Button, Space, Popover } from 'antd';
 import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { ModuleDefinition, FieldType } from '../types';
@@ -12,9 +12,18 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 import type { InputRef } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import type { FilterConfirmProps } from 'antd/es/table/interface';
+import type { CrudSorting } from '@refinedev/core';
 import ProductionStagesField from './ProductionStagesField';
 import RelatedRecordPopover from './RelatedRecordPopover';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
+import {
+  buildFieldSorter,
+  getFieldSortDirections,
+  getFieldSortMode,
+  getFieldSortOrder,
+  TableSortIcon,
+  type TableSortMode,
+} from '../utils/tableSorting';
 
 interface SmartTableRendererProps {
   moduleConfig: ModuleDefinition | null | undefined;
@@ -23,8 +32,9 @@ interface SmartTableRendererProps {
   visibleColumns?: string[];  // ✅ ستون‌های انتخاب‌شده از View
   rowSelection?: any;
   onRow?: (record: any) => any;
-  onChange?: (pagination: any, filters: any, sorter: any) => void;
+  onChange?: (pagination: any, filters: any, sorter: any, extra?: any) => void;
   pagination?: any;
+  currentSorters?: CrudSorting;
   scrollX?: string | number;
   tableLayout?: 'auto' | 'fixed';
   disableScroll?: boolean;
@@ -45,6 +55,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   onRow,
   onChange,
   pagination,
+  currentSorters,
   scrollX,
   tableLayout,
   disableScroll,
@@ -57,6 +68,10 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
 }) => {
   const searchInput = useRef<InputRef>(null);
   const [scrollHeight, setScrollHeight] = useState<number>(500);
+  const [localSorter, setLocalSorter] = useState<{ field: string | null; order: 'ascend' | 'descend' | null }>({
+    field: null,
+    order: null,
+  });
 
   // ✅ Responsive scroll height
   useEffect(() => {
@@ -199,9 +214,19 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     tableFields = [keyField, ...otherFields];
   }
 
+  const sortedData = useMemo(() => {
+    if (!localSorter.field || !localSorter.order) return data;
+    const localField = tableFields.find((field) => field.key === localSorter.field);
+    if (!localField) return data;
+
+    const nextData = [...data].sort(buildFieldSorter(localField));
+    return localSorter.order === 'descend' ? nextData.reverse() : nextData;
+  }, [data, localSorter.field, localSorter.order, tableFields]);
+
   const columns: ColumnsType<any> = tableFields.map(field => {
     const isSearchable = field.type === FieldType.TEXT || field.key.includes('name') || field.key.includes('code') || field.key.includes('title');
     const isTagField = field.type === FieldType.TAGS;
+    const sortMode: TableSortMode = getFieldSortMode(field);
 
     const formatPersianDate = (val: any, kind: 'DATE' | 'TIME' | 'DATETIME') => {
       if (!val) return null;
@@ -242,6 +267,13 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
       dataIndex: field.key,
       key: field.key,
       width: field.key === 'id' ? 60 : isTagField ? 140 : undefined,
+      sorter: sortMode === 'local' ? buildFieldSorter(field) : true,
+      sortOrder: sortMode === 'local'
+        ? (localSorter.field === field.key ? localSorter.order : undefined)
+        : getFieldSortOrder(field.key, currentSorters),
+      sortDirections: getFieldSortDirections(field),
+      sortIcon: ({ sortOrder }) => <TableSortIcon sortOrder={sortOrder} />,
+      showSorterTooltip: false,
       
       ...(isSearchable ? getColumnSearchProps(field.key, field.labels.fa) : {}),
       ...(isTagField ? getTagFilterProps(field.key, field.labels.fa) : {}),
@@ -465,6 +497,11 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     dataIndex: 'assignee_id',
     key: 'assignee',
     width: 120,
+    sorter: true,
+    sortOrder: getFieldSortOrder('assignee_id', currentSorters),
+    sortDirections: ['ascend', 'descend', null],
+    sortIcon: ({ sortOrder }) => <TableSortIcon sortOrder={sortOrder} />,
+    showSorterTooltip: false,
     render: (_: any, record: any) => {
       const assigneeId = record.assignee_id;
       const assigneeType = record.assignee_type;
@@ -504,6 +541,29 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     });
     }
 
+  const handleTableChange = (paginationState: any, tableFilters: any, sorter: any, extra: any) => {
+    const activeSorter = Array.isArray(sorter)
+      ? sorter.find((item: any) => item?.order) || sorter[0]
+      : sorter;
+    const sortFieldKey = String(activeSorter?.field ?? activeSorter?.columnKey ?? '');
+    const matchingField = tableFields.find((field) => field.key === sortFieldKey);
+
+    if (matchingField && getFieldSortMode(matchingField) === 'local') {
+      setLocalSorter({
+        field: matchingField.key,
+        order: activeSorter?.order ?? null,
+      });
+      onChange?.(paginationState, tableFilters, {}, extra);
+      return;
+    }
+
+    if (localSorter.field || localSorter.order) {
+      setLocalSorter({ field: null, order: null });
+    }
+
+    onChange?.(paginationState, tableFilters, sorter, extra);
+  };
+
   const tablePagination =
     pagination === false
       ? false
@@ -522,13 +582,13 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
     <div className={["custom-erp-table", containerClassName].filter(Boolean).join(' ')}>
       <Table 
           columns={columns} 
-          dataSource={data} 
+          dataSource={sortedData} 
           rowKey="id" 
           loading={loading} 
           size="small" 
           tableLayout={tableLayout}
           pagination={tablePagination} 
-          onChange={onChange}
+          onChange={handleTableChange}
           scroll={disableScroll ? undefined : { x: scrollX ?? 'max-content', y: scrollHeight }}
           // 🔥 اتصال انتخاب گروهی
           rowSelection={rowSelection ? {

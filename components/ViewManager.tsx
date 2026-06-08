@@ -16,6 +16,7 @@ import FilterBuilder from './FilterBuilder';
 interface ViewManagerProps {
   moduleId: string;
   currentView: SavedView | null;
+  currentSort?: ViewConfig["sort"];
   onViewChange: (view: SavedView | null, config: ViewConfig | null) => void;
   onRefresh: () => void;
 }
@@ -47,7 +48,7 @@ const areViewConfigsEqual = (a?: ViewConfig | null, b?: ViewConfig | null) => {
   );
 };
 
-const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onViewChange, onRefresh }) => {
+const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, currentSort, onViewChange, onRefresh }) => {
   const { message } = App.useApp();
   const [views, setViews] = useState<SavedView[]>([]);
   const [loadingViews, setLoadingViews] = useState(false);
@@ -105,23 +106,27 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
   const handleOpenNewView = useCallback(() => {
     const allCols = moduleConfig.fields.map(f => f.key);
     setConfig((prev) => {
-      const next = { columns: allCols, filters: [] };
+      const next = { columns: allCols, filters: [], sort: currentSort };
       return areViewConfigsEqual(prev, next) ? prev : next;
     });
     setViewName('');
     setEditingViewId(null);
     setIsModalOpen(true);
-  }, [moduleConfig.fields]);
+  }, [currentSort, moduleConfig.fields]);
 
   const handleEditView = useCallback((view: SavedView, e: React.MouseEvent) => {
     e.stopPropagation();
     const rawConfig = (view.config as any) || {};
+    const effectiveSort =
+      currentView?.id === view.id && currentSort !== undefined
+        ? currentSort
+        : rawConfig.sort;
     const safeConfig: ViewConfig = {
         columns: Array.isArray(rawConfig.columns) && rawConfig.columns.length > 0 
             ? rawConfig.columns 
             : moduleConfig.fields.map(f => f.key),
         filters: Array.isArray(rawConfig.filters) ? rawConfig.filters : [],
-        sort: rawConfig.sort
+        sort: effectiveSort
     };
     setConfig((prev) => (areViewConfigsEqual(prev, safeConfig) ? prev : safeConfig));
     
@@ -133,7 +138,7 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, onView
         setEditingViewId(view.id);
     }
     setIsModalOpen(true);
-  }, [moduleConfig.fields]);
+  }, [currentSort, currentView?.id, moduleConfig.fields]);
 
   const handleSaveView = async () => {
     if (!viewName.trim()) {

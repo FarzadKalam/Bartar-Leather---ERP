@@ -33,6 +33,7 @@ import {
   formatBundlePrintItems,
   mapBundleInventoryRowsToPrintItems,
 } from "../utils/productBundlePrint";
+import { DEFAULT_LIST_SORTERS } from "../utils/tableSorting";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -127,13 +128,16 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const [printMode, setPrintMode] = useState(false);
   const [selectedPrintFields, setSelectedPrintFields] = useState<Record<string, string[]>>({});
   const [bundlePrintSummariesById, setBundlePrintSummariesById] = useState<Record<string, string>>({});
+  const areStringArraysEqual = useCallback((left: string[] = [], right: string[] = []) => (
+    left.length === right.length && left.every((item, index) => item === right[index])
+  ), []);
   const closeWorkflowsModal = useCallback(() => {
     setIsWorkflowsModalOpen(false);
   }, []);
 
-  const { tableProps, tableQueryResult, setFilters, filters } = useTable({
+  const { tableProps, tableQueryResult, setFilters, filters, sorters, setSorters } = useTable({
     resource: resolvedModuleId,
-    sorters: { initial: [{ field: "created_at", order: "desc" }] },
+    sorters: { initial: DEFAULT_LIST_SORTERS },
     pagination: { pageSize: 10 }, 
     queryOptions: { enabled: !!resolvedModuleId },
     syncWithLocation: false,
@@ -194,6 +198,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 
   useEffect(() => {
     setViewMode(moduleConfig?.defaultViewMode || ViewMode.LIST);
+    setSorters(DEFAULT_LIST_SORTERS);
     setCurrentView(null);
     setSelectedRowKeys([]);
     setVisibleColumns([]);
@@ -575,7 +580,25 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     } else {
         setVisibleColumns([]);
     }
+
+    if (config && Array.isArray(config.sort) && config.sort.length > 0) {
+      setSorters(config.sort);
+    } else {
+      setSorters(DEFAULT_LIST_SORTERS);
+    }
   };
+
+  const handleTableChange = useCallback((pagination: any, tableFilters: any, sorter: any, extra?: any) => {
+    tableProps.onChange?.(pagination, tableFilters, sorter, extra);
+
+    const hasActiveSort = Array.isArray(sorter)
+      ? sorter.some((item: any) => item?.order)
+      : Boolean(sorter?.order);
+
+    if (!hasActiveSort) {
+      setSorters(DEFAULT_LIST_SORTERS);
+    }
+  }, [setSorters, tableProps]);
 
   // ✅ FIX: سرچ فقط فیلتر سرچ را اضافه/حذف می‌کند و به فیلترهای View دست نمی‌زند
   const handleSearch = (val: string) => {
@@ -775,7 +798,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     if (resolvedModuleId !== "product_bundles") return;
     const bundleIds = selectedRowsBase.map((row: any) => String(row?.id || "")).filter(Boolean);
     if (!bundleIds.length) {
-      setBundlePrintSummariesById({});
+      setBundlePrintSummariesById((prev) => (
+        Object.keys(prev).length === 0 ? prev : {}
+      ));
       return;
     }
 
@@ -803,10 +828,24 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
             mapBundleInventoryRowsToPrintItems(rowsByBundle.get(bundleId) || [])
           );
         });
-        setBundlePrintSummariesById(next);
+        setBundlePrintSummariesById((prev) => {
+          const prevKeys = Object.keys(prev);
+          const nextKeys = Object.keys(next);
+          if (
+            prevKeys.length === nextKeys.length
+            && prevKeys.every((key) => prev[key] === next[key])
+          ) {
+            return prev;
+          }
+          return next;
+        });
       } catch (err) {
         console.error("Load bundle print summaries failed", err);
-        if (!cancelled) setBundlePrintSummariesById({});
+        if (!cancelled) {
+          setBundlePrintSummariesById((prev) => (
+            Object.keys(prev).length === 0 ? prev : {}
+          ));
+        }
       }
     };
 
@@ -826,19 +865,28 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 
   useEffect(() => {
     if (!selectedPrintTemplateId || printableFields.length === 0) return;
-    setSelectedPrintFields((prev: Record<string, string[]>) => ({
-      ...prev,
-      [selectedPrintTemplateId]: printableFields
-        .filter((field) => (
-          field.key === "__qr_system"
-            ? selectedRows.length > 0
-            : field.key === "__qr_site"
-              ? selectedRows.some((record: any) => hasPrintableValue(record?.site_product_link))
-              : selectedRows.some((record: any) => hasPrintableValue(record?.[field.key]))
-        ))
-        .map((field) => String(field.key)),
-    }));
-  }, [hasPrintableValue, printableFields, selectedPrintTemplateId, selectedRows]);
+    const nextFieldKeys = printableFields
+      .filter((field) => (
+        field.key === "__qr_system"
+          ? selectedRows.length > 0
+          : field.key === "__qr_site"
+            ? selectedRows.some((record: any) => hasPrintableValue(record?.site_product_link))
+            : selectedRows.some((record: any) => hasPrintableValue(record?.[field.key]))
+      ))
+      .map((field) => String(field.key));
+
+    setSelectedPrintFields((prev: Record<string, string[]>) => {
+      const currentFieldKeys = prev[selectedPrintTemplateId] || [];
+      if (areStringArraysEqual(currentFieldKeys, nextFieldKeys)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [selectedPrintTemplateId]: nextFieldKeys,
+      };
+    });
+  }, [areStringArraysEqual, hasPrintableValue, printableFields, selectedPrintTemplateId, selectedRows]);
 
   const formatPersianDate = useCallback((value: any, withTime = false) => {
     if (!value) return "";
@@ -1191,9 +1239,10 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
         </div>
 
          <div className="mb-4">
-          <ViewManager 
+         <ViewManager 
             moduleId={resolvedModuleId} 
             currentView={currentView} 
+            currentSort={sorters as any}
             onViewChange={handleViewChange} 
             onRefresh={() => tableQueryResult.refetch()}
           />
@@ -1216,8 +1265,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                     data={enrichedData} 
                     loading={isRefreshing}
                     visibleColumns={visibleColumns.length > 0 ? visibleColumns : undefined}
-                    onChange={tableProps.onChange as any}
+                    onChange={handleTableChange}
                     pagination={tableProps.pagination}
+                    currentSorters={sorters as any}
                     rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
                     onRow={(record: any) => ({ 
                       onClick: () => navigate(`/${resolvedModuleId}/${record.id}`), 

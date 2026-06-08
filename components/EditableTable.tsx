@@ -29,6 +29,7 @@ import {
 } from '../utils/manualStockMovements';
 import { mapStockTransferRowToEditorRow } from '../utils/stockTransferHelpers';
 import {
+  partitionRemovedInventoryRows,
   recordInventoryRowDeletionTransfers,
   syncOpeningBalanceTransfersForInventoryRows,
 } from '../utils/productOpeningInventory';
@@ -1026,11 +1027,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
       if (isProductInventory || isShelfInventory) {
         const baseRows = tempData.map(({ key, ...rest }) => ({ ...rest }));
 
-        let payload = baseRows;
+        let normalizedInputRows = baseRows;
         if (isProductInventory) {
-          payload = baseRows
+          normalizedInputRows = baseRows
             .filter((row: any) => row.shelf_id)
             .map((row: any) => ({
+              id: row.id ?? null,
               product_id: recordId,
               shelf_id: row.shelf_id,
               warehouse_id: row.warehouse_id ?? null,
@@ -1040,9 +1042,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
         }
 
         if (isShelfInventory) {
-          payload = baseRows
+          normalizedInputRows = baseRows
             .filter((row: any) => row.product_id)
             .map((row: any) => ({
+              id: row.id ?? null,
               product_id: row.product_id,
               shelf_id: recordId,
               warehouse_id: row.warehouse_id ?? null,
@@ -1051,6 +1054,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             }));
         }
 
+        let payload = normalizedInputRows.map(({ id, ...rest }: any) => ({ ...rest }));
         if (payload.length > 1) {
           const dedupedMap = new Map<string, any>();
           payload.forEach((row: any) => {
@@ -1073,19 +1077,12 @@ const EditableTable: React.FC<EditableTableProps> = ({
           payload = Array.from(dedupedMap.values());
         }
 
-        const newKeys = new Set(
-          payload.map((row: any) => `${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`)
-        );
-        const removedRows = data
-          .filter((row: any) => !newKeys.has(`${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`))
-          .map((row: any) => ({
-            product_id: row.product_id,
-            shelf_id: row.shelf_id,
-            bundle_id: row.bundle_id ?? null,
-            stock: row.stock,
-          }));
-        const removedIds = data
-          .filter((row: any) => !newKeys.has(`${row.product_id}_${row.shelf_id}_${row.bundle_id ?? '__null__'}`) && row.id)
+        const { removedRows, deletedRows } = partitionRemovedInventoryRows({
+          previousRows: data,
+          nextRows: normalizedInputRows as any,
+        });
+        const removedIds = removedRows
+          .filter((row: any) => row.id)
           .map((row: any) => row.id);
 
         if (removedIds.length > 0) {
@@ -1108,10 +1105,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
         const { data: authData } = await supabase.auth.getUser();
         const currentUserId = authData?.user?.id || null;
-        if (removedRows.length > 0) {
+        if (deletedRows.length > 0) {
           await recordInventoryRowDeletionTransfers({
             supabase: supabase as any,
-            removedRows,
+            removedRows: deletedRows,
             userId: currentUserId,
           });
         }
