@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { convertArea, type UnitValue } from './unitConversions';
+import { convertArea, normalizeUnitValue, type UnitValue } from './unitConversions';
 import { getAllowNegativeInventory } from './companySettings';
 
 export interface InventoryDelta {
@@ -49,7 +49,7 @@ const toNumber = (value: any) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const normalizeUnit = (value: any) => String(value || '').trim();
+const normalizeUnit = (value: any) => normalizeUnitValue(value) || String(value || '').trim();
 
 const getProductMeta = async (
   supabase: SupabaseClient,
@@ -66,7 +66,7 @@ const getProductMeta = async (
   if (error) throw error;
   const meta: ProductUnitMeta = {
     name: data?.name ? String(data.name) : null,
-    mainUnit: data?.main_unit ? String(data.main_unit) : null,
+    mainUnit: normalizeUnitValue(data?.main_unit) || (data?.main_unit ? String(data.main_unit) : null),
   };
   cache.set(productId, meta);
   return meta;
@@ -198,8 +198,8 @@ export const syncSingleProductStock = async (supabase: SupabaseClient, productId
   if (productError) throw productError;
 
   const catalogMeta: ProductCatalogMeta = {
-    main_unit: productRow?.main_unit ? String(productRow.main_unit) : null,
-    sub_unit: productRow?.sub_unit ? String(productRow.sub_unit) : null,
+    main_unit: normalizeUnitValue(productRow?.main_unit) || (productRow?.main_unit ? String(productRow.main_unit) : null),
+    sub_unit: normalizeUnitValue(productRow?.sub_unit) || (productRow?.sub_unit ? String(productRow.sub_unit) : null),
     catalog_role: productRow?.catalog_role ? String(productRow.catalog_role) : null,
     parent_product_id: productRow?.parent_product_id ? String(productRow.parent_product_id) : null,
   };

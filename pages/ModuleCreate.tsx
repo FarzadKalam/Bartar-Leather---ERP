@@ -6,7 +6,7 @@ import SmartForm from "../components/SmartForm";
 import { Button, Result, Spin } from "antd";
 import { ArrowRightOutlined, SaveOutlined } from "@ant-design/icons";
 import { supabase } from "../supabaseClient";
-import { applyInvoiceFinalizationInventory } from "../utils/invoiceInventoryWorkflow";
+import { syncInvoiceInventoryOnSave } from "../utils/invoiceInventoryWorkflow";
 import { runWorkflowsForEvent } from "../utils/workflowRuntime";
 import { syncCustomerLevelsByInvoiceCustomers } from "../utils/customerLeveling";
 import { attachTaskCompletionIfNeeded } from "../utils/taskCompletion";
@@ -156,13 +156,14 @@ export const ModuleCreate = () => {
 
                 const { data: authData } = await supabase.auth.getUser();
                 const userId = authData?.user?.id || null;
-                await applyInvoiceFinalizationInventory({
+                await syncInvoiceInventoryOnSave({
                   supabase: supabase as any,
                   moduleId,
                   recordId: inserted.id,
                   previousStatus: null,
                   nextStatus: values?.status ?? null,
-                  invoiceItems: values?.invoiceItems ?? [],
+                  previousInvoiceItems: [],
+                  nextInvoiceItems: values?.invoiceItems ?? [],
                   userId,
                 });
                 if (moduleId === "invoices") {

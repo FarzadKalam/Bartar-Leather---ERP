@@ -5,7 +5,7 @@ import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
 import { calculateRow } from '../utils/calculations';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
-import { canConvertUnits, convertArea } from '../utils/unitConversions';
+import { canConvertUnits, convertArea, normalizeUnitValue } from '../utils/unitConversions';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 import {
   calculateUnitQuantity,
@@ -17,7 +17,7 @@ import QrScanPopover from './QrScanPopover';
 import { dedupeOptionsByLabel } from './editableTable/tableUtils';
 import { insertChangelog } from './editableTable/changelogHelpers';
 import { getInvoiceAmounts } from './editableTable/invoiceHelpers';
-import { fetchShelfOptions, updateProductStock } from './editableTable/inventoryHelpers';
+import { fetchShelfOptions } from './editableTable/inventoryHelpers';
 import { buildProductFilters, runProductsQuery } from './editableTable/productionOrderHelpers';
 import { MODULES } from '../moduleRegistry';
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
@@ -33,6 +33,7 @@ import {
   recordInventoryRowDeletionTransfers,
   syncOpeningBalanceTransfersForInventoryRows,
 } from '../utils/productOpeningInventory';
+import { syncInvoiceInventoryOnSave } from '../utils/invoiceInventoryWorkflow';
 
 const { Text } = Typography;
 
@@ -169,6 +170,26 @@ const EditableTable: React.FC<EditableTableProps> = ({
     }
     if (isEditing) setTempData(nextRows);
     else setData(nextRows);
+  };
+
+  const toPositiveNumber = (raw: any) => {
+    const normalized = normalizeNumericString(raw);
+    if (!normalized || normalized === '-' || normalized === '.' || normalized === '-.') return 0;
+    const parsed = Math.abs(parseFloat(normalized));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const syncRowUnitQuantities = (row: any, fieldKey: string) => {
+    const conversion = getTableUnitConversion(fieldKey);
+    if (!conversion) return;
+    const sourceQty = toPositiveNumber(row?.[conversion.sourceQtyKey]);
+    const targetQty = toPositiveNumber(row?.[conversion.targetQtyKey]);
+    if (!sourceQty || targetQty > 0) return;
+    try {
+      row[conversion.targetQtyKey] = calculateUnitQuantity(row, conversion);
+    } catch {
+      // Leave the paired quantity untouched when units are not convertible yet.
+    }
   };
 
   const applyManualUnitConversion = (index: number, fieldKey: string) => {
@@ -527,7 +548,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   }, [block.tableColumns, dynamicOptions]);
 
   useEffect(() => {
-    if (!isInvoiceItems) return;
+    if (!isAnyInvoiceItems) return;
     const sourceRows = getActiveRows();
     sourceRows.forEach((row: any, index: number) => {
       const productId = row?.product_id ? String(row.product_id) : null;
@@ -538,7 +559,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
         loadShelvesForRow(rowKey, productId);
       }
     });
-  }, [isInvoiceItems, isEditing, tempData, data, shelfOptionsByRow]);
+  }, [isAnyInvoiceItems, isEditing, tempData, data, shelfOptionsByRow]);
 
   const updateRow = (index: number, key: string, value: any) => {
     const source = getActiveRows();
@@ -560,7 +581,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       }
     }
 
-    if (isInvoiceItems && key === 'product_id') {
+    if (isAnyInvoiceItems && key === 'product_id') {
       newData[index]['source_shelf_id'] = null;
       const rowKey = String(row.key || row.id || index);
       if (value) {
@@ -579,6 +600,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
       if (Number.isFinite(lengthVal) && Number.isFinite(widthVal)) {
         newData[index]['usage'] = lengthVal * widthVal;
       }
+    }
+
+    if (['quantity', 'sub_quantity', 'main_quantity'].includes(key)) {
+      syncRowUnitQuantities(newData[index], key);
     }
 
     if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'discount_type', 'vat_type', 'length', 'width', 'main_quantity', 'sub_quantity'].includes(key)) {
@@ -631,6 +656,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
       return;
     }
 
+    if (isAnyInvoiceItems && key === 'source_shelf_id') {
+      return;
+    }
+
     if (value && relationConfig?.targetModule) {
       try {
         const { data: record, error } = await supabase
@@ -654,18 +683,18 @@ const EditableTable: React.FC<EditableTableProps> = ({
           });
 
             if (isAnyInvoiceItems && key === 'product_id') {
-              currentRow.main_unit = record?.main_unit || currentRow.main_unit || null;
-              currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || null;
+              currentRow.main_unit = normalizeUnitValue(record?.main_unit || currentRow.main_unit || null) || null;
+              currentRow.sub_unit = normalizeUnitValue(record?.sub_unit || currentRow.sub_unit || null) || null;
             }
 
             if (isBundleContents && key === 'product_id') {
               currentRow.product_name = record?.name || currentRow.product_name || '';
               currentRow.system_code = record?.system_code || currentRow.system_code || '';
-              currentRow.main_unit = record?.main_unit || currentRow.main_unit || '';
-              currentRow.sub_unit = record?.sub_unit || currentRow.sub_unit || '';
+              currentRow.main_unit = normalizeUnitValue(record?.main_unit || currentRow.main_unit || '') || '';
+              currentRow.sub_unit = normalizeUnitValue(record?.sub_unit || currentRow.sub_unit || '') || '';
             }
 
-          if (isInvoiceItems && key === 'product_id') {
+          if (isAnyInvoiceItems && key === 'product_id') {
             currentRow.source_shelf_id = null;
           }
 
@@ -674,7 +703,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           newData[index] = currentRow;
           commitActiveRows(newData);
 
-          if (isInvoiceItems && key === 'product_id' && value) {
+          if (isAnyInvoiceItems && key === 'product_id' && value) {
             const rowKey = String(currentRow.key || currentRow.id || index);
             loadShelvesForRow(rowKey, String(value));
           }
@@ -834,6 +863,11 @@ const EditableTable: React.FC<EditableTableProps> = ({
       if (isNumeric) {
         const normalized = normalizeNumericString(value);
         nextRow[key] = normalized === '' ? null : normalized;
+        return;
+      }
+
+      if ((key === 'main_unit' || key === 'sub_unit') && typeof value === 'string') {
+        nextRow[key] = normalizeUnitValue(value) || value;
         return;
       }
 
@@ -1120,16 +1154,14 @@ const EditableTable: React.FC<EditableTableProps> = ({
         });
 
         if (isProductInventory) {
-          await updateProductStock(supabase as any, recordId);
+          await syncMultipleProductsStock(supabase as any, [recordId]);
         }
 
         if (isShelfInventory) {
           const affectedProductIds = new Set<string>();
           payload.forEach((row: any) => row.product_id && affectedProductIds.add(row.product_id));
           data.forEach((row: any) => row.product_id && affectedProductIds.add(row.product_id));
-          for (const pid of Array.from(affectedProductIds)) {
-            await updateProductStock(supabase, pid);
-          }
+          await syncMultipleProductsStock(supabase as any, Array.from(affectedProductIds));
         }
 
         const oldValue = data.map(({ key, ...rest }) => rest);
@@ -1243,12 +1275,37 @@ const EditableTable: React.FC<EditableTableProps> = ({
         total_price: calculateRow(rest, block.rowCalculationType),
       }));
 
+      let invoiceStatusBeforeSave: string | null = null;
+      if (isAnyInvoiceItems) {
+        const { data: invoiceMeta, error: invoiceMetaError } = await supabase
+          .from(moduleId)
+          .select('status')
+          .eq('id', recordId)
+          .maybeSingle();
+        if (invoiceMetaError) throw invoiceMetaError;
+        invoiceStatusBeforeSave = invoiceMeta?.status ?? null;
+      }
+
       const updatePayload: any = { [block.id]: dataToSave };
       
       const { error } = await supabase.from(moduleId).update(updatePayload).eq('id', recordId);
       if (error) throw error;
 
       const oldValue = data.map(({ key, ...rest }) => rest);
+      if (isAnyInvoiceItems) {
+        const { data: authData } = await supabase.auth.getUser();
+        const currentUserId = authData?.user?.id || null;
+        await syncInvoiceInventoryOnSave({
+          supabase: supabase as any,
+          moduleId,
+          recordId,
+          previousStatus: invoiceStatusBeforeSave,
+          nextStatus: invoiceStatusBeforeSave,
+          previousInvoiceItems: oldValue,
+          nextInvoiceItems: dataToSave,
+          userId: currentUserId,
+        });
+      }
       await insertChangelog(supabase, moduleId, recordId, block, oldValue, dataToSave);
 
       message.success('ذخیره شد');
@@ -1607,7 +1664,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             || (isProductionOrder && isBomItemBlock && (record as any)?.selected_product_id && !editableAfterSelection.has(col.key))
             || readonlyByCondition
             || (isAnyInvoiceItems && col.key === 'total_price')
-            || (isInvoiceItems && col.key === 'source_shelf_id' && !record?.product_id),
+            || (isAnyInvoiceItems && col.key === 'source_shelf_id' && !record?.product_id),
         };
         if (col.imageSourceMode) {
           (fieldConfig as any).imageSourceMode = col.imageSourceMode;
@@ -1625,7 +1682,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
         if (col.type === FieldType.RELATION) {
           const specificKey = `${block.id}_${col.key}`;
           options = relationOptions[specificKey] || relationOptions[col.key] || [];
-          if (isInvoiceItems && col.key === 'source_shelf_id') {
+          if (isAnyInvoiceItems && col.key === 'source_shelf_id') {
             const shelvesState = shelfOptionsByRow[rowKey];
             options = shelvesState?.options || [];
           }

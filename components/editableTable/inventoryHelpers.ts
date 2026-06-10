@@ -1,29 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { convertArea, type UnitValue } from '../../utils/unitConversions';
 import { getAllowNegativeInventory } from '../../utils/companySettings';
-
-export const updateProductStock = async (supabase: SupabaseClient, productId: string) => {
-  try {
-    const { data: rows, error } = await supabase
-      .from('product_inventory')
-      .select('stock')
-      .eq('product_id', productId);
-    if (error) throw error;
-
-    const totalStock = (rows || []).reduce((sum: number, row: any) => sum + (parseFloat(row.stock) || 0), 0);
-    const { data: productRow } = await supabase
-      .from('products')
-      .select('main_unit, sub_unit')
-      .eq('id', productId)
-      .maybeSingle();
-    const mainUnit = productRow?.main_unit as UnitValue | undefined;
-    const subUnit = productRow?.sub_unit as UnitValue | undefined;
-    const subStock = mainUnit && subUnit ? convertArea(totalStock, mainUnit, subUnit) : 0;
-    await supabase.from('products').update({ stock: totalStock, sub_stock: subStock }).eq('id', productId);
-  } catch (e) {
-    console.error(e);
-  }
-};
 
 export const fetchShelfOptions = async (
   supabase: SupabaseClient,
@@ -64,19 +40,46 @@ export const fetchShelfOptions = async (
   const { data: rows, error } = await query;
   if (error) throw error;
 
-  const inventoryOptions = (rows || []).map((row: any) => {
-    const shelfNumber = row?.shelves?.shelf_number || row?.shelves?.name || row.shelf_id;
+  // Invoice rows store only shelf_id, so we must expose one option per shelf.
+  const inventoryByShelf = new Map<string, {
+    value: string;
+    shelfLabel: string;
+    stock: number;
+    unit: string | null;
+  }>();
+
+  (rows || []).forEach((row: any) => {
+    const shelfId = String(row?.shelf_id || '').trim();
+    if (!shelfId) return;
+
+    const shelfNumber = row?.shelves?.shelf_number || row?.shelves?.name || shelfId;
     const systemCode = row?.shelves?.system_code || '';
     const warehouseName = row?.shelves?.warehouses?.name || '';
     const shelfLabel = [systemCode, shelfNumber, warehouseName].filter(Boolean).join(' - ');
     const stockLabel = typeof row.stock === 'number' ? row.stock : parseFloat(row.stock) || 0;
-    const unitSuffix = productMainUnit ? ` ${productMainUnit}` : '';
-    const bundleNumber = row?.product_bundles?.bundle_number || '';
-    return {
-      value: row.shelf_id,
-      label: `${shelfLabel}${bundleNumber ? ` - بسته ${bundleNumber}` : ''} (موجودی: ${stockLabel}${unitSuffix})`,
+    const existing = inventoryByShelf.get(shelfId);
+
+    if (existing) {
+      existing.stock += stockLabel;
+      if (!existing.shelfLabel && shelfLabel) existing.shelfLabel = shelfLabel;
+      return;
+    }
+
+    inventoryByShelf.set(shelfId, {
+      value: shelfId,
+      shelfLabel,
       stock: stockLabel,
       unit: productMainUnit || null,
+    });
+  });
+
+  const inventoryOptions = Array.from(inventoryByShelf.values()).map((item) => {
+    const unitSuffix = productMainUnit ? ` ${productMainUnit}` : '';
+    return {
+      value: item.value,
+      label: `${item.shelfLabel} (موجودی: ${item.stock}${unitSuffix})`,
+      stock: item.stock,
+      unit: item.unit,
     };
   });
 
@@ -97,9 +100,8 @@ export const fetchShelfOptions = async (
   if (shelvesError) throw shelvesError;
 
   const plainShelfIds = new Set(
-    (rows || [])
-      .filter((row: any) => !row?.bundle_id)
-      .map((row: any) => String(row?.shelf_id || ''))
+    inventoryOptions
+      .map((row: any) => String(row?.value || ''))
       .filter(Boolean)
   );
 

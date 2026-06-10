@@ -159,6 +159,7 @@ export const invoicesConfig: ModuleDefinition = {
         { label: 'فاکتور نهایی', value: 'final', color: 'green' },
         { label: 'تسویه شده', value: 'settled', color: 'purple' },
         { label: 'تکمیل شده', value: 'completed', color: 'gray' },
+        { label: 'لغو شده', value: 'cancelled', color: 'red' },
       ],
     },
     // --- اطلاعات پایه ---

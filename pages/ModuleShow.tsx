@@ -33,7 +33,7 @@ import {
   addFinishedGoods,
   syncProductStock,
 } from '../utils/productionWorkflow';
-import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
+import { syncInvoiceInventoryOnSave } from '../utils/invoiceInventoryWorkflow';
 import { canAccessAssignedRecord, resolveFilesAccessPermissions } from '../utils/permissions';
 import { isMissingRecordFilesError } from '../utils/recordFilesAvailability';
 import { buildCopyPayload, copyProductionOrderRelations, detectCopyNameField } from '../utils/recordCopy';
@@ -64,6 +64,16 @@ import { BUNDLE_PRODUCTS_PRINT_FIELD } from '../utils/productBundlePrint';
 
 const MODULE_SHOW_OPTIONS_CACHE = new Map<string, { dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>();
 const MODULE_SHOW_OPTIONS_INFLIGHT = new Map<string, Promise<{ dynamicOptions: Record<string, any[]>; relationOptions: Record<string, any[]> }>>();
+
+const normalizeInvoiceRecordForView = (moduleId: string, record: any) => {
+  if (moduleId !== 'invoices' || !record) return record;
+  if (record?.description) return record;
+  if (!record?.terms_conditions) return record;
+  return {
+    ...record,
+    description: record.terms_conditions,
+  };
+};
 
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
@@ -780,7 +790,7 @@ const ModuleShow: React.FC = () => {
         setAccessDenied(false);
         setCurrentTags(tags);
         
-        let nextRecord: any = normalizeStoragePublicUrlsInRecord(record);
+        let nextRecord: any = normalizeInvoiceRecordForView(moduleId, normalizeStoragePublicUrlsInRecord(record));
         if (moduleId === 'products') {
           const mainUnit = nextRecord?.main_unit;
           const subUnit = nextRecord?.sub_unit;
@@ -2053,19 +2063,22 @@ const ModuleShow: React.FC = () => {
             previousStatus: data?.status ?? null,
             previousStartDate: data?.start_date || null,
           })
-          : { [key]: newValue };
+          : moduleId === 'invoices' && key === 'description'
+            ? { terms_conditions: typeof newValue === 'string' ? (newValue.trim() || null) : (newValue ?? null) }
+            : { [key]: newValue };
       const { error } = await supabase.from(moduleId).update(patch).eq('id', id);
       if (error) throw error;
       if ((moduleId === 'invoices' || moduleId === 'purchase_invoices') && key === 'status') {
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || null;
-        await applyInvoiceFinalizationInventory({
+        await syncInvoiceInventoryOnSave({
           supabase: supabase as any,
           moduleId,
           recordId: id || '',
           previousStatus: data?.status ?? null,
           nextStatus: newValue,
-          invoiceItems: data?.invoiceItems || [],
+          previousInvoiceItems: data?.invoiceItems || [],
+          nextInvoiceItems: data?.invoiceItems || [],
           userId,
         });
       }
@@ -2078,7 +2091,11 @@ const ModuleShow: React.FC = () => {
           customerIds: [data?.customer_id, key === 'customer_id' ? newValue : null],
         });
       }
-      setData((prev: any) => ({ ...prev, ...patch }));
+      setData((prev: any) => ({
+        ...prev,
+        ...patch,
+        ...(moduleId === 'invoices' && key === 'description' ? { description: newValue } : {}),
+      }));
       await insertChangelog({
         action: 'update',
         fieldName: key,
@@ -2127,7 +2144,13 @@ const ModuleShow: React.FC = () => {
           previousStatus: previous?.status ?? null,
           previousStartDate: previous?.start_date || null,
         })
-        : values;
+        : { ...values };
+
+      if (moduleId === 'invoices') {
+        const invoiceDescription = typeof payload?.description === 'string' ? payload.description.trim() : '';
+        payload.terms_conditions = invoiceDescription || null;
+        delete payload.description;
+      }
 
       const changedKeys = Object.keys(payload)
         .filter((key) => !String(key).startsWith('__'))
@@ -2145,13 +2168,14 @@ const ModuleShow: React.FC = () => {
       }
 
       if (moduleId === 'invoices' || moduleId === 'purchase_invoices') {
-        await applyInvoiceFinalizationInventory({
+        await syncInvoiceInventoryOnSave({
           supabase: supabase as any,
           moduleId,
           recordId: id,
           previousStatus: previous?.status || null,
           nextStatus: payload?.status ?? previous?.status ?? null,
-          invoiceItems: payload?.invoiceItems ?? previous?.invoiceItems ?? [],
+          previousInvoiceItems: previous?.invoiceItems ?? [],
+          nextInvoiceItems: payload?.invoiceItems ?? previous?.invoiceItems ?? [],
           userId,
         });
         if (moduleId === 'invoices') {
