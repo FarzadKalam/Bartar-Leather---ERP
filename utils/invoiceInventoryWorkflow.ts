@@ -72,6 +72,65 @@ const buildTransferAggregateKey = (productId: string, shelfId: string, bundleId:
   `${productId}::${shelfId}::${bundleId ?? '__null__'}`
 );
 
+const roundQuantity = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 1000) / 1000;
+};
+
+const allocateSaleQuantityAcrossShelfInventory = async (
+  supabase: SupabaseClient,
+  {
+    productId,
+    shelfId,
+    quantity,
+    bundleId,
+  }: {
+    productId: string;
+    shelfId: string;
+    quantity: number;
+    bundleId?: string | null;
+  }
+) => {
+  const qty = Math.abs(toNumber(quantity));
+  if (!productId || !shelfId || qty <= 0) return [];
+  if (bundleId) return [{ bundleId, quantity: qty }];
+
+  const { data, error } = await supabase
+    .from('product_inventory')
+    .select('bundle_id, stock')
+    .eq('product_id', productId)
+    .eq('shelf_id', shelfId);
+  if (error) throw error;
+
+  const rows = [...(data || [])]
+    .map((row: any) => ({
+      bundleId: row?.bundle_id ? String(row.bundle_id) : null,
+      stock: Math.max(0, toNumber(row?.stock)),
+    }))
+    .filter((row) => row.stock > 0)
+    .sort((left, right) => {
+      if (left.bundleId === null && right.bundleId !== null) return -1;
+      if (left.bundleId !== null && right.bundleId === null) return 1;
+      return String(left.bundleId || '').localeCompare(String(right.bundleId || ''), 'en');
+    });
+
+  let remaining = qty;
+  const allocations: Array<{ bundleId: string | null; quantity: number }> = [];
+  rows.forEach((row) => {
+    if (remaining <= 0) return;
+    const allocated = Math.min(remaining, row.stock);
+    if (allocated <= 0) return;
+    allocations.push({ bundleId: row.bundleId, quantity: roundQuantity(allocated) });
+    remaining = roundQuantity(remaining - allocated);
+  });
+
+  if (remaining > 0) {
+    allocations.push({ bundleId: null, quantity: roundQuantity(remaining) });
+  }
+
+  return allocations;
+};
+
 const getTransferRecordId = (moduleId: string, row: any) => {
   const refs = getStockTransferLinkedRecordIds(row);
   return moduleId === 'purchase_invoices'
@@ -148,6 +207,12 @@ interface ApplyInvoiceFinalizationParams {
   ignoreExistingActiveEffectCheck?: boolean;
 }
 
+type InvoiceInventorySyncResult = {
+  applied: boolean;
+  affectedProducts?: string[];
+  skipped?: 'already_applied' | 'already_reverted';
+};
+
 export const applyInvoiceFinalizationInventory = async ({
   supabase,
   moduleId,
@@ -157,7 +222,7 @@ export const applyInvoiceFinalizationInventory = async ({
   invoiceItems,
   userId,
   ignoreExistingActiveEffectCheck = false,
-}: ApplyInvoiceFinalizationParams) => {
+}: ApplyInvoiceFinalizationParams): Promise<InvoiceInventorySyncResult> => {
   if (!recordId) return { applied: false };
 
   const direction = getInvoiceDirection(moduleId);
@@ -191,7 +256,6 @@ export const applyInvoiceFinalizationInventory = async ({
       return { applied: false, skipped: 'already_applied' as const };
     }
   } else if (isCancelledStatus(nextStatus)) {
-    if (!isFinalStatus(previousStatus)) return { applied: false };
     if (!hasActiveInventoryEffect) {
       return { applied: false, skipped: 'already_reverted' as const };
     }
@@ -209,7 +273,7 @@ export const applyInvoiceFinalizationInventory = async ({
       return { applied: false };
     }
 
-    rows.forEach((item: any, index: number) => {
+    for (const [index, item] of rows.entries()) {
       const productId = item?.product_id ? String(item.product_id) : '';
       const shelfIdRaw = item?.source_shelf_id || item?.shelf_id || item?.selected_shelf_id || null;
       const shelfId = shelfIdRaw ? String(shelfIdRaw) : '';
@@ -218,7 +282,7 @@ export const applyInvoiceFinalizationInventory = async ({
       const requiredQty = Math.abs(toNumber(item?.sub_quantity));
       const bundleId = item?.bundle_id ? String(item.bundle_id) : null;
 
-      if (!productId || qty <= 0) return;
+      if (!productId || qty <= 0) continue;
       if (!shelfId) {
         throw new Error(`در ردیف ${index + 1} قفسه انتخاب نشده است.`);
       }
@@ -239,20 +303,37 @@ export const applyInvoiceFinalizationInventory = async ({
           bundleId,
         }));
       } else {
-        deltas.push({ productId, shelfId, bundleId, delta: -qty, unit: mainUnit });
-        transfersPayload.push(buildStockTransferPayload({
-          transferType: transferTypes.apply,
+        const allocations = await allocateSaleQuantityAcrossShelfInventory(supabase, {
           productId,
-          deliveredQty: qty,
-          requiredQty,
-          invoiceId: recordId,
-          fromShelfId: shelfId,
-          toShelfId: null,
-          userId: userId || null,
+          shelfId,
+          quantity: qty,
           bundleId,
-        }));
+        });
+        let allocatedRequiredQtySoFar = 0;
+        allocations.forEach((allocation, allocationIndex) => {
+          const allocatedQty = Math.abs(toNumber(allocation.quantity));
+          if (allocatedQty <= 0) return;
+          const allocatedRequiredQty = requiredQty > 0
+            ? (allocationIndex === allocations.length - 1
+              ? roundQuantity(requiredQty - allocatedRequiredQtySoFar)
+              : roundQuantity(requiredQty * (allocatedQty / qty)))
+            : 0;
+          allocatedRequiredQtySoFar = roundQuantity(allocatedRequiredQtySoFar + allocatedRequiredQty);
+          deltas.push({ productId, shelfId, bundleId: allocation.bundleId, delta: -allocatedQty, unit: mainUnit });
+          transfersPayload.push(buildStockTransferPayload({
+            transferType: transferTypes.apply,
+            productId,
+            deliveredQty: allocatedQty,
+            requiredQty: Math.max(0, allocatedRequiredQty),
+            invoiceId: recordId,
+            fromShelfId: shelfId,
+            toShelfId: null,
+            userId: userId || null,
+            bundleId: allocation.bundleId,
+          }));
+        });
       }
-    });
+    }
   } else {
     activeEffects.forEach((item) => {
       const qty = Math.abs(toNumber(item.deltaQty));

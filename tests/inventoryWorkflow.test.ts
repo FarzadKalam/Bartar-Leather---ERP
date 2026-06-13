@@ -296,6 +296,34 @@ runTest('purchase invoice finalization increases stock and logs incoming transfe
   assert.equal(supabase.getTable('products')[0].stock, 3);
 });
 
+runTest('purchase invoice finalization keeps bundle inventory separate from normal shelf stock', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 5, sub_stock: 500 }],
+    product_inventory: [{ id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: null, stock: 5, warehouse_id: 'w1' }],
+    stock_transfers: [],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'purchase_invoices',
+    recordId: 'inv-purchase-bundle-1',
+    previousStatus: 'created',
+    nextStatus: 'completed',
+    invoiceItems: [{ product_id: 'p1', source_shelf_id: 's1', bundle_id: 'b1', quantity: 2, main_unit: 'متر' }],
+    userId: 'u1',
+  });
+
+  const inventoryRows = supabase.getTable('product_inventory');
+  const normalRow = inventoryRows.find((row) => row.bundle_id === null);
+  const bundleRow = inventoryRows.find((row) => row.bundle_id === 'b1');
+
+  assert.equal(result.applied, true);
+  assert.equal(normalRow?.stock, 5);
+  assert.equal(bundleRow?.stock, 2);
+  assert.equal(supabase.getTable('stock_transfers')[0].bundle_id, 'b1');
+  assert.equal(supabase.getTable('products')[0].stock, 7);
+});
+
 runTest('invoice finalization derives main quantity from sub-unit quantity when units are convertible', async () => {
   const supabase = new MockSupabase({
     products: [{ id: 'p1', name: 'Leather', main_unit: 'متر مربع', sub_unit: 'سانتیمتر مربع', stock: 0, sub_stock: 0 }],
@@ -344,6 +372,116 @@ runTest('sales invoice finalization decreases stock and logs outgoing transfer',
   assert.equal(supabase.getTable('products')[0].stock, 6);
 });
 
+runTest('sales invoice finalization deducts from the selected bundle inventory only', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 8, sub_stock: 800 }],
+    product_inventory: [
+      { id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: null, stock: 5, warehouse_id: 'w1' },
+      { id: 'pi2', product_id: 'p1', shelf_id: 's1', bundle_id: 'b1', stock: 3, warehouse_id: 'w1' },
+    ],
+    stock_transfers: [],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'invoices',
+    recordId: 'inv-sale-bundle-1',
+    previousStatus: 'draft',
+    nextStatus: 'settled',
+    invoiceItems: [{ product_id: 'p1', source_shelf_id: 's1', bundle_id: 'b1', quantity: 2, main_unit: 'متر' }],
+    userId: 'u1',
+  });
+
+  const inventoryRows = supabase.getTable('product_inventory');
+  const normalRow = inventoryRows.find((row) => row.bundle_id === null);
+  const bundleRow = inventoryRows.find((row) => row.bundle_id === 'b1');
+
+  assert.equal(result.applied, true);
+  assert.equal(normalRow?.stock, 5);
+  assert.equal(bundleRow?.stock, 1);
+  assert.equal(supabase.getTable('stock_transfers')[0].bundle_id, 'b1');
+  assert.equal(supabase.getTable('products')[0].stock, 6);
+});
+
+runTest('sales invoice without bundle selection consumes available stock across the selected shelf', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 5, sub_stock: 500 }],
+    product_inventory: [
+      { id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: null, stock: 1, warehouse_id: 'w1' },
+      { id: 'pi2', product_id: 'p1', shelf_id: 's1', bundle_id: 'b1', stock: 4, warehouse_id: 'w1' },
+    ],
+    stock_transfers: [],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'invoices',
+    recordId: 'inv-sale-mixed-shelf-1',
+    previousStatus: 'created',
+    nextStatus: 'final',
+    invoiceItems: [{ product_id: 'p1', source_shelf_id: 's1', quantity: 3, sub_quantity: 300, main_unit: 'متر', sub_unit: 'سانتی‌متر' }],
+    userId: 'u1',
+  });
+
+  const inventoryRows = supabase.getTable('product_inventory');
+  const normalRow = inventoryRows.find((row) => row.bundle_id === null);
+  const bundleRow = inventoryRows.find((row) => row.bundle_id === 'b1');
+  const transfers = supabase.getTable('stock_transfers');
+
+  assert.equal(result.applied, true);
+  assert.equal(normalRow?.stock, 0);
+  assert.equal(bundleRow?.stock, 2);
+  assert.equal(transfers.length, 2);
+  assert.equal(transfers[0].bundle_id, null);
+  assert.equal(transfers[0].delivered_qty, 1);
+  assert.equal(transfers[0].required_qty, 100);
+  assert.equal(transfers[1].bundle_id, 'b1');
+  assert.equal(transfers[1].delivered_qty, 2);
+  assert.equal(transfers[1].required_qty, 200);
+  assert.equal(supabase.getTable('products')[0].stock, 2);
+});
+
+runTest('cancelled sales invoice restores split bundle and non-bundle deductions to the same shelf', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 2, sub_stock: 200 }],
+    product_inventory: [
+      { id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: null, stock: 0, warehouse_id: 'w1' },
+      { id: 'pi2', product_id: 'p1', shelf_id: 's1', bundle_id: 'b1', stock: 2, warehouse_id: 'w1' },
+    ],
+    stock_transfers: [
+      { id: 'st1', invoice_id: 'inv-sale-mixed-cancel-1', transfer_type: 'sales_invoice', product_id: 'p1', from_shelf_id: 's1', to_shelf_id: null, delivered_qty: 1, required_qty: 100, bundle_id: null },
+      { id: 'st2', invoice_id: 'inv-sale-mixed-cancel-1', transfer_type: 'sales_invoice', product_id: 'p1', from_shelf_id: 's1', to_shelf_id: null, delivered_qty: 2, required_qty: 200, bundle_id: 'b1' },
+    ],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'invoices',
+    recordId: 'inv-sale-mixed-cancel-1',
+    previousStatus: 'final',
+    nextStatus: 'cancelled',
+    invoiceItems: [],
+    userId: 'u1',
+  });
+
+  const inventoryRows = supabase.getTable('product_inventory');
+  const normalRow = inventoryRows.find((row) => row.bundle_id === null);
+  const bundleRow = inventoryRows.find((row) => row.bundle_id === 'b1');
+  const transfers = supabase.getTable('stock_transfers');
+
+  assert.equal(result.applied, true);
+  assert.equal(normalRow?.stock, 1);
+  assert.equal(bundleRow?.stock, 4);
+  assert.equal(transfers.length, 4);
+  assert.equal(transfers[2].transfer_type, 'sales_invoice_cancel');
+  assert.equal(transfers[2].to_shelf_id, 's1');
+  assert.equal(transfers[2].bundle_id, null);
+  assert.equal(transfers[3].transfer_type, 'sales_invoice_cancel');
+  assert.equal(transfers[3].to_shelf_id, 's1');
+  assert.equal(transfers[3].bundle_id, 'b1');
+  assert.equal(supabase.getTable('products')[0].stock, 5);
+});
+
 runTest('sales invoice finalization also runs when invoice is saved directly as settled', async () => {
   const supabase = new MockSupabase({
     products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 8, sub_stock: 800 }],
@@ -389,6 +527,33 @@ runTest('sales invoice cancelled status restores stock to the same shelf and log
   assert.equal(supabase.getTable('product_inventory')[0].stock, 8);
   assert.equal(supabase.getTable('stock_transfers').length, 2);
   assert.equal(supabase.getTable('stock_transfers')[1].transfer_type, 'sales_invoice_cancel');
+  assert.equal(supabase.getTable('stock_transfers')[1].to_shelf_id, 's1');
+  assert.equal(supabase.getTable('products')[0].stock, 8);
+});
+
+runTest('cancelled status restores active stock effect even when previous status was not final', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 8, sub_stock: 800 }],
+    product_inventory: [{ id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: 'b1', stock: 6, warehouse_id: 'w1' }],
+    stock_transfers: [
+      { id: 'st1', invoice_id: 'inv-sale-cancel-active-1', transfer_type: 'sales_invoice', product_id: 'p1', from_shelf_id: 's1', to_shelf_id: null, delivered_qty: 2, required_qty: 200, bundle_id: 'b1' },
+    ],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'invoices',
+    recordId: 'inv-sale-cancel-active-1',
+    previousStatus: 'created',
+    nextStatus: 'cancelled',
+    invoiceItems: [],
+    userId: 'u1',
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(supabase.getTable('product_inventory')[0].stock, 8);
+  assert.equal(supabase.getTable('stock_transfers')[1].transfer_type, 'sales_invoice_cancel');
+  assert.equal(supabase.getTable('stock_transfers')[1].bundle_id, 'b1');
   assert.equal(supabase.getTable('stock_transfers')[1].to_shelf_id, 's1');
   assert.equal(supabase.getTable('products')[0].stock, 8);
 });
