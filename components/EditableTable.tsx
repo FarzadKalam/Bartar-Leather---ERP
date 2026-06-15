@@ -475,7 +475,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
           }
         }
 
-        const dataWithKeys = (rows || []).map((row: any, idx: number) => {
+        const visibleRows = (rows || []).filter((row: any) => Math.abs(parseFloat(row?.stock) || 0) > 1e-9);
+        const dataWithKeys = visibleRows.map((row: any, idx: number) => {
           const mainUnit = row?.products?.main_unit ?? row.main_unit ?? productUnits.mainUnit ?? null;
           const subUnit = row?.products?.sub_unit ?? row.sub_unit ?? productUnits.subUnit ?? null;
           const shelfName = row?.shelves?.name || row?.shelves?.shelf_number || row?.shelf_id || '-';

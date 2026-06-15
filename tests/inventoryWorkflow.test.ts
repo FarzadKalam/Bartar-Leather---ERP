@@ -6,6 +6,7 @@ import {
   persistProductOpeningInventory,
   reconcileMissingOpeningBalanceTransfers,
   recordInventoryRowDeletionTransfers,
+  syncOpeningBalanceTransfersForInventoryRows,
 } from '../utils/productOpeningInventory';
 
 type Row = Record<string, any>;
@@ -23,7 +24,7 @@ class MockQuery {
   constructor(
     private readonly db: MockSupabase,
     private readonly table: string,
-    private readonly mode: 'select' | 'insert' | 'upsert' | 'update',
+    private readonly mode: 'select' | 'insert' | 'upsert' | 'update' | 'delete',
     private readonly payload?: any,
   ) {}
 
@@ -78,6 +79,10 @@ class MockQuery {
       const updated = this.db.updateRows(this.table, this.filters, this.payload);
       return resolve({ data: updated, error: null });
     }
+    if (this.mode === 'delete') {
+      const deleted = this.db.deleteRows(this.table, this.filters);
+      return resolve({ data: deleted, error: null });
+    }
     return resolve({ data: this.executeSelect(), error: null });
   }
 
@@ -95,6 +100,10 @@ class MockQuery {
 
   update(payload: any) {
     return new MockQuery(this.db, this.table, 'update', payload).withFilters(this.filters);
+  }
+
+  delete() {
+    return new MockQuery(this.db, this.table, 'delete').withFilters(this.filters);
   }
 
   private withFilters(filters: Filter[]) {
@@ -179,6 +188,23 @@ class MockSupabase {
       updated.push({ ...target[index] });
     });
     return updated;
+  }
+
+  deleteRows(table: string, filters: Filter[]) {
+    const target = this.getTable(table);
+    const deleted: Row[] = [];
+    for (let index = target.length - 1; index >= 0; index -= 1) {
+      const row = target[index];
+      const matches = filters.every((filter) => {
+        if (filter.type === 'eq') return row?.[filter.column] === filter.value;
+        if (filter.type === 'in') return (filter.value || []).includes(row?.[filter.column]);
+        return (row?.[filter.column] ?? null) === filter.value;
+      });
+      if (!matches) continue;
+      deleted.push({ ...row });
+      target.splice(index, 1);
+    }
+    return deleted.reverse();
   }
 }
 
@@ -429,7 +455,7 @@ runTest('sales invoice without bundle selection consumes available stock across 
   const transfers = supabase.getTable('stock_transfers');
 
   assert.equal(result.applied, true);
-  assert.equal(normalRow?.stock, 0);
+  assert.equal(normalRow, undefined);
   assert.equal(bundleRow?.stock, 2);
   assert.equal(transfers.length, 2);
   assert.equal(transfers[0].bundle_id, null);
@@ -578,7 +604,7 @@ runTest('purchase invoice cancelled status removes stock from the same shelf and
   });
 
   assert.equal(result.applied, true);
-  assert.equal(supabase.getTable('product_inventory')[0].stock, 0);
+  assert.equal(supabase.getTable('product_inventory').length, 0);
   assert.equal(supabase.getTable('stock_transfers').length, 2);
   assert.equal(supabase.getTable('stock_transfers')[1].transfer_type, 'purchase_invoice_cancel');
   assert.equal(supabase.getTable('stock_transfers')[1].from_shelf_id, 's1');
@@ -795,6 +821,26 @@ runTest('transfer between shelves keeps total stock stable and tracks each shelf
   assert.equal(rows.reduce((sum, row) => sum + (parseFloat(row.stock) || 0), 0), 10);
 });
 
+runTest('transfer that fully depletes a shelf removes the zero-stock source row', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'ظ…طھط±', sub_unit: 'ط³ط§ظ†طھغŒâ€Œظ…طھط±', stock: 2, sub_stock: 200 }],
+    product_inventory: [
+      { id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: 'b1', stock: 2, warehouse_id: 'w1' },
+    ],
+  });
+
+  await applyInventoryDeltas(supabase as any, [
+    { productId: 'p1', shelfId: 's1', bundleId: 'b1', delta: -2, unit: 'ظ…طھط±' },
+    { productId: 'p1', shelfId: 's2', bundleId: 'b1', delta: 2, unit: 'ظ…طھط±' },
+  ]);
+
+  const rows = supabase.getTable('product_inventory');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.shelf_id, 's2');
+  assert.equal(rows[0]?.bundle_id, 'b1');
+  assert.equal(rows[0]?.stock, 2);
+});
+
 runTest('syncMultipleProductsStock rolls variant inventory changes up to the parent product', async () => {
   const supabase = new MockSupabase({
     products: [
@@ -870,6 +916,65 @@ runTest('changing a row shelf keeps it out of deletion transfer candidates', () 
   ]);
   assert.deepEqual(result.deletedRows, []);
   assert.deepEqual(result.rekeyedRowIds, ['pi1']);
+});
+
+runTest('correcting bundle shelves works for arbitrary shelves, products, and bundles', async () => {
+  const cases = [
+    { productId: 'p1', bundleId: 'b1', fromShelfId: 's3', toShelfId: 's4', stock: 2 },
+    { productId: 'p2', bundleId: 'b27', fromShelfId: 's11', toShelfId: 's98', stock: 7.5 },
+    { productId: 'product-x', bundleId: 'bundle-x', fromShelfId: 'shelf-old', toShelfId: 'shelf-new', stock: 1 },
+  ];
+
+  for (const [index, item] of cases.entries()) {
+    const supabase = new MockSupabase({
+      products: [{
+        id: item.productId,
+        name: `Product ${index + 1}`,
+        main_unit: 'متر',
+        sub_unit: 'سانتی‌متر',
+      }],
+      stock_transfers: [{
+        id: `st${index + 1}`,
+        transfer_type: 'opening_balance',
+        product_id: item.productId,
+        bundle_id: item.bundleId,
+        delivered_qty: item.stock,
+        required_qty: item.stock * 100,
+        from_shelf_id: null,
+        to_shelf_id: item.fromShelfId,
+      }],
+    });
+    const previousRows = [{
+      id: `pi${index + 1}`,
+      product_id: item.productId,
+      shelf_id: item.fromShelfId,
+      bundle_id: item.bundleId,
+      stock: item.stock,
+    }];
+    const nextRows = [{
+      id: `pi${index + 1}`,
+      product_id: item.productId,
+      shelf_id: item.toShelfId,
+      bundle_id: item.bundleId,
+      stock: item.stock,
+    }];
+    const { removedRows } = partitionRemovedInventoryRows({ previousRows, nextRows });
+
+    await syncOpeningBalanceTransfersForInventoryRows({
+      supabase: supabase as any,
+      inventoryRows: nextRows,
+      removedRows,
+      userId: 'u1',
+    });
+
+    const transfers = supabase.getTable('stock_transfers');
+    assert.equal(transfers.length, 1);
+    assert.equal(transfers[0]?.transfer_type, 'opening_balance');
+    assert.equal(transfers[0]?.product_id, item.productId);
+    assert.equal(transfers[0]?.bundle_id, item.bundleId);
+    assert.equal(transfers[0]?.to_shelf_id, item.toShelfId);
+    assert.equal(transfers.some((row) => row.to_shelf_id === item.fromShelfId), false);
+  }
 });
 
 let failures = 0;

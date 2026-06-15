@@ -35,7 +35,8 @@ const ShelfInventoryPanel: React.FC<ShelfInventoryPanelProps> = ({
 
       if (error) throw error;
 
-      const mapped = (data || []).map((row: any, index: number) => {
+      const visibleRows = (data || []).filter((row: any) => Math.abs(parseFloat(row?.stock) || 0) > 1e-9);
+      const mapped = visibleRows.map((row: any, index: number) => {
         const mainUnit = row?.products?.main_unit || null;
         const subUnit = row?.products?.sub_unit || null;
         const mainStock = parseFloat(row?.stock) || 0;
