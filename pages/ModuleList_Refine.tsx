@@ -34,6 +34,7 @@ import {
   mapBundleInventoryRowsToPrintItems,
 } from "../utils/productBundlePrint";
 import { DEFAULT_LIST_SORTERS } from "../utils/tableSorting";
+import { sanitizeViewFilters, toCrudViewFilters } from "../utils/viewFilters";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -562,13 +563,10 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
 
   const handleViewChange = (view: SavedView | null, config: any) => {
     setCurrentView(view);
+    const sanitizedFilters = sanitizeViewFilters(config?.filters);
 
-    if (config && config.filters && Array.isArray(config.filters) && config.filters.length > 0) {
-        const refineFilters: CrudFilters = config.filters.map((f: any) => ({
-            field: f.field,
-            operator: f.operator || 'eq',
-            value: f.value
-        }));
+    if (sanitizedFilters.length > 0) {
+        const refineFilters: CrudFilters = toCrudViewFilters(sanitizedFilters);
         setFilters(refineFilters, 'replace');
     } else {
         setFilters([], 'replace');

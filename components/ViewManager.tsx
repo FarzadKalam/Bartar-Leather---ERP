@@ -11,6 +11,7 @@ import {
 import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import { SavedView, ViewConfig } from '../types';
+import { sanitizeViewFilters } from '../utils/viewFilters';
 import FilterBuilder from './FilterBuilder';
 
 interface ViewManagerProps {
@@ -117,6 +118,7 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, curren
   const handleEditView = useCallback((view: SavedView, e: React.MouseEvent) => {
     e.stopPropagation();
     const rawConfig = (view.config as any) || {};
+    const sanitizedFilters = sanitizeViewFilters(rawConfig.filters);
     const effectiveSort =
       currentView?.id === view.id && currentSort !== undefined
         ? currentSort
@@ -125,7 +127,7 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, curren
         columns: Array.isArray(rawConfig.columns) && rawConfig.columns.length > 0 
             ? rawConfig.columns 
             : moduleConfig.fields.map(f => f.key),
-        filters: Array.isArray(rawConfig.filters) ? rawConfig.filters : [],
+        filters: sanitizedFilters,
         sort: effectiveSort
     };
     setConfig((prev) => (areViewConfigsEqual(prev, safeConfig) ? prev : safeConfig));
@@ -146,11 +148,7 @@ const ViewManager: React.FC<ViewManagerProps> = ({ moduleId, currentView, curren
         return;
     }
 
-    const validFilters = (config.filters || []).filter(f =>
-      f.field &&
-      f.operator &&
-      !(f.value === undefined || f.value === null)
-    );
+    const validFilters = sanitizeViewFilters(config.filters);
 
     const cleanConfig: ViewConfig = { ...config, filters: validFilters };
 
