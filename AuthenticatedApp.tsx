@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Route, Routes, Outlet } from "react-router-dom";
 import { Refine, Authenticated } from "@refinedev/core";
-import { notificationProvider, ErrorComponent } from "@refinedev/antd";
+import { useNotificationProvider, ErrorComponent } from "@refinedev/antd";
 import { dataProvider } from "@refinedev/supabase";
 import routerBindings, {
   UnsavedChangesNotifier,
@@ -38,6 +38,8 @@ const FullScreenLoader = () => (
 );
 
 function AuthenticatedApp() {
+  const baseNotificationProvider = useNotificationProvider();
+
   useEffect(() => {
     const publicPaths = ["/inquiry", "/login"];
 
@@ -86,6 +88,66 @@ function AuthenticatedApp() {
     if (action === "edit") return "ویرایش";
     if (action === "show") return "جزئیات";
     return "";
+  };
+
+  const getResourceFaLabel = (identifier?: string) => {
+    const key = String(identifier || "").trim();
+    if (!key) return "";
+    return MODULES?.[key]?.titles?.fa || key;
+  };
+
+  const translateNotificationTitle = (title?: string) => {
+    const value = String(title || "").trim();
+    if (!value) return title;
+    if (value === "Success") return "موفق";
+    if (value === "Error") return "خطا";
+    return value;
+  };
+
+  const translateNotificationMessage = (message?: string): string => {
+    const value = String(message || "").trim();
+    if (!value) return "";
+
+    const deleteMatch = value.match(/^Successfully deleted(?: a)? (.+)$/i);
+    if (deleteMatch?.[1]) {
+      const resourceLabel = getResourceFaLabel(deleteMatch[1]);
+      return resourceLabel ? `${resourceLabel} با موفقیت حذف شد` : "با موفقیت حذف شد";
+    }
+
+    const createMatch = value.match(/^Successfully created(?: a)? (.+)$/i);
+    if (createMatch?.[1]) {
+      const resourceLabel = getResourceFaLabel(createMatch[1]);
+      return resourceLabel ? `${resourceLabel} با موفقیت ایجاد شد` : "با موفقیت ایجاد شد";
+    }
+
+    const updateMatch = value.match(/^Successfully updated(?: a)? (.+)$/i);
+    if (updateMatch?.[1]) {
+      const resourceLabel = getResourceFaLabel(updateMatch[1]);
+      return resourceLabel ? `${resourceLabel} با موفقیت بروزرسانی شد` : "با موفقیت بروزرسانی شد";
+    }
+
+    if (/^An error occurred while deleting the record\.?$/i.test(value)) {
+      return "در حذف رکورد خطا رخ داد.";
+    }
+    if (/^An error occurred while creating the record\.?$/i.test(value)) {
+      return "در ایجاد رکورد خطا رخ داد.";
+    }
+    if (/^An error occurred while updating the record\.?$/i.test(value)) {
+      return "در بروزرسانی رکورد خطا رخ داد.";
+    }
+
+    return value;
+  };
+
+  const notificationProvider = {
+    ...baseNotificationProvider,
+    open: (params: Parameters<typeof baseNotificationProvider.open>[0]) => {
+      baseNotificationProvider.open({
+        ...params,
+        description: translateNotificationTitle(params.description),
+        message: translateNotificationMessage(params.message),
+      });
+    },
   };
 
   const titleHandler = ({

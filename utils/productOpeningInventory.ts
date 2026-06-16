@@ -24,6 +24,7 @@ type PersistProductOpeningInventoryParams = {
 };
 
 type InventoryBalanceRow = {
+  id?: unknown;
   product_id: string;
   shelf_id: string;
   bundle_id?: string | null;
@@ -72,6 +73,73 @@ const normalizeRelationId = (value: unknown): string | null => {
   }
   const fallback = String(value).trim();
   return fallback ? fallback : null;
+};
+
+const normalizeInventoryBalanceComparableRow = (row: InventoryBalanceRow) => ({
+  id: normalizeRelationId(row?.id),
+  productId: String(row?.product_id || '').trim(),
+  shelfId: String(row?.shelf_id || '').trim(),
+  bundleId: normalizeRelationId(row?.bundle_id),
+  stock: toNumber(row?.stock),
+});
+
+const inventoryBalanceKeyOf = (row: {
+  productId: string;
+  shelfId: string;
+  bundleId?: string | null;
+}) => `${row.productId}::${row.shelfId}::${row.bundleId ?? '__null__'}`;
+
+export const partitionRemovedInventoryRows = ({
+  previousRows,
+  nextRows,
+}: {
+  previousRows?: InventoryBalanceRow[] | null;
+  nextRows?: InventoryBalanceRow[] | null;
+}) => {
+  const normalizedPreviousRows = (previousRows || [])
+    .map(normalizeInventoryBalanceComparableRow)
+    .filter((row) => row.productId && row.shelfId);
+  const normalizedNextRows = (nextRows || [])
+    .map(normalizeInventoryBalanceComparableRow)
+    .filter((row) => row.productId && row.shelfId);
+
+  const nextKeys = new Set(normalizedNextRows.map(inventoryBalanceKeyOf));
+  const previousById = new Map(
+    normalizedPreviousRows
+      .filter((row) => row.id)
+      .map((row) => [String(row.id), row])
+  );
+  const rekeyedRowIds = new Set<string>();
+
+  normalizedNextRows.forEach((row) => {
+    if (!row.id) return;
+    const previous = previousById.get(String(row.id));
+    if (!previous) return;
+    if (inventoryBalanceKeyOf(previous) !== inventoryBalanceKeyOf(row)) {
+      rekeyedRowIds.add(String(row.id));
+    }
+  });
+
+  const removedRows = normalizedPreviousRows.filter((row) => !nextKeys.has(inventoryBalanceKeyOf(row)));
+  const deletedRows = removedRows.filter((row) => !(row.id && rekeyedRowIds.has(String(row.id))));
+
+  return {
+    removedRows: removedRows.map((row) => ({
+      id: row.id,
+      product_id: row.productId,
+      shelf_id: row.shelfId,
+      bundle_id: row.bundleId ?? null,
+      stock: row.stock,
+    })),
+    deletedRows: deletedRows.map((row) => ({
+      id: row.id,
+      product_id: row.productId,
+      shelf_id: row.shelfId,
+      bundle_id: row.bundleId ?? null,
+      stock: row.stock,
+    })),
+    rekeyedRowIds: Array.from(rekeyedRowIds),
+  };
 };
 
 export const persistProductOpeningInventory = async ({
@@ -292,7 +360,7 @@ export const syncOpeningBalanceTransfersForInventoryRows = async ({
   })).filter((row) => row.productId && row.shelfId);
 
   const keyOf = (row: { productId: string; shelfId: string; bundleId?: string | null }) =>
-    `${row.productId}::${row.shelfId}::${row.bundleId ?? '__null__'}`;
+    inventoryBalanceKeyOf(row);
 
   const finalByKey = new Map(finalRows.map((row) => [keyOf(row), row]));
   const affectedKeys = new Set([

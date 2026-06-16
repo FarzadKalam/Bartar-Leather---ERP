@@ -42,6 +42,13 @@ const BLOCKS = {
         width: 180,
         relationConfig: { targetModule: 'shelves', targetField: 'name' },
       },
+      {
+        key: 'bundle_id',
+        title: 'بسته محصول',
+        type: FieldType.RELATION,
+        width: 150,
+        relationConfig: { targetModule: 'product_bundles', targetField: 'bundle_number' },
+      },
       { key: 'quantity', title: 'مقدار', type: FieldType.NUMBER, width: 100 },
       {
         key: 'main_unit',
@@ -159,6 +166,7 @@ export const invoicesConfig: ModuleDefinition = {
         { label: 'فاکتور نهایی', value: 'final', color: 'green' },
         { label: 'تسویه شده', value: 'settled', color: 'purple' },
         { label: 'تکمیل شده', value: 'completed', color: 'gray' },
+        { label: 'لغو شده', value: 'cancelled', color: 'red' },
       ],
     },
     // --- اطلاعات پایه ---

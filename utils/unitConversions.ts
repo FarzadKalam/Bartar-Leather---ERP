@@ -30,7 +30,7 @@ const M_IN_CM = 100;
 const AREA_UNITS: UnitValue[] = ['فوت مربع', 'سانتیمتر مربع', 'میلیمتر مربع', 'متر مربع'];
 const LENGTH_UNITS: UnitValue[] = ['میلیمتر طول', 'سانتیمتر طول', 'متر طول'];
 const DISCRETE_UNITS = new Set<string>(['عدد', 'بسته']);
-const normalizeUnitValue = (raw?: string | null): UnitValue | '' => {
+export const normalizeUnitValue = (raw?: string | null): UnitValue | '' => {
   const value = String(raw || '')
     .trim()
     .replace(/\u200c/g, '')

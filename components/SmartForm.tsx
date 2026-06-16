@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Form, Button, message, Spin, Divider, Select, Space, Modal, Checkbox } from 'antd';
+import { App, Form, Button, Spin, Divider, Select, Space, Checkbox } from 'antd';
 import { CalculatorOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -15,7 +15,7 @@ import {
 } from '../utils/unitQuantityConversion';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
-import { applyInvoiceFinalizationInventory } from '../utils/invoiceInventoryWorkflow';
+import { normalizeInvoiceItemsForInventory, syncInvoiceInventoryOnSave } from '../utils/invoiceInventoryWorkflow';
 import { syncCustomerLevelsByInvoiceCustomers } from '../utils/customerLeveling';
 import { persistProductOpeningInventory } from '../utils/productOpeningInventory';
 import { findDuplicateUniqueFields } from '../utils/fieldUniqueness';
@@ -48,6 +48,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const initialValues = useMemo(() => initialValuesProp ?? {}, [initialValuesProp]);
   const requireInventoryShelf = initialValuesProp?.__requireInventoryShelf === true;
   const [form] = Form.useForm();
+  const { message, modal } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [initialRecord, setInitialRecord] = useState<any>(null);
@@ -76,6 +77,30 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const buildAssigneeCombo = (assigneeType?: string | null, assigneeId?: string | null) => {
     if (!assigneeType || !assigneeId) return null;
     return `${assigneeType}_${assigneeId}`;
+  };
+
+  const getMissingColumnName = (error: unknown, relationName: string) => {
+    const messageText = getErrorMessage(error, '');
+    if (!messageText) return null;
+    const escapedRelation = relationName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const patterns = [
+      new RegExp(`Column '([a-zA-Z0-9_]+)' of relation '${escapedRelation}' does not exist`, 'i'),
+      new RegExp(`${escapedRelation}.*column.*([a-zA-Z0-9_]+).*does not exist`, 'i'),
+    ];
+    for (const pattern of patterns) {
+      const match = messageText.match(pattern);
+      if (match?.[1]) return match[1];
+    }
+    return null;
+  };
+
+  const omitMissingColumn = (payload: Record<string, any>, missingColumn: string | null) => {
+    if (!missingColumn || !Object.prototype.hasOwnProperty.call(payload || {}, missingColumn)) {
+      return payload;
+    }
+    const nextPayload = { ...payload };
+    delete nextPayload[missingColumn];
+    return nextPayload;
   };
 
   const parseAssigneeCombo = (val?: string | null) => {
@@ -389,12 +414,15 @@ const SmartForm: React.FC<SmartFormProps> = ({
       const { data, error } = await supabase.from(module.table).select('*').eq('id', recordId).single();
       if (error) throw error;
       if (data) {
-        const assigneeCombo = buildAssigneeCombo(data?.assignee_type, data?.assignee_id);
-        const nextValues = { ...data, assignee_combo: assigneeCombo };
+        const normalizedRecord = module.id === 'invoices' && !data?.description && data?.terms_conditions
+          ? { ...data, description: data.terms_conditions }
+          : data;
+        const assigneeCombo = buildAssigneeCombo(normalizedRecord?.assignee_type, normalizedRecord?.assignee_id);
+        const nextValues = { ...normalizedRecord, assignee_combo: assigneeCombo };
         form.setFieldsValue(nextValues);
         setFormData(nextValues);
-        setInitialRecord(data);
-        setLastAppliedParentProductId(String(data?.parent_product_id || '').trim() || null);
+        setInitialRecord(normalizedRecord);
+        setLastAppliedParentProductId(String(normalizedRecord?.parent_product_id || '').trim() || null);
       }
     } catch (err: any) {
       message.error('خطا: ' + getErrorMessage(err));
@@ -446,7 +474,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
     if (bomConfirmOpenRef.current === bomId) return;
     bomConfirmOpenRef.current = bomId;
 
-    Modal.confirm({
+    modal.confirm({
       title: 'کپی از شناسنامه تولید',
       content: 'جداول سفارش تولید ریست شوند و مقادیر از روی BOM کپی شوند؟',
       okText: 'بله، کپی کن',
@@ -562,6 +590,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
       };
     });
   };
+
+  const normalizeInvoiceRowsForSave = (rows: any[]) => normalizeInvoiceItemsForInventory(rows);
 
   const normalizeFieldForBulkEdit = (field: ModuleField) => {
     if (!isBulkEdit) return field;
@@ -709,6 +739,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
       if (module.id === 'products') {
         productInventoryRows = normalizeProductInventoryRows(productInventoryRows, values);
       }
+      if ((module.id === 'invoices' || module.id === 'purchase_invoices') && Array.isArray(values?.invoiceItems)) {
+        values.invoiceItems = normalizeInvoiceRowsForSave(values.invoiceItems);
+      }
       if (module.id === 'products') {
         const hasNegative = productInventoryRows.some((row: any) => toSafeNumber(row?.stock) < 0);
         if (hasNegative) {
@@ -736,6 +769,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
       if (module.id === 'stock_transfers') {
         delete values.main_unit;
         delete values.sub_unit;
+      }
+      if (module.id === 'invoices') {
+        const invoiceDescription = typeof values.description === 'string' ? values.description.trim() : '';
+        values.terms_conditions = invoiceDescription || null;
+        delete values.description;
       }
 
       if (module.id === 'products' && values.auto_name_enabled) {
@@ -775,7 +813,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
           values.production_stages_draft = formData?.production_stages_draft || [];
         }
       }
-      const summaryData = getSummaryData(formData);
+      const summarySource = { ...formData, ...values };
+      const summaryData = getSummaryData(summarySource);
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
 
       // تزریق مقادیر محاسباتی به دیتای ارسالی
@@ -824,19 +863,27 @@ const SmartForm: React.FC<SmartFormProps> = ({
               values: persistenceValues,
             });
           } else {
-            await supabase.from(module.table).update(sanitizedValues).eq('id', recordId);
+            const { error: updateError } = await supabase.from(module.table).update(sanitizedValues).eq('id', recordId);
+            if (updateError) {
+              const missingColumn = getMissingColumnName(updateError, module.table);
+              const fallbackPayload = omitMissingColumn(sanitizedValues, missingColumn);
+              if (fallbackPayload === sanitizedValues) throw updateError;
+              const { error: retryUpdateError } = await supabase.from(module.table).update(fallbackPayload).eq('id', recordId);
+              if (retryUpdateError) throw retryUpdateError;
+            }
           }
 
           if (module.id === 'invoices' || module.id === 'purchase_invoices') {
-            await applyInvoiceFinalizationInventory({
+            await syncInvoiceInventoryOnSave({
               supabase: supabase as any,
               moduleId: module.id,
               recordId,
-               previousStatus: initialRecord?.status ?? null,
-               nextStatus: sanitizedValues?.status ?? initialRecord?.status ?? null,
-               invoiceItems: sanitizedValues?.invoiceItems ?? initialRecord?.invoiceItems ?? [],
-               userId,
-             });
+              previousStatus: initialRecord?.status ?? null,
+              nextStatus: sanitizedValues?.status ?? initialRecord?.status ?? null,
+              previousInvoiceItems: initialRecord?.invoiceItems ?? [],
+              nextInvoiceItems: sanitizedValues?.invoiceItems ?? initialRecord?.invoiceItems ?? [],
+              userId,
+            });
              if (module.id === 'invoices') {
                await syncCustomerLevelsByInvoiceCustomers({
                  supabase: supabase as any,
@@ -896,11 +943,26 @@ const SmartForm: React.FC<SmartFormProps> = ({
             inserted = insertedProduct;
           } else {
             const insertSelect = module.id === 'products' ? 'id, main_unit, sub_unit' : 'id';
-            const { data: insertedRow, error } = await supabase
+            let insertPayload = values;
+            let { data: insertedRow, error } = await supabase
               .from(module.table)
-              .insert(values)
+              .insert(insertPayload)
               .select(insertSelect)
               .single();
+            if (error) {
+              const missingColumn = getMissingColumnName(error, module.table);
+              const fallbackPayload = omitMissingColumn(insertPayload, missingColumn);
+              if (fallbackPayload !== insertPayload) {
+                insertPayload = fallbackPayload;
+                const retryResult = await supabase
+                  .from(module.table)
+                  .insert(insertPayload)
+                  .select(insertSelect)
+                  .single();
+                insertedRow = retryResult.data;
+                error = retryResult.error;
+              }
+            }
             if (error) throw error;
             inserted = insertedRow;
           }
@@ -917,13 +979,14 @@ const SmartForm: React.FC<SmartFormProps> = ({
               });
             }
             if (module.id === 'invoices' || module.id === 'purchase_invoices') {
-              await applyInvoiceFinalizationInventory({
+              await syncInvoiceInventoryOnSave({
                 supabase: supabase as any,
                 moduleId: module.id,
                 recordId: inserted.id,
                 previousStatus: null,
                 nextStatus: sanitizedValues?.status ?? null,
-                invoiceItems: sanitizedValues?.invoiceItems ?? [],
+                previousInvoiceItems: [],
+                nextInvoiceItems: sanitizedValues?.invoiceItems ?? [],
                 userId,
               });
               if (module.id === 'invoices') {
@@ -1039,7 +1102,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const handleFormAction = (actionId: string) => {
     if (actionId === 'auto_name' && module.id === 'products') {
       let enableAuto = !!form.getFieldValue('auto_name_enabled');
-      Modal.confirm({
+      modal.confirm({
         title: 'نامگذاری خودکار محصول',
         content: (
           <div className="space-y-3">
@@ -1068,7 +1131,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
     }
     if (actionId === 'auto_name' && module.id === 'production_orders') {
       let enableAuto = !!form.getFieldValue('auto_name_enabled');
-      Modal.confirm({
+      modal.confirm({
         title: 'نامگذاری خودکار سفارش تولید',
         content: (
           <div className="space-y-3">
