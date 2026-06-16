@@ -823,15 +823,15 @@ runTest('transfer between shelves keeps total stock stable and tracks each shelf
 
 runTest('transfer that fully depletes a shelf removes the zero-stock source row', async () => {
   const supabase = new MockSupabase({
-    products: [{ id: 'p1', name: 'Leather', main_unit: 'ظ…طھط±', sub_unit: 'ط³ط§ظ†طھغŒâ€Œظ…طھط±', stock: 2, sub_stock: 200 }],
+    products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 2, sub_stock: 200 }],
     product_inventory: [
       { id: 'pi1', product_id: 'p1', shelf_id: 's1', bundle_id: 'b1', stock: 2, warehouse_id: 'w1' },
     ],
   });
 
   await applyInventoryDeltas(supabase as any, [
-    { productId: 'p1', shelfId: 's1', bundleId: 'b1', delta: -2, unit: 'ظ…طھط±' },
-    { productId: 'p1', shelfId: 's2', bundleId: 'b1', delta: 2, unit: 'ظ…طھط±' },
+    { productId: 'p1', shelfId: 's1', bundleId: 'b1', delta: -2, unit: 'متر' },
+    { productId: 'p1', shelfId: 's2', bundleId: 'b1', delta: 2, unit: 'متر' },
   ]);
 
   const rows = supabase.getTable('product_inventory');
