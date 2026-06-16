@@ -12,7 +12,7 @@ export const customerModule: ModuleDefinition = {
     { key: 'last_name', labels: { fa: 'نام خانوادگی', en: 'Last Name' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 3, validation: { required: true }, isTableColumn: true, isKey: true },
     { key: 'system_code', labels: { fa: 'کد اشتراک', en: 'Code' }, type: FieldType.TEXT, location: FieldLocation.HEADER, order: 7, isTableColumn: true },
     {
-      key: 'location_url', labels: { fa: 'وضعیت مشتری', en: 'Customer Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4,
+      key: 'customer_status', labels: { fa: 'وضعیت مشتری', en: 'Customer Status' }, type: FieldType.STATUS, location: FieldLocation.HEADER, order: 4,
       options: [
         { label: 'سرنخ جدید', value: 'new_lead', color: 'cyan' },
         { label: 'درحال پیگیری', value: 'in_follow_up', color: 'orange' },

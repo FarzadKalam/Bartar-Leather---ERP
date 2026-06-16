@@ -22,6 +22,7 @@ import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece,
 import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { convertArea } from '../utils/unitConversions';
+import { formatStockPrintValue } from '../utils/stockPrintFormatter';
 import QrScanPopover from '../components/QrScanPopover';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import { getRecordTitle } from '../utils/recordTitle';
@@ -2332,6 +2333,9 @@ const ModuleShow: React.FC = () => {
     if (field.type === FieldType.CHECKBOX) return value ? 'بله' : 'خیر';
     if (field.type === FieldType.PRICE) return `${Number(value).toLocaleString()} تومان`;
     if (field.type === FieldType.PERCENTAGE) return `${value}%`;
+    if (field.type === FieldType.STOCK || field.type === FieldType.NUMBER) {
+      return formatStockPrintValue(String(field?.key || ''), value, data);
+    }
     if (field.type === FieldType.DATE) {
       return formatPersian(value, 'DATE') || String(value);
     }

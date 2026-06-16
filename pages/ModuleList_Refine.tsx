@@ -33,6 +33,7 @@ import {
   formatBundlePrintItems,
   mapBundleInventoryRowsToPrintItems,
 } from "../utils/productBundlePrint";
+import { formatStockPrintValue } from "../utils/stockPrintFormatter";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -862,6 +863,9 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     if (field.type === FieldType.CHECKBOX) return value ? "بله" : "خیر";
     if (field.type === FieldType.PRICE) return `${Number(value).toLocaleString()} تومان`;
     if (field.type === FieldType.PERCENTAGE) return `${value}%`;
+    if (field.type === FieldType.STOCK || field.type === FieldType.NUMBER) {
+      return formatStockPrintValue(String(field?.key || ""), value, record);
+    }
     if (field.type === FieldType.DATE) return formatPersianDate(value);
     if (field.type === FieldType.TIME) return String(value);
     if (field.type === FieldType.DATETIME) return formatPersianDate(value, true);

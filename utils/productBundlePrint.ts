@@ -1,4 +1,5 @@
 import { toPersianNumber } from './persianNumberFormatter';
+import { convertBetweenUnits } from './unitConversions';
 
 export interface ProductBundlePrintItem {
   productId: string;
@@ -24,7 +25,13 @@ export const mapBundleInventoryRowsToPrintItems = (rows: any[]): ProductBundlePr
 
     const existing = items.get(productId);
     const stock = toNumber(row?.stock);
-    const subStock = toNumber(row?.sub_stock);
+    const mainUnit = String(row?.products?.main_unit || '');
+    const subUnit = String(row?.products?.sub_unit || '');
+    const storedSubStock = toNumber(row?.sub_stock);
+    const computedSubStock = convertBetweenUnits(stock, mainUnit, subUnit);
+    const subStock = (storedSubStock === 0 && stock !== 0 && computedSubStock !== 0)
+      ? computedSubStock
+      : storedSubStock;
     if (existing) {
       existing.stock += stock;
       existing.subStock += subStock;
@@ -36,9 +43,9 @@ export const mapBundleInventoryRowsToPrintItems = (rows: any[]): ProductBundlePr
       name: String(row?.products?.name || productId),
       systemCode: String(row?.products?.system_code || ''),
       stock,
-      mainUnit: String(row?.products?.main_unit || ''),
+      mainUnit,
       subStock,
-      subUnit: String(row?.products?.sub_unit || ''),
+      subUnit,
     });
   });
 
