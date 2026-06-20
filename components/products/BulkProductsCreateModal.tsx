@@ -201,7 +201,13 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         if (target !== 'product_bundles' && target !== 'shelves') selectFields = `id,${targetField},system_code`;
 
         const trySelect = async (fields: string) => {
-          const { data, error } = await supabase.from(target).select(fields).limit(400);
+          let query = supabase.from(target).select(fields);
+          if (target === 'product_bundles') {
+            query = query.order('created_at', { ascending: false }).limit(500);
+          } else {
+            query = query.limit(400);
+          }
+          const { data, error } = await query;
           if (error) return null;
           return data || [];
         };
@@ -221,7 +227,8 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
         const { data } = await supabase
           .from('product_bundles')
           .select('id,bundle_number,system_code')
-          .limit(400);
+          .order('created_at', { ascending: false })
+          .limit(500);
         relMap.bundle_id = (data || []).map((r: any) => ({
           value: String(r.id),
           label: `${r.bundle_number || r.id}${r.system_code ? ` (${r.system_code})` : ''}`,

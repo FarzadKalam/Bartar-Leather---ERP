@@ -222,8 +222,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
             // تلاش برای گرفتن نام + کد سیستمی
             let relationQuery = supabase
                 .from(targetModule)
-                .select(`id, ${resolvedTargetField}, system_code${extraSelect}${isProductsTarget ? ', catalog_role' : ''}`)
-                .limit(100);
+                .select(`id, ${resolvedTargetField}, system_code${extraSelect}${isProductsTarget ? ', catalog_role' : ''}`);
+            if (targetModule === 'product_bundles') {
+              relationQuery = relationQuery.order('created_at', { ascending: false }).limit(500);
+            } else {
+              relationQuery = relationQuery.limit(100);
+            }
             relationQuery = applyRelationTargetFilters(relationQuery, targetModule, key);
             const { data, error } = await relationQuery;
             
@@ -243,8 +247,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
             // تلاش دوم: فقط نام
             let relationQuery = supabase
                 .from(targetModule)
-                .select(`id, ${resolvedTargetField}${targetModule === 'products' ? ', catalog_role' : ''}`)
-                .limit(100);
+                .select(`id, ${resolvedTargetField}${targetModule === 'products' ? ', catalog_role' : ''}`);
+            if (targetModule === 'product_bundles') {
+              relationQuery = relationQuery.order('created_at', { ascending: false }).limit(500);
+            } else {
+              relationQuery = relationQuery.limit(100);
+            }
             relationQuery = applyRelationTargetFilters(relationQuery, targetModule, key);
             const { data } = await relationQuery;
             

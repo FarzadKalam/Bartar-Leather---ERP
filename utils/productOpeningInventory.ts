@@ -238,6 +238,62 @@ export const persistProductOpeningInventory = async ({
 
 };
 
+export const persistInitialOpeningInventoryForExistingProduct = async ({
+  supabase,
+  productId,
+  productMainUnit,
+  productSubUnit,
+  rows,
+  userId,
+}: PersistProductOpeningInventoryParams) => {
+  const normalizedProductId = String(productId || '').trim();
+  if (!normalizedProductId) return { persisted: false, reason: 'missing_product_id' as const };
+
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if (!sourceRows.length) return { persisted: false, reason: 'missing_rows' as const };
+
+  const hasRequestedOpeningBalance = sourceRows.some((row) => {
+    const shelfId = normalizeRelationId(row?.shelf_id);
+    const qtyMain = toNumber(row?.stock ?? row?.main_quantity ?? row?.quantity ?? 0);
+    const qtySub = toNumber(row?.sub_stock ?? 0);
+    return !!shelfId && (Math.abs(qtyMain) > 0 || Math.abs(qtySub) > 0);
+  });
+  if (!hasRequestedOpeningBalance) {
+    return { persisted: false, reason: 'no_positive_rows' as const };
+  }
+
+  const [{ data: inventoryRows, error: inventoryError }, { data: transferRows, error: transferError }] = await Promise.all([
+    supabase
+      .from('product_inventory')
+      .select('id')
+      .eq('product_id', normalizedProductId)
+      .limit(1),
+    supabase
+      .from('stock_transfers')
+      .select('id')
+      .eq('product_id', normalizedProductId)
+      .limit(1),
+  ]);
+
+  if (inventoryError) throw inventoryError;
+  if (transferError) throw transferError;
+
+  if ((inventoryRows || []).length > 0 || (transferRows || []).length > 0) {
+    return { persisted: false, reason: 'already_has_inventory_or_transfers' as const };
+  }
+
+  await persistProductOpeningInventory({
+    supabase,
+    productId: normalizedProductId,
+    productMainUnit,
+    productSubUnit,
+    rows: sourceRows,
+    userId,
+  });
+
+  return { persisted: true as const };
+};
+
 export const reconcileMissingOpeningBalanceTransfers = async (
   supabase: SupabaseClient,
   options?: { userId?: string | null }

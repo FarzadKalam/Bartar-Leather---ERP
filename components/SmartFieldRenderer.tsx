@@ -465,8 +465,12 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
             const extraSelect = isShelvesTarget ? ', shelf_number' : '';
             let relationQuery = supabase
               .from(targetModule)
-              .select(`id, ${targetField}, system_code${extraSelect}${targetModule === 'products' ? ', catalog_role' : ''}`)
-              .limit(200);
+              .select(`id, ${targetField}, system_code${extraSelect}${targetModule === 'products' ? ', catalog_role' : ''}`);
+            if (targetModule === 'product_bundles') {
+              relationQuery = relationQuery.order('created_at', { ascending: false }).limit(500);
+            } else {
+              relationQuery = relationQuery.limit(200);
+            }
             relationQuery = applyRelationTargetFilters(relationQuery, targetModule, quickField.key);
             const { data, error } = await relationQuery;
             if (error) throw error;
