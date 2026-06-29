@@ -18,9 +18,8 @@ import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { checkFieldDuplicate, findDuplicateUniqueFields, getUniqueFieldMessage, isUniqueField } from '../utils/fieldUniqueness';
-import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
-import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
+import { fetchRelationOptions } from '../utils/relationOptions';
 import {
   calculateUnitQuantity,
   getUnitQuantityConversion,
@@ -96,10 +95,27 @@ interface SmartFieldRendererProps {
   canDeleteFilesManager?: boolean;
   popupContainer?: HTMLElement | null;
   popupZIndex?: number;
+  onRelationOptionsUpdate?: (fieldKey: string, options: any[]) => void;
 }
 
+const mergeSelectOptions = (...optionGroups: Array<any[] | undefined>) => {
+  const seen = new Set<string>();
+  const next: any[] = [];
+
+  optionGroups.forEach((optionsGroup) => {
+    (optionsGroup || []).forEach((option: any) => {
+      const key = String(option?.value ?? '').trim();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      next.push(option);
+    });
+  });
+
+  return next;
+};
+
 const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({ 
-  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false, canViewFilesManager = true, canEditFilesManager = true, canDeleteFilesManager = true, popupContainer, popupZIndex
+  field, value, onChange, label, type, options, forceEditMode, onOptionsUpdate, allValues = {}, recordId, moduleId, compactMode = false, canViewFilesManager = true, canEditFilesManager = true, canDeleteFilesManager = true, popupContainer, popupZIndex, onRelationOptionsUpdate
 }) => {
   const { message: msg } = App.useApp();
   const [uploading, setUploading] = useState(false);
@@ -119,6 +135,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
     createdAt: string | null;
   }>>([]);
   const [globalImageGalleryLoading, setGlobalImageGalleryLoading] = useState(false);
+  const [relationSearchTerm, setRelationSearchTerm] = useState('');
+  const [relationSearchOptions, setRelationSearchOptions] = useState<any[]>([]);
+  const [resolvedRelationOptions, setResolvedRelationOptions] = useState<any[]>([]);
+  const [relationSearchLoading, setRelationSearchLoading] = useState(false);
   const supportsFilesGallery = moduleId === 'products' || moduleId === 'production_orders' || moduleId === 'production_boms';
   const canShowFilesGallery = supportsFilesGallery && canViewFilesManager && !!recordId;
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
@@ -152,6 +172,20 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const flattenedSelectValues = flattenSelectValue(value);
   const normalizedSingleSelectValue = flattenedSelectValues[0];
   const normalizedMultiSelectValue = flattenedSelectValues;
+  const relationTargetModule = field.relationConfig?.targetModule;
+  const relationTargetField = field.relationConfig?.targetField;
+  const relationDependsOnKey = String(relationConfigAny?.dependsOn || '').trim();
+  const canUseRemoteRelationSearch = (
+    fieldType === FieldType.RELATION
+    && !!relationTargetModule
+    && !relationDependsOnKey
+  );
+  const relationBaseOptions = relationSearchTerm.trim()
+    ? relationSearchOptions
+    : fieldOptions;
+  const mergedRelationOptions = useMemo(() => (
+    mergeSelectOptions(relationBaseOptions, resolvedRelationOptions)
+  ), [relationBaseOptions, resolvedRelationOptions]);
   const quickCreateTargetField = useMemo(() => {
     const configured = relationConfigAny?.targetField;
     if (configured) return String(configured);
@@ -456,29 +490,17 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
         const targetField = (targetModule === 'product_bundles' && (!rawTargetField || rawTargetField === 'name'))
           ? 'bundle_number'
           : (rawTargetField || 'name');
-        const queryCacheKey = JSON.stringify({ targetModule, targetField });
+        const queryCacheKey = JSON.stringify({ targetModule, targetField, relationKey: quickField.key });
 
         try {
           let options = relationQueryCache.get(queryCacheKey);
           if (!options) {
-            const isShelvesTarget = targetModule === 'shelves';
-            const extraSelect = isShelvesTarget ? ', shelf_number' : '';
-            let relationQuery = supabase
-              .from(targetModule)
-              .select(`id, ${targetField}, system_code${extraSelect}${targetModule === 'products' ? ', catalog_role' : ''}`)
-              .limit(200);
-            relationQuery = applyRelationTargetFilters(relationQuery, targetModule, quickField.key);
-            const { data, error } = await relationQuery;
-            if (error) throw error;
-            const filteredRows = filterRelationRows(data as any[] || [], targetModule, quickField.key);
-            options = filteredRows.map((item: any) => ({
-              label: formatRelationOptionLabel(
-                targetModule,
-                item[targetField] || item.shelf_number || item.bundle_number || item.system_code || item.id,
-                item.system_code,
-              ),
-              value: item.id,
-            }));
+            options = await fetchRelationOptions({
+              targetModule,
+              targetField,
+              relationKey: quickField.key,
+              filter: quickField.relationConfig?.filter,
+            });
             relationQueryCache.set(queryCacheKey, options);
           }
           relationMap[quickField.key] = options;
@@ -498,6 +520,110 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
       cancelled = true;
     };
   }, [quickCreateOpen, quickCreateFields]);
+
+  useEffect(() => {
+    if (fieldType !== FieldType.RELATION) return;
+    setRelationSearchTerm('');
+    setRelationSearchOptions([]);
+    setResolvedRelationOptions([]);
+  }, [fieldKey, fieldType]);
+
+  useEffect(() => {
+    if (fieldType !== FieldType.RELATION || !relationTargetModule) return;
+
+    const selectedIds = flattenSelectValue(value)
+      .map((item) => String(item ?? '').trim())
+      .filter(Boolean);
+    const missingIds = selectedIds.filter((selectedId) => !mergedRelationOptions.some((option: any) => String(option?.value ?? '') === selectedId));
+    if (missingIds.length === 0) return;
+
+    let cancelled = false;
+
+    const loadSelectedOptions = async () => {
+      try {
+        const fetchedOptions = await fetchRelationOptions({
+          targetModule: relationTargetModule,
+          targetField: relationTargetField,
+          relationKey: fieldKey,
+          filter: relationConfigAny?.filter,
+          ids: missingIds,
+          limit: missingIds.length,
+        });
+        if (cancelled || fetchedOptions.length === 0) return;
+        setResolvedRelationOptions((currentOptions) => mergeSelectOptions(currentOptions, fetchedOptions));
+        onRelationOptionsUpdate?.(fieldKey, fetchedOptions);
+      } catch (error) {
+        console.warn('Failed to resolve relation option labels', error);
+      }
+    };
+
+    void loadSelectedOptions();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fieldKey,
+    fieldType,
+    mergedRelationOptions,
+    onRelationOptionsUpdate,
+    relationConfigAny?.filter,
+    relationTargetField,
+    relationTargetModule,
+    value,
+  ]);
+
+  useEffect(() => {
+    if (!canUseRemoteRelationSearch) return;
+
+    const normalizedSearchTerm = relationSearchTerm.trim();
+    if (!normalizedSearchTerm) {
+      setRelationSearchLoading(false);
+      setRelationSearchOptions([]);
+      return;
+    }
+
+    let cancelled = false;
+    setRelationSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const fetchedOptions = await fetchRelationOptions({
+            targetModule: relationTargetModule!,
+            targetField: relationTargetField,
+            relationKey: fieldKey,
+            filter: relationConfigAny?.filter,
+            searchTerm: normalizedSearchTerm,
+            limit: 80,
+          });
+          if (cancelled) return;
+          setRelationSearchOptions(fetchedOptions);
+          onRelationOptionsUpdate?.(fieldKey, fetchedOptions);
+        } catch (error) {
+          if (!cancelled) {
+            console.warn('Remote relation search failed', error);
+            setRelationSearchOptions([]);
+          }
+        } finally {
+          if (!cancelled) {
+            setRelationSearchLoading(false);
+          }
+        }
+      })();
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    canUseRemoteRelationSearch,
+    fieldKey,
+    onRelationOptionsUpdate,
+    relationConfigAny?.filter,
+    relationSearchTerm,
+    relationTargetField,
+    relationTargetModule,
+  ]);
 
   const handleQuickCreate = async () => {
     if (!quickCreateTargetModuleId) return;
@@ -789,7 +915,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
 
       case FieldType.RELATION:
         const canQuickCreate = !!field.relationConfig?.targetModule;
-        let filteredOptions = fieldOptions;
+        let filteredOptions = mergedRelationOptions;
         const relationPopupRootStyle = isMobileViewport
           ? { zIndex: resolvedPopupZIndex, width: 'min(92vw, 420px)', maxWidth: 'calc(100vw - 24px)' }
           : { zIndex: resolvedPopupZIndex, minWidth: 320 };
@@ -813,6 +939,14 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     showSearch={shouldEnableSearch}
                     options={filteredOptions}
                     optionFilterProp="label"
+                    filterOption={!canUseRemoteRelationSearch}
+                    onSearch={canUseRemoteRelationSearch ? setRelationSearchTerm : undefined}
+                    onDropdownVisibleChange={(open) => {
+                      if (!open) {
+                        setRelationSearchTerm('');
+                        setRelationSearchOptions([]);
+                      }
+                    }}
                     getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
                     popupMatchSelectWidth={isMobileViewport}
                     placement={shouldUseStableMobileSelect ? 'bottomLeft' : undefined}
@@ -820,7 +954,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                     virtual={!shouldUseStableMobileSelect}
                     listHeight={shouldUseStableMobileSelect ? 256 : undefined}
                     styles={{ popup: { root: relationPopupRootStyle } }}
-                    filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+                    notFoundContent={relationSearchLoading ? 'در حال جستجو...' : 'موردی یافت نشد'}
                     popupRender={(menu) => (
                         <>
                           {menu}

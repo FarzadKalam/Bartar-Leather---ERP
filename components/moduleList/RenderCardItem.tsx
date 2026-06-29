@@ -7,6 +7,7 @@ import { getRecordTitle } from "../../utils/recordTitle";
 import ProductionStagesField from "../ProductionStagesField";
 import { MODULES } from "../../moduleRegistry";
 import { normalizeStoragePublicUrl } from "../../utils/storageUrls";
+import { toggleSelectionKey } from "./selectionGuard";
 
 export interface RenderCardItemProps {
   item: any;
@@ -144,15 +145,21 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
 
   const toggleSelect = (e: any) => {
     e.stopPropagation();
-    const newSelected = isSelected
-      ? selectedRowKeys.filter((k: any) => k !== item.id)
-      : [...selectedRowKeys, item.id];
-    setSelectedRowKeys(newSelected);
+    setSelectedRowKeys(toggleSelectionKey(selectedRowKeys, item.id));
+  };
+
+  const handleCardClick = () => {
+    if (selectedRowKeys.length > 0) {
+      setSelectedRowKeys(toggleSelectionKey(selectedRowKeys, item.id));
+      return;
+    }
+
+    navigate(`/${moduleId}/${item.id}`);
   };
 
   return (
     <div
-      onClick={() => navigate(`/${moduleId}/${item.id}`)}
+      onClick={handleCardClick}
       className={`
         bg-white dark:bg-[#1e1e1e] rounded-xl border shadow-sm cursor-pointer transition-all flex flex-col group relative
         ${isSelected ? "border-leather-500 ring-1 ring-leather-500 bg-leather-50 dark:bg-leather-900/20" : "border-gray-200 dark:border-gray-700 hover:border-leather-400 hover:shadow-md"}

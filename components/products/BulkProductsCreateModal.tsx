@@ -7,7 +7,7 @@ import { MODULES } from '../../moduleRegistry';
 import { FieldLocation, FieldNature, FieldType, LogicOperator, ModuleField } from '../../types';
 import { supabase } from '../../supabaseClient';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../../utils/inventoryTransactions';
-import { normalizeCatalogProductPayload } from '../../utils/productCatalog';
+import { composeNameWithAutoSuffix, normalizeCatalogProductPayload } from '../../utils/productCatalog';
 import { syncOpeningBalanceTransfersForInventoryRows } from '../../utils/productOpeningInventory';
 
 interface BulkProductsCreateModalProps {
@@ -286,7 +286,8 @@ const BulkProductsCreateModal: React.FC<BulkProductsCreateModalProps> = ({ open,
       const brandLabel = resolveLabel(brandField, sharedValues.brand_name);
       if (brandLabel) parts.push(brandLabel);
     }
-    return parts.join(' ').replace(/\s+/g, ' ').trim() || `محصول جدید ${index + 1}`;
+    const generatedName = parts.join(' ').replace(/\s+/g, ' ').trim() || `محصول جدید ${index + 1}`;
+    return composeNameWithAutoSuffix(String(row.name || '').trim(), generatedName);
   }, [brandField, modelNameField, productCategory, productCategoryOptions, productType, rawCategory, rawCategoryField?.options, resolveLabel, rowFields, sharedValues.brand_name]);
 
   const validate = useCallback(() => {

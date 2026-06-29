@@ -52,6 +52,8 @@ import ProductSiteSyncModal from '../components/products/ProductSiteSyncModal';
 import { persistProductCatalogData } from '../utils/productCatalogPersistence';
 import {
   buildCatalogGroupPrefixedName,
+  composeNameWithAutoSuffix,
+  extractManualNamePrefix,
   resolveProductAttributeGroupLabel,
   shouldPrefixProductAttributeGroup,
 } from '../utils/productCatalog';
@@ -797,7 +799,7 @@ const ModuleShow: React.FC = () => {
           const subUnit = nextRecord?.sub_unit;
           const stockValue = parseFloat(nextRecord?.stock) || 0;
           if (mainUnit && subUnit) {
-            const computedSubStock = convertArea(stockValue, mainUnit, subUnit);
+            const computedSubStock = convertArea(stockValue, mainUnit, subUnit, { record: nextRecord });
             if (Number.isFinite(computedSubStock)) {
               nextRecord = { ...nextRecord, sub_stock: computedSubStock };
             }
@@ -808,7 +810,7 @@ const ModuleShow: React.FC = () => {
               product_inventory: nextRecord.product_inventory.map((row: any) => {
                 const stockVal = parseFloat(row?.stock) || 0;
                 const subStock = mainUnit && subUnit
-                  ? convertArea(stockVal, mainUnit as any, subUnit as any)
+                  ? convertArea(stockVal, mainUnit as any, subUnit as any, { record: nextRecord })
                   : 0;
                 return {
                   ...row,
@@ -2263,7 +2265,7 @@ const ModuleShow: React.FC = () => {
     return String(getOptionLabel(field, value));
   };
 
-  const buildAutoProductName = (record: any) => {
+  const buildAutoProductNameBase = (record: any) => {
     if (!record) return '';
     const parts: string[] = [];
     const addPart = (part?: string) => {
@@ -2299,6 +2301,13 @@ const ModuleShow: React.FC = () => {
     if (!shouldPrefixProductAttributeGroup(record)) return baseName;
     return buildCatalogGroupPrefixedName(baseName, resolveProductAttributeGroupLabel(record, getFieldValueLabel));
   };
+
+  const buildAutoProductName = (record: any) => (
+    composeNameWithAutoSuffix(
+      extractManualNamePrefix(record?.name, buildAutoProductNameBase(record)),
+      buildAutoProductNameBase(record),
+    )
+  );
 
   const buildAutoProductionOrderName = (record: any) => {
     if (!record) return '';

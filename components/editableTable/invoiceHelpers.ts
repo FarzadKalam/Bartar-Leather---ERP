@@ -17,8 +17,12 @@ const toSafeNumber = (raw: any) => {
 
 export const getInvoiceAmounts = (row: any) => {
   const qty = toSafeNumber(row.quantity) || 0;
-  const price = toSafeNumber(row.unit_price) || 0;
-  const baseTotal = qty * price;
+  const subQty = toSafeNumber(row.sub_quantity) || 0;
+  const mainPrice = toSafeNumber(row.main_unit_price) || toSafeNumber(row.unit_price) || 0;
+  const subPrice = toSafeNumber(row.sub_unit_price) || 0;
+  const baseTotal = qty > 0 && mainPrice > 0
+    ? qty * mainPrice
+    : subQty * subPrice;
   const discountInput = toSafeNumber(row.discount) || 0;
   const vatInput = toSafeNumber(row.vat) || 0;
   const discountType = row.discount_type || 'amount';

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useTable } from "@refinedev/antd";
-import { CrudFilters, useDeleteMany, useUpdate } from "@refinedev/core";
+import { CrudFilter, CrudFilters, useDeleteMany, useUpdate } from "@refinedev/core";
 import { useNavigate, useParams } from "react-router-dom";
 import { MODULES } from "../moduleRegistry";
 import SmartTableRenderer from "../components/SmartTableRenderer";
@@ -36,6 +36,15 @@ import {
 import { formatStockPrintValue } from "../utils/stockPrintFormatter";
 import { DEFAULT_LIST_SORTERS } from "../utils/tableSorting";
 import { sanitizeViewFilters, toCrudViewFilters } from "../utils/viewFilters";
+import {
+  DEFAULT_MODULE_LIST_PAGE_SIZE,
+  readModuleListPageSizePreference,
+  writeModuleListPageSizePreference,
+} from "../utils/moduleListPreferences";
+import {
+  isSelectionGuardClickTarget,
+  toggleSelectionKey,
+} from "../components/moduleList/selectionGuard";
 
 const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode }) => {
   if (viewMode === ViewMode.GRID) {
@@ -89,6 +98,27 @@ const ModuleListContentSkeleton: React.FC<{ viewMode: ViewMode }> = ({ viewMode 
   );
 };
 
+const MODULE_LIST_SEARCH_FILTER_KEY = "__module_list_search__";
+const MODULE_LIST_SEARCH_PRIORITY_KEYS = [
+  "system_code",
+  "manual_code",
+  "name",
+  "title",
+  "business_name",
+  "full_name",
+  "subject",
+  "description",
+  "mobile_1",
+  "mobile_2",
+  "phone",
+];
+const MODULE_LIST_SEARCHABLE_TYPES = new Set<FieldType>([
+  FieldType.TEXT,
+  FieldType.LONG_TEXT,
+  FieldType.LINK,
+  FieldType.PHONE,
+]);
+
 export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ moduleIdOverride }) => {
   const { moduleId } = useParams();
   const resolvedModuleId = moduleIdOverride || moduleId;
@@ -96,6 +126,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   const { modal, message: msg } = App.useApp();
   
   const moduleConfig = resolvedModuleId ? MODULES[resolvedModuleId] : null;
+  const [preferredListPageSize, setPreferredListPageSize] = useState<number>(() => readModuleListPageSizePreference());
 
   // ✅ Use default view mode from module config, fallback to LIST
   const [viewMode, setViewMode] = useState<ViewMode>(moduleConfig?.defaultViewMode || ViewMode.LIST);
@@ -137,10 +168,19 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     setIsWorkflowsModalOpen(false);
   }, []);
 
-  const { tableProps, tableQueryResult, setFilters, filters, sorters, setSorters } = useTable({
+  const {
+    tableProps,
+    tableQueryResult,
+    setFilters,
+    filters,
+    sorters,
+    setSorters,
+    setCurrent,
+    setPageSize,
+  } = useTable({
     resource: resolvedModuleId,
     sorters: { initial: DEFAULT_LIST_SORTERS },
-    pagination: { pageSize: 10 }, 
+    pagination: { pageSize: preferredListPageSize },
     queryOptions: { enabled: !!resolvedModuleId },
     syncWithLocation: false,
   });
@@ -222,6 +262,13 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     setSelectedPrintFields({});
     setBundlePrintSummariesById({});
   }, [resolvedModuleId, moduleConfig?.defaultViewMode]);
+
+  useEffect(() => {
+    const savedPageSize = readModuleListPageSizePreference();
+    setPreferredListPageSize(savedPageSize);
+    setCurrent(1);
+    setPageSize(savedPageSize);
+  }, [resolvedModuleId, setCurrent, setPageSize]);
 
   const openSingleCreateForm = useCallback((initialValues?: Record<string, any>) => {
     setCreateSingleInitialValues(initialValues || {});
@@ -530,16 +577,29 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     fetchTags();
   }, [resolvedModuleId, tagsField, accessibleData.length]);
 
-  const searchTargetField = useMemo(() => {
-    if (!moduleConfig) return null;
-    const keyField = moduleConfig.fields.find(f => f.isKey);
-    if (keyField) return keyField.key;
-    const priorityKeys = ['name', 'title', 'business_name', 'full_name', 'subject', 'description'];
-    const priorityField = moduleConfig.fields.find(f => priorityKeys.includes(f.key));
-    if (priorityField) return priorityField.key;
-    const textField = moduleConfig.fields.find(f => f.type === FieldType.TEXT);
-    if (textField) return textField.key;
-    return null;
+  const searchTargetFields = useMemo(() => {
+    if (!moduleConfig) return [];
+
+    const seen = new Set<string>();
+    const nextFields: string[] = [];
+    const pushField = (fieldKey?: string | null) => {
+      const normalizedKey = String(fieldKey || "").trim();
+      if (!normalizedKey || seen.has(normalizedKey)) return;
+      seen.add(normalizedKey);
+      nextFields.push(normalizedKey);
+    };
+
+    MODULE_LIST_SEARCH_PRIORITY_KEYS.forEach((fieldKey) => {
+      const field = moduleConfig.fields.find((candidate) => candidate.key === fieldKey);
+      if (field) pushField(field.key);
+    });
+
+    moduleConfig.fields.forEach((field) => {
+      if (field.isKey) pushField(field.key);
+      if (MODULE_LIST_SEARCHABLE_TYPES.has(field.type)) pushField(field.key);
+    });
+
+    return nextFields;
   }, [moduleConfig]);
 
   const availableGroupFields = useMemo(() => {
@@ -557,10 +617,10 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   }, [viewMode, kanbanGroupBy, availableGroupFields]);
 
   useEffect(() => {
-    if (!searchTargetField) return;
+    if (searchTargetFields.length === 0) return;
     const handle = setTimeout(() => handleSearch(searchTerm), 300);
     return () => clearTimeout(handle);
-  }, [searchTerm, searchTargetField]);
+  }, [searchTargetFields, searchTerm]);
 
   const handleViewChange = (view: SavedView | null, config: any) => {
     setCurrentView(view);
@@ -588,6 +648,12 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
   };
 
   const handleTableChange = useCallback((pagination: any, tableFilters: any, sorter: any, extra?: any) => {
+    const nextPageSize = Number(pagination?.pageSize) || DEFAULT_MODULE_LIST_PAGE_SIZE;
+    if (nextPageSize !== preferredListPageSize) {
+      setPreferredListPageSize(nextPageSize);
+      writeModuleListPageSizePreference(nextPageSize);
+    }
+
     tableProps.onChange?.(pagination, tableFilters, sorter, extra);
 
     const hasActiveSort = Array.isArray(sorter)
@@ -597,29 +663,48 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
     if (!hasActiveSort) {
       setSorters(DEFAULT_LIST_SORTERS);
     }
-  }, [setSorters, tableProps]);
+  }, [preferredListPageSize, setSorters, tableProps]);
+
+  const handleListRowClick = useCallback((recordId: React.Key, event: React.MouseEvent<HTMLElement>) => {
+    if (isSelectionGuardClickTarget(event.target)) {
+      return;
+    }
+
+    if (selectedRowKeys.length > 0) {
+      setSelectedRowKeys((currentKeys) => toggleSelectionKey(currentKeys, recordId));
+      return;
+    }
+
+    navigate(`/${resolvedModuleId}/${recordId}`);
+  }, [navigate, resolvedModuleId, selectedRowKeys.length]);
 
   // ✅ FIX: سرچ فقط فیلتر سرچ را اضافه/حذف می‌کند و به فیلترهای View دست نمی‌زند
   const handleSearch = (val: string) => {
-      if (!searchTargetField) return;
+      if (searchTargetFields.length === 0) return;
 
-      const nonSearchFilters = filters.filter(f => {
-        const lf = f as any;
-        return !(lf?.field === searchTargetField && lf?.operator === 'contains');
-      });
+      const normalizedValue = String(val || '').trim();
+      const nonSearchFilters = filters.filter((filter) => (filter as any)?.key !== MODULE_LIST_SEARCH_FILTER_KEY);
 
-      if (!val) {
+      if (!normalizedValue) {
+        setCurrent(1);
         setFilters(nonSearchFilters, 'replace');
         return;
       }
 
+      const searchFilter: CrudFilter = {
+        key: MODULE_LIST_SEARCH_FILTER_KEY,
+        operator: 'or',
+        value: searchTargetFields.map((field) => ({
+          field,
+          operator: 'contains',
+          value: normalizedValue,
+        })),
+      };
+
+      setCurrent(1);
       setFilters([
         ...nonSearchFilters,
-        {
-          field: searchTargetField,
-          operator: 'contains',
-          value: val
-        }
+        searchFilter,
       ], 'replace');
   };
 
@@ -1272,7 +1357,7 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
                     currentSorters={sorters as any}
                     rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
                     onRow={(record: any) => ({ 
-                      onClick: () => navigate(`/${resolvedModuleId}/${record.id}`), 
+                      onClick: (event: React.MouseEvent<HTMLElement>) => handleListRowClick(record.id, event),
                       style: { cursor: 'pointer' } 
                     })}
                     dynamicOptions={dynamicOptions}

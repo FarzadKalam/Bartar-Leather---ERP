@@ -22,13 +22,15 @@ import { findDuplicateUniqueFields } from '../utils/fieldUniqueness';
 import { getErrorMessage } from '../utils/errorHandling';
 import ProductCatalogManager from './products/ProductCatalogManager';
 import { persistProductCatalogData } from '../utils/productCatalogPersistence';
-import { applyRelationTargetFilters, filterRelationRows } from '../utils/relationFilters';
 import {
   buildCatalogGroupPrefixedName,
+  composeNameWithAutoSuffix,
+  extractManualNamePrefix,
   resolveProductAttributeGroupLabel,
   shouldPrefixProductAttributeGroup,
   stripInternalFormFields,
 } from '../utils/productCatalog';
+import { fetchRelationOptions as fetchFullRelationOptions } from '../utils/relationOptions';
 
 interface SmartFormProps {
   module: ModuleDefinition;
@@ -40,6 +42,8 @@ interface SmartFormProps {
   isBulkEdit?: boolean;
   initialValues?: Record<string, any>;
 }
+
+const AUTO_NAME_PREFIX_KEY = '__auto_name_prefix';
 
 const SmartForm: React.FC<SmartFormProps> = ({ 
   module, visible, onCancel, onSave, recordId, title, isBulkEdit = false,
@@ -58,10 +62,38 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
   const [modulePermissions, setModulePermissions] = useState<{ view?: boolean; edit?: boolean; delete?: boolean }>({});
   const [fieldPermissions, setFieldPermissions] = useState<Record<string, boolean>>({});
+  const isApplyingAutoProductNameRef = useRef(false);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
   const [lastAppliedBomId, setLastAppliedBomId] = useState<string | null>(null);
   const [lastAppliedParentProductId, setLastAppliedParentProductId] = useState<string | null>(null);
   const bomConfirmOpenRef = useRef<string | null>(null);
+  const mergeRelationOptions = (fieldKey: string, incomingOptions: any[]) => {
+    const normalizedFieldKey = String(fieldKey || '').trim();
+    if (!normalizedFieldKey || !Array.isArray(incomingOptions) || incomingOptions.length === 0) return;
+
+    setRelationOptions((currentOptions) => {
+      const currentFieldOptions = Array.isArray(currentOptions[normalizedFieldKey]) ? currentOptions[normalizedFieldKey] : [];
+      const seen = new Set<string>();
+      const merged = [...currentFieldOptions, ...incomingOptions].filter((option: any) => {
+        const key = String(option?.value ?? '').trim();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      if (
+        currentFieldOptions.length === merged.length
+        && currentFieldOptions.every((option: any, index: number) => option?.value === merged[index]?.value && option?.label === merged[index]?.label)
+      ) {
+        return currentOptions;
+      }
+
+      return {
+        ...currentOptions,
+        [normalizedFieldKey]: merged,
+      };
+    });
+  };
 
   const normalizeStateFieldValue = (input: any): any => {
     if (input && typeof input === 'object' && 'target' in input) {
@@ -143,7 +175,13 @@ const SmartForm: React.FC<SmartFormProps> = ({
         // 2. ترکیب با مقادیر اولیه ورودی (اولویت با ورودی‌هاست)
         const initialProps = initialValues || {};
         const assigneeCombo = buildAssigneeCombo(initialProps?.assignee_type, initialProps?.assignee_id);
-        const finalValues = { ...defaults, ...initialProps, assignee_combo: assigneeCombo };
+        const finalValues = { ...defaults, ...initialProps, assignee_combo: assigneeCombo } as Record<string, any>;
+        if (module.id === 'products') {
+          finalValues[AUTO_NAME_PREFIX_KEY] = extractManualNamePrefix(
+            finalValues?.name,
+            buildAutoProductNameBase(finalValues),
+          );
+        }
 
         // 3. اعمال مقادیر اولیه بدون تاخیر (برای جلوگیری از flicker)
         setFormData(finalValues);
@@ -206,80 +244,47 @@ const SmartForm: React.FC<SmartFormProps> = ({
   // --- 2. دریافت آپشن‌های ارتباطی (Relation) ---
   const fetchRelationOptions = async () => {
     const options: Record<string, any[]> = {};
-    
-    // تابع کمکی برای دریافت دیتا با کد سیستمی
-    const fetchOptionsForField = async (targetModule?: string, targetField?: string, key?: string) => {
-        // اگر پارامترهای ضروری موجود نیستند، کاری انجام نده
-        if (!targetModule || !key) return;
-        const resolvedTargetField = (targetModule === 'product_bundles' && (!targetField || targetField === 'name'))
-          ? 'bundle_number'
-          : (targetField || 'name');
 
-        try {
-            const isShelvesTarget = targetModule === 'shelves';
-            const isProductsTarget = targetModule === 'products';
-            const extraSelect = isShelvesTarget ? ', shelf_number' : '';
-            // تلاش برای گرفتن نام + کد سیستمی
-            let relationQuery = supabase
-                .from(targetModule)
-                .select(`id, ${resolvedTargetField}, system_code${extraSelect}${isProductsTarget ? ', catalog_role' : ''}`)
-                .limit(100);
-            relationQuery = applyRelationTargetFilters(relationQuery, targetModule, key);
-            const { data, error } = await relationQuery;
-            
-            if (!error && data) {
-                const filteredRows = filterRelationRows(data as any[], targetModule, key);
-                options[key] = filteredRows.map((item: any) => ({
-                    label: item.system_code
-                      ? `${item[resolvedTargetField] || item.shelf_number || item.system_code || item.id} (${item.system_code})`
-                      : (item[resolvedTargetField] || item.shelf_number || item.system_code || item.id),
-                    value: item.id
-                }));
-                return;
-            }
-        } catch (e) { /* اگر فیلد system_code نبود خطا نده */ }
+    const requests: Array<Promise<void>> = [];
 
-        try {
-            // تلاش دوم: فقط نام
-            let relationQuery = supabase
-                .from(targetModule)
-                .select(`id, ${resolvedTargetField}${targetModule === 'products' ? ', catalog_role' : ''}`)
-                .limit(100);
-            relationQuery = applyRelationTargetFilters(relationQuery, targetModule, key);
-            const { data } = await relationQuery;
-            
-            if (data) {
-                const filteredRows = filterRelationRows(data as any[], targetModule, key);
-                options[key] = filteredRows.map((item: any) => ({
-                    label: item[resolvedTargetField],
-                    value: item.id
-                }));
-            }
-        } catch (e) { console.error("Error fetching relation:", e); }
-    };
+    module.fields.forEach((field) => {
+      if (field.type !== FieldType.RELATION || !field.relationConfig) return;
+      const relationKey = String(field.key || '').trim();
+      if (!relationKey) return;
+      const targetModule = field.relationConfig?.targetModule;
+      if (!targetModule) return;
+      requests.push((async () => {
+        options[relationKey] = await fetchFullRelationOptions({
+          targetModule,
+          targetField: field.relationConfig?.targetField,
+          relationKey,
+          filter: (field.relationConfig as any)?.filter,
+          limit: 120,
+        });
+      })());
+    });
 
-    // پیمایش فیلدهای اصلی
-    for (const field of module.fields) {
-      if (field.type === FieldType.RELATION && field.relationConfig) {
-        await fetchOptionsForField(field.relationConfig.targetModule, field.relationConfig.targetField, field.key);
-      }
-    }
+    module.blocks?.forEach((block) => {
+      block.tableColumns?.forEach((col: any) => {
+        if (col.type !== FieldType.RELATION || !col.relationConfig) return;
+        const key = `${block.id}_${col.key}`;
+        const plainKey = String(col.key || '').trim();
+        const targetModule = col.relationConfig?.targetModule;
+        if (!targetModule || !plainKey) return;
+        requests.push((async () => {
+          options[key] = await fetchFullRelationOptions({
+            targetModule,
+            targetField: col.relationConfig?.targetField,
+            relationKey: key,
+            filter: (col.relationConfig as any)?.filter,
+            limit: 120,
+          });
+          if (!options[plainKey]) options[plainKey] = options[key];
+        })());
+      });
+    });
 
-    // پیمایش ستون‌های جداول
-    if (module.blocks) {
-      for (const block of module.blocks) {
-        if (block.tableColumns) {
-          for (const col of block.tableColumns) {
-            if (col.type === FieldType.RELATION && col.relationConfig) {
-              const key = `${block.id}_${col.key}`;
-              await fetchOptionsForField(col.relationConfig.targetModule, col.relationConfig.targetField, key);
-              // کپی برای دسترسی راحت‌تر
-              if (!options[col.key]) options[col.key] = options[key];
-            }
-          }
-        }
-      }
-    }
+    await Promise.all(requests);
     setRelationOptions(options);
   };
 
@@ -357,7 +362,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
     return formatOptionLabel(value);
   };
 
-  const buildAutoProductName = (values: any) => {
+  const buildAutoProductNameBase = (values: any) => {
     const parts: string[] = [];
     const addPart = (part?: string) => {
       if (!part) return;
@@ -370,11 +375,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
       addPart(getFieldValueLabel('category', values?.category));
       const category = values?.category;
       const specKeys = category === 'leather'
-        ? ['leather_type', 'leather_colors', 'leather_finish_1', 'leather_effect', 'leather_sort']
+        ? ['leather_type', 'leather_colors', 'leather_width', 'leather_finish_1', 'leather_effect', 'leather_sort']
         : category === 'lining'
-          ? ['lining_material', 'lining_color', 'lining_width']
-          : category === 'accessory'
-            ? ['acc_material']
+          ? ['lining_material', 'lining_type', 'lining_color', 'lining_width']
+        : category === 'accessory'
+            ? ['acc_material', 'accessory_type', 'accessory_width']
             : category === 'fitting'
               ? ['fitting_type', 'fitting_material', 'fitting_colors', 'fitting_size']
               : [];
@@ -392,6 +397,18 @@ const SmartForm: React.FC<SmartFormProps> = ({
     if (!shouldPrefixProductAttributeGroup(values)) return baseName;
     return buildCatalogGroupPrefixedName(baseName, resolveProductAttributeGroupLabel(values, getFieldValueLabel));
   };
+
+  const resolveProductAutoNamePrefix = (values: any) => {
+    const explicitPrefix = values?.[AUTO_NAME_PREFIX_KEY];
+    if (explicitPrefix !== undefined && explicitPrefix !== null) {
+      return String(explicitPrefix || '').trim();
+    }
+    return extractManualNamePrefix(values?.name, buildAutoProductNameBase(values));
+  };
+
+  const buildAutoProductName = (values: any) => (
+    composeNameWithAutoSuffix(resolveProductAutoNamePrefix(values), buildAutoProductNameBase(values))
+  );
 
   const buildAutoProductionOrderName = (values: any) => {
     const parts: string[] = [];
@@ -418,7 +435,13 @@ const SmartForm: React.FC<SmartFormProps> = ({
           ? { ...data, description: data.terms_conditions }
           : data;
         const assigneeCombo = buildAssigneeCombo(normalizedRecord?.assignee_type, normalizedRecord?.assignee_id);
-        const nextValues = { ...normalizedRecord, assignee_combo: assigneeCombo };
+        const nextValues = { ...normalizedRecord, assignee_combo: assigneeCombo } as Record<string, any>;
+        if (module.id === 'products') {
+          nextValues[AUTO_NAME_PREFIX_KEY] = extractManualNamePrefix(
+            normalizedRecord?.name,
+            buildAutoProductNameBase(normalizedRecord),
+          );
+        }
         form.setFieldsValue(nextValues);
         setFormData(nextValues);
         setInitialRecord(normalizedRecord);
@@ -494,10 +517,16 @@ const SmartForm: React.FC<SmartFormProps> = ({
     if (module.id !== 'products') return;
     const currentValues = watchedValues || formData;
     if (!currentValues?.auto_name_enabled) return;
+    const manualPrefix = resolveProductAutoNamePrefix(currentValues);
     const nextName = buildAutoProductName(currentValues);
     if (!nextName || nextName === currentValues?.name) return;
+    isApplyingAutoProductNameRef.current = true;
     form.setFieldValue('name', nextName);
-    setFormData((prev: any) => ({ ...prev, name: nextName }));
+    form.setFieldValue(AUTO_NAME_PREFIX_KEY, manualPrefix);
+    setFormData((prev: any) => ({ ...prev, name: nextName, [AUTO_NAME_PREFIX_KEY]: manualPrefix }));
+    Promise.resolve().then(() => {
+      isApplyingAutoProductNameRef.current = false;
+    });
   }, [module.id, watchedValues, relationOptions, dynamicOptions]);
 
   useEffect(() => {
@@ -511,7 +540,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       try {
         const { data, error } = await supabase
           .from('products')
-          .select('product_type, category, product_category, model_name, sewing_type, warranty_months, after_sales_service_months, brand_name, main_unit, sub_unit, buy_price, sell_price, related_bom, image_url')
+          .select('product_type, category, product_category, model_name, sewing_type, warranty_months, after_sales_service_months, brand_name, main_unit, sub_unit, main_unit_price, sub_unit_price, buy_price, sell_price, related_bom, image_url, leather_width, lining_width, accessory_width, lining_material, lining_type, acc_material, accessory_type, fitting_type')
           .eq('id', parentProductId)
           .single();
         if (error) throw error;
@@ -527,10 +556,20 @@ const SmartForm: React.FC<SmartFormProps> = ({
           brand_name: data?.brand_name || null,
           main_unit: data?.main_unit || null,
           sub_unit: data?.sub_unit || null,
+          main_unit_price: data?.main_unit_price ?? null,
+          sub_unit_price: data?.sub_unit_price ?? null,
           buy_price: data?.buy_price ?? null,
           sell_price: data?.sell_price ?? null,
           related_bom: data?.related_bom || null,
           image_url: data?.image_url || null,
+          leather_width: data?.leather_width || null,
+          lining_width: data?.lining_width || null,
+          accessory_width: data?.accessory_width || null,
+          lining_material: data?.lining_material || null,
+          lining_type: data?.lining_type || null,
+          acc_material: data?.acc_material || null,
+          accessory_type: data?.accessory_type || null,
+          fitting_type: data?.fitting_type || null,
         };
 
         form.setFieldsValue(payload);
@@ -628,13 +667,19 @@ const SmartForm: React.FC<SmartFormProps> = ({
     try {
       const { data, error } = await supabase
         .from('products')
-        .select('main_unit, sub_unit')
+        .select('main_unit, sub_unit, category, leather_width, lining_width, accessory_width, main_unit_price, sub_unit_price')
         .eq('id', productId)
         .single();
       if (error) throw error;
       return {
         main_unit: data?.main_unit || null,
         sub_unit: data?.sub_unit || null,
+        category: data?.category || null,
+        leather_width: data?.leather_width || null,
+        lining_width: data?.lining_width || null,
+        accessory_width: data?.accessory_width || null,
+        main_unit_price: data?.main_unit_price ?? null,
+        sub_unit_price: data?.sub_unit_price ?? null,
       };
     } catch (err) {
       console.warn('Could not load stock transfer product units', err);
@@ -777,6 +822,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
       }
 
       if (module.id === 'products' && values.auto_name_enabled) {
+        if (values[AUTO_NAME_PREFIX_KEY] === undefined && formData?.[AUTO_NAME_PREFIX_KEY] !== undefined) {
+          values[AUTO_NAME_PREFIX_KEY] = formData[AUTO_NAME_PREFIX_KEY];
+        }
         const nextName = buildAutoProductName(values);
         if (nextName) {
           values.name = nextName;
@@ -1032,6 +1080,17 @@ const SmartForm: React.FC<SmartFormProps> = ({
       Object.entries(allValues || {}).filter(([, value]) => value !== undefined)
     );
     if (
+      module.id === 'products'
+      && Object.prototype.hasOwnProperty.call(changedValues || {}, 'name')
+      && !isApplyingAutoProductNameRef.current
+    ) {
+      cleanedValues[AUTO_NAME_PREFIX_KEY] = extractManualNamePrefix(
+        String(cleanedValues.name || ''),
+        buildAutoProductNameBase(cleanedValues),
+      );
+      form.setFieldValue(AUTO_NAME_PREFIX_KEY, cleanedValues[AUTO_NAME_PREFIX_KEY]);
+    }
+    if (
       module.id === 'products' &&
       (Object.prototype.hasOwnProperty.call(changedValues || {}, 'main_unit')
         || Object.prototype.hasOwnProperty.call(changedValues || {}, 'sub_unit'))
@@ -1116,14 +1175,16 @@ const SmartForm: React.FC<SmartFormProps> = ({
         cancelText: 'انصراف',
         onOk: () => {
           const currentValues = form.getFieldsValue();
+          const manualPrefix = resolveProductAutoNamePrefix(currentValues);
           const nextName = buildAutoProductName({ ...currentValues, auto_name_enabled: enableAuto });
           if (!nextName) {
             message.warning('اطلاعات کافی برای نامگذاری وجود ندارد');
             return;
           }
           form.setFieldValue('auto_name_enabled', enableAuto);
+          form.setFieldValue(AUTO_NAME_PREFIX_KEY, manualPrefix);
           form.setFieldValue('name', nextName);
-          setFormData({ ...currentValues, name: nextName, auto_name_enabled: enableAuto });
+          setFormData({ ...currentValues, name: nextName, auto_name_enabled: enableAuto, [AUTO_NAME_PREFIX_KEY]: manualPrefix });
           message.success('نام محصول بروزرسانی شد');
         }
       });
@@ -1195,7 +1256,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
             <div className="h-full flex items-center justify-center"><Spin size="large" /></div>
           ) : (
             <Form form={form} layout="vertical" onFinish={handleFinish} onValuesChange={handleValuesChange} initialValues={formData}>
-              
+              <Form.Item name={AUTO_NAME_PREFIX_KEY} hidden>
+                <input />
+              </Form.Item>
+
               {(canViewField('assignee_id')) && (
                 <div className="mb-6">
                   <div className="flex items-center justify-between sm:justify-start bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-lg sm:rounded-full pl-2 sm:pl-1 pr-3 py-1 gap-1 sm:gap-2">
@@ -1260,6 +1324,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                             moduleId={module.id}
                             recordId={recordId}
                             allValues={{ ...formData, ...currentValues }}
+                            onRelationOptionsUpdate={mergeRelationOptions}
                           />
                               </div>
                               {conversion && canShowConversion && !(resolvedField as any).readonly && (
@@ -1343,7 +1408,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 if (module.id === 'products' && block.id === 'product_stock_movements') return null;
                 if (module.id === 'products' && block.id === 'product_inventory' && !!recordId) return null;
                 if (module.id === 'products' && block.id === 'product_inventory' && (currentValues as any)?.catalog_role === 'parent') return null;
-                if (module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && ['leatherSpec', 'liningSpec', 'kharjkarSpec', 'yaraghSpec'].includes(String(block.id))) return null;
+                if (
+                  module.id === 'products'
+                  && (currentValues as any)?.catalog_role === 'parent'
+                  && (currentValues as any)?.product_type !== 'raw'
+                  && ['leatherSpec', 'liningSpec', 'kharjkarSpec', 'yaraghSpec'].includes(String(block.id))
+                ) return null;
                 if (module.id === 'product_bundles' && block.id === 'bundle_stock_movements') return null;
                 if (module.id === 'shelves' && block.id === 'shelf_stock_movements') return null;
                 if (module.id === 'tasks' && block.id === 'task_shelf_stock_movements') return null;
@@ -1400,6 +1470,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                    forceEditMode={true} options={options}
                                    moduleId={module.id}
                                    allValues={{ ...formData, ...currentValues }}
+                                   onRelationOptionsUpdate={mergeRelationOptions}
                                  />
                                 </div>
                                 {conversion && canShowConversion && !(resolvedField as any).readonly && (

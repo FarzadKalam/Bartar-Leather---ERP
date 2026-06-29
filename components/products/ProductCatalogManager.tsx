@@ -71,6 +71,8 @@ const VARIATION_COMMON_FIELDS: ModuleField[] = [
   { key: 'name', type: FieldType.TEXT, labels: { fa: 'نام محصول' } },
   { key: 'site_code', type: FieldType.TEXT, labels: { fa: 'کد سایت / SKU' } },
   { key: 'waste_rate', type: FieldType.NUMBER, labels: { fa: 'نرخ پرت' } },
+  { key: 'main_unit_price', type: FieldType.PRICE, labels: { fa: 'قیمت واحد اصلی' } },
+  { key: 'sub_unit_price', type: FieldType.PRICE, labels: { fa: 'قیمت واحد فرعی' } },
   { key: 'buy_price', type: FieldType.PRICE, labels: { fa: 'قیمت خرید' } },
   { key: 'sell_price', type: FieldType.PRICE, labels: { fa: 'قیمت فروش' } },
   {
@@ -114,13 +116,17 @@ const DEFAULT_GLOBAL_ATTRIBUTE_DEFINITIONS = [
 const SMART_GLOBAL_FIELD_MAPPINGS: Record<string, { key: string; label: string }> = {
   leather_type: { key: 'global_leather_type', label: 'نوع چرم' },
   leather_colors: { key: 'global_leather_color', label: 'رنگ چرم' },
+  leather_width: { key: 'global_leather_width', label: 'عرض چرم (میلیمتر)' },
   leather_finish_1: { key: 'global_leather_finish', label: 'صفحه چرم' },
   leather_effect: { key: 'global_leather_effect', label: 'افکت چرم' },
   leather_sort: { key: 'global_leather_sort', label: 'سورت چرم' },
   lining_material: { key: 'global_lining_material', label: 'جنس آستر' },
+  lining_type: { key: 'global_lining_type', label: 'نوع آستر' },
   lining_color: { key: 'global_lining_color', label: 'رنگ آستر' },
-  lining_width: { key: 'global_lining_width', label: 'عرض آستر' },
+  lining_width: { key: 'global_lining_width', label: 'عرض آستر (میلیمتر)' },
   acc_material: { key: 'global_accessory_material', label: 'جنس خرجکار' },
+  accessory_type: { key: 'global_accessory_type', label: 'نوع خرجکار' },
+  accessory_width: { key: 'global_accessory_width', label: 'عرض خرجکار (میلیمتر)' },
   fitting_type: { key: 'global_fitting_type', label: 'نوع یراق' },
   fitting_material: { key: 'global_fitting_material', label: 'جنس یراق' },
   fitting_colors: { key: 'global_fitting_color', label: 'رنگ یراق' },
@@ -487,9 +493,11 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   };
 
   const productAttributeGroupLabel = resolveProductAttributeGroupLabel(product);
-  const getAutoVariationBaseName = () => (
-    buildCatalogGroupPrefixedName(String(product?.name || 'محصول'), productAttributeGroupLabel)
-  );
+  const getAutoVariationBaseName = () => {
+    const normalizedProductName = String(product?.name || '').trim();
+    if (normalizedProductName) return normalizedProductName;
+    return buildCatalogGroupPrefixedName('محصول', productAttributeGroupLabel);
+  };
 
   const getAutoVariationName = (variantValues: Record<string, any>) => (
     buildVariantName(getAutoVariationBaseName(), variantValues, attributes, renderAttributeValue)
@@ -670,6 +678,8 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
         name: product?.auto_name_enabled ? getAutoVariationName(seededValues) : '',
         site_code: '',
         waste_rate: null,
+        main_unit_price: product?.main_unit_price ?? null,
+        sub_unit_price: product?.sub_unit_price ?? null,
         buy_price: null,
         sell_price: null,
         bundle_id: null,
@@ -755,6 +765,8 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
             name: product?.auto_name_enabled ? getAutoVariationName(variantValues) : '',
             site_code: '',
             waste_rate: null,
+            main_unit_price: product?.main_unit_price ?? null,
+            sub_unit_price: product?.sub_unit_price ?? null,
             buy_price: null,
             sell_price: null,
             bundle_id: null,
@@ -1133,7 +1145,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                       );
                     }
 
-                    if (fieldKey === 'waste_rate' || fieldKey === 'buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock' || fieldKey === 'opening_sub_stock') {
+                    if (fieldKey === 'waste_rate' || fieldKey === 'main_unit_price' || fieldKey === 'sub_unit_price' || fieldKey === 'buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock' || fieldKey === 'opening_sub_stock') {
                       const openingUnitsConvertible = !!product?.main_unit && !!product?.sub_unit
                         && (String(product.main_unit) === String(product.sub_unit) || canConvertUnits(product.main_unit, product.sub_unit));
                       const isOpeningSubStock = fieldKey === 'opening_sub_stock';

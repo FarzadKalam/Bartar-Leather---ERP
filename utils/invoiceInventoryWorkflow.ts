@@ -38,13 +38,13 @@ const normalizeInvoiceItem = (item: any) => {
   if (qty <= 0 && subQty > 0 && mainUnit && subUnit) {
     qty = mainUnit === subUnit
       ? subQty
-      : Math.abs(toNumber(convertBetweenUnits(subQty, subUnit, mainUnit)));
+      : Math.abs(toNumber(convertBetweenUnits(subQty, subUnit, mainUnit, { record: item })));
   }
 
   if (subQty <= 0 && qty > 0 && mainUnit && subUnit) {
     subQty = mainUnit === subUnit
       ? qty
-      : Math.abs(toNumber(convertBetweenUnits(qty, mainUnit, subUnit)));
+      : Math.abs(toNumber(convertBetweenUnits(qty, mainUnit, subUnit, { record: item })));
   }
 
   return {

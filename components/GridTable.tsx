@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Table, Typography, message } from 'antd';
-import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
+import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { BlockDefinition, FieldType } from '../types';
 import { MODULES } from '../moduleRegistry';
 import { convertArea, HARD_CODED_UNIT_OPTIONS } from '../utils/unitConversions';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
+import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import QrScanPopover from './QrScanPopover';
 import { buildProductFilters, runProductsQuery } from './editableTable/productionOrderHelpers';
@@ -45,6 +46,7 @@ const defaultPiece = () => ({
   formula_id: null,
   final_usage: 0,
   unit_price: 0,
+  sub_unit_price: 0,
   cost_per_item: 0,
   total_usage: 0,
   total_cost: 0,
@@ -230,6 +232,16 @@ const GridTable: React.FC<GridTableProps> = ({
     }
     return tempData;
   };
+
+  const getPieceUnitConversion = (fieldKey: string) => getUnitQuantityConversion(fieldKey, {
+    availableKeys: ['qty_main', 'qty_sub'],
+  });
+
+  const buildPieceUnitConversionContext = (row: any, piece: any) => ({
+    ...(row?.specs || {}),
+    category: row?.header?.category || null,
+    ...piece,
+  });
 
   const getRowKeyValue = (row: any, index: number) => String(row?.key || index);
 
@@ -447,11 +459,19 @@ const GridTable: React.FC<GridTableProps> = ({
       const finalUsage = baseUsage * (1 + wasteRate / 100);
       const mainUnit = piece.main_unit || gridRow?.header?.main_unit || null;
       const subUnit = piece.sub_unit || null;
-      const qtySubRaw = convertArea(baseUsage, mainUnit, subUnit);
+      const qtySubRaw = convertArea(baseUsage, mainUnit, subUnit, {
+        record: {
+          ...(gridRow?.specs || {}),
+          category: gridRow?.header?.category || null,
+        },
+      });
       const qtySub = Number.isFinite(qtySubRaw) ? Math.round(qtySubRaw * 100) / 100 : 0;
 
       const unitPrice = parseFloat(piece.unit_price) || 0;
-      const costPerItem = unitPrice * finalUsage;
+      const subUnitPrice = parseFloat(piece.sub_unit_price) || 0;
+      const costPerItem = unitPrice > 0
+        ? unitPrice * finalUsage
+        : subUnitPrice * qtySub;
       const totalUsage = qty ? finalUsage * qty : 0;
       const totalCostRow = qty ? costPerItem * qty : costPerItem;
 
@@ -507,6 +527,23 @@ const GridTable: React.FC<GridTableProps> = ({
     row.pieces = pieces;
     nextData[rowIndex] = applyCalculations(row);
     updateGrid(nextData);
+  };
+
+  const applyPieceUnitConversion = (rowIndex: number, pieceIndex: number, fieldKey: string) => {
+    const conversion = getPieceUnitConversion(fieldKey);
+    if (!conversion) return;
+
+    const source = getWorkingData();
+    const row = source[rowIndex];
+    const piece = row?.pieces?.[pieceIndex];
+    if (!row || !piece) return;
+
+    try {
+      const converted = calculateUnitQuantity(buildPieceUnitConversionContext(row, piece), conversion);
+      updatePiece(rowIndex, pieceIndex, { [conversion.targetQtyKey]: converted });
+    } catch (err: any) {
+      message.error(err?.message || 'خطا در محاسبه واحد');
+    }
   };
 
   const addPiece = (rowIndex: number) => {
@@ -682,7 +719,8 @@ const GridTable: React.FC<GridTableProps> = ({
         waste_rate: product?.waste_rate ?? piece.waste_rate,
         main_unit: productMainUnit ?? piece.main_unit,
         sub_unit: productSubUnit ?? piece.sub_unit,
-        unit_price: product?.buy_price ?? piece.unit_price,
+        unit_price: product?.main_unit_price ?? product?.buy_price ?? piece.unit_price,
+        sub_unit_price: product?.sub_unit_price ?? piece.sub_unit_price,
       }));
       row.pieces = pieces;
 
@@ -1734,14 +1772,56 @@ const GridTable: React.FC<GridTableProps> = ({
                           dataIndex: 'qty_main',
                           key: 'qty_main',
                           width: 130,
-                          render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
+                          render: (val: any, _record: any, pieceIndex: number) => {
+                            const conversion = getPieceUnitConversion('qty_main');
+                            return (
+                              <div className="flex items-center gap-1">
+                                <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
+                                {conversion ? (
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    className="px-1 text-[10px] whitespace-nowrap shrink-0"
+                                    icon={<CalculatorOutlined />}
+                                    title={conversion.title}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      applyPieceUnitConversion(rowIndex, pieceIndex, 'qty_main');
+                                    }}
+                                  />
+                                ) : null}
+                              </div>
+                            );
+                          },
                         },
                         {
                           title: 'مقدار واحد فرعی',
                           dataIndex: 'qty_sub',
                           key: 'qty_sub',
                           width: 130,
-                          render: (val: any) => <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>,
+                          render: (val: any, _record: any, pieceIndex: number) => {
+                            const conversion = getPieceUnitConversion('qty_sub');
+                            return (
+                              <div className="flex items-center gap-1">
+                                <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
+                                {conversion ? (
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    className="px-1 text-[10px] whitespace-nowrap shrink-0"
+                                    icon={<CalculatorOutlined />}
+                                    title={conversion.title}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      applyPieceUnitConversion(rowIndex, pieceIndex, 'qty_sub');
+                                    }}
+                                  />
+                                ) : null}
+                              </div>
+                            );
+                          },
                         },
                         ...(!shouldHideFormulaColumn ? [{
                           title: 'فرمول',
@@ -1778,7 +1858,7 @@ const GridTable: React.FC<GridTableProps> = ({
                         },
                         ...(isProductionOrder ? [
                           {
-                            title: 'قیمت واحد',
+                            title: 'قیمت واحد اصلی',
                             dataIndex: 'unit_price',
                             key: 'unit_price',
                             render: (val: any, _record: any, pieceIndex: number) => (
@@ -1789,6 +1869,26 @@ const GridTable: React.FC<GridTableProps> = ({
                                     style={{ minWidth: 0, maxWidth: '100%' }}
                                     value={val}
                                     onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })}
+                                    formatter={(v) => formatGroupedInput(v)}
+                                    parser={(v) => parseNumberInput(v)}
+                                    onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
+                                  />
+                                )
+                                : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>
+                            ),
+                          },
+                          {
+                            title: 'قیمت واحد فرعی',
+                            dataIndex: 'sub_unit_price',
+                            key: 'sub_unit_price',
+                            render: (val: any, _record: any, pieceIndex: number) => (
+                              rowCanEdit
+                                ? (
+                                  <InputNumber
+                                    className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
+                                    style={{ minWidth: 0, maxWidth: '100%' }}
+                                    value={val}
+                                    onChange={(v) => updatePiece(rowIndex, pieceIndex, { sub_unit_price: v })}
                                     formatter={(v) => formatGroupedInput(v)}
                                     parser={(v) => parseNumberInput(v)}
                                     onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}

@@ -162,6 +162,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   const [deleteReplacementValue, setDeleteReplacementValue] = useState<string>();
   const [editTarget, setEditTarget] = useState<ManagedOption | null>(null);
   const [editOptionValue, setEditOptionValue] = useState('');
+  const [dropdownSearchValue, setDropdownSearchValue] = useState('');
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
   const isLocalMode = manageMode === 'local';
   const mobileDropdownAlign = isMobileViewport
@@ -236,6 +237,17 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       && String(option.value) !== String(deleteTarget.value)
     );
   }, [deleteTarget, normalizedOptions, persistedOptionValues]);
+
+  const filteredDropdownOptions = useMemo(() => {
+    const normalizedSearch = String(dropdownSearchValue || '').trim().toLowerCase();
+    if (!normalizedSearch) return normalizedOptions;
+
+    return normalizedOptions.filter((option) => {
+      const label = String(option?.label ?? '').toLowerCase();
+      const value = String(option?.value ?? '').toLowerCase();
+      return label.includes(normalizedSearch) || value.includes(normalizedSearch);
+    });
+  }, [dropdownSearchValue, normalizedOptions]);
 
   const handleSelectChange = (nextValue: string | string[] | undefined) => {
     const normalized = normalizeDynamicValueToLabel(nextValue, normalizedOptions, mode);
@@ -481,12 +493,17 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
         placeholder={placeholder}
         className={className}
         showSearch={isMobileViewport ? false : showSearch}
+        onDropdownVisibleChange={(open) => {
+          if (!open) {
+            setDropdownSearchValue('');
+          }
+        }}
         allowClear={allowClear}
         disabled={disabled || loading}
         loading={loading}
         optionFilterProp="label"
         getPopupContainer={resolvedPopupContainer}
-        options={normalizedOptions}
+        options={filteredDropdownOptions}
         popupMatchSelectWidth={isMobileViewport}
         placement={isMobileViewport ? 'bottomLeft' : undefined}
         dropdownAlign={mobileDropdownAlign}
@@ -545,8 +562,31 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
           <>
             {menu}
             <Divider style={{ margin: '8px 0' }} />
-            <div style={{ padding: '8px 10px 10px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ padding: '0 10px 10px' }}>
+              <div
+                style={{ marginBottom: 8 }}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+              >
+                <Input
+                  placeholder="جستجو در گزینه‌ها..."
+                  value={dropdownSearchValue}
+                  onChange={(event) => setDropdownSearchValue(event.target.value)}
+                  disabled={loading}
+                  className="w-full"
+                  onKeyDown={(event) => event.stopPropagation()}
+                />
+              </div>
+              <Divider style={{ margin: '8px 0' }} />
+              <div
+                style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+              >
                 <Input
                   placeholder="افزودن گزینه جدید..."
                   value={newOptionValue}
@@ -554,6 +594,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
                   onPressEnter={handleAddOption}
                   disabled={loading}
                   className="w-full"
+                  onKeyDown={(event) => event.stopPropagation()}
                 />
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <Button

@@ -1,4 +1,9 @@
-import { canConvertUnits, convertBetweenUnits } from './unitConversions';
+import {
+  canConvertUnits,
+  convertBetweenUnits,
+  isCrossDimensionUnitConversion,
+  resolveUnitConversionWidthMm,
+} from './unitConversions';
 
 export type QuantityDirection = 'main_to_sub' | 'sub_to_main';
 
@@ -16,6 +21,7 @@ const PAIRS = [
   { mainQtyKey: 'stock', subQtyKey: 'sub_stock' },
   { mainQtyKey: 'quantity', subQtyKey: 'sub_quantity' },
   { mainQtyKey: 'main_quantity', subQtyKey: 'sub_quantity' },
+  { mainQtyKey: 'qty_main', subQtyKey: 'qty_sub' },
   { mainQtyKey: 'delivered_qty', subQtyKey: 'required_qty' },
   { mainQtyKey: 'opening_stock', subQtyKey: 'opening_sub_stock' },
 ];
@@ -104,7 +110,11 @@ export const calculateUnitQuantity = (
     throw new Error(`تبدیل واحد "${sourceUnit}" به "${targetUnit}" ممکن نیست.`);
   }
 
-  const converted = convertBetweenUnits(sourceQty, sourceUnit, targetUnit);
+  if (isCrossDimensionUnitConversion(sourceUnit, targetUnit) && !resolveUnitConversionWidthMm({ record: values })) {
+    throw new Error('برای تبدیل بین واحد سطح و طول، عرض اختصاصی ماده اولیه باید بر حسب میلیمتر وارد شده باشد.');
+  }
+
+  const converted = convertBetweenUnits(sourceQty, sourceUnit, targetUnit, { record: values });
   if (!Number.isFinite(converted)) {
     throw new Error(`تبدیل واحد "${sourceUnit}" به "${targetUnit}" ممکن نیست.`);
   }

@@ -235,12 +235,15 @@ export const syncProductStock = async (productId: string) => {
   const totalStock = (data || []).reduce((sum: number, row: any) => sum + (parseFloat(row.stock) || 0), 0);
   const { data: productRow } = await supabase
     .from('products')
-    .select('main_unit, sub_unit')
+    .select('main_unit, sub_unit, category, leather_width, lining_width, accessory_width')
     .eq('id', productId)
     .maybeSingle();
   const mainUnit = productRow?.main_unit as UnitValue | undefined;
   const subUnit = productRow?.sub_unit as UnitValue | undefined;
-  const subStock = mainUnit && subUnit ? convertArea(totalStock, mainUnit, subUnit) : 0;
+  const computedSubStock = mainUnit && subUnit
+    ? convertArea(totalStock, mainUnit, subUnit, { record: productRow as any })
+    : 0;
+  const subStock = Number.isFinite(computedSubStock) ? computedSubStock : 0;
   const { error: updateError } = await supabase
     .from('products')
     .update({ stock: totalStock, sub_stock: subStock })

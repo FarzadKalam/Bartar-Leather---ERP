@@ -28,8 +28,8 @@ export const mapBundleInventoryRowsToPrintItems = (rows: any[]): ProductBundlePr
     const mainUnit = String(row?.products?.main_unit || '');
     const subUnit = String(row?.products?.sub_unit || '');
     const storedSubStock = toNumber(row?.sub_stock);
-    const computedSubStock = convertBetweenUnits(stock, mainUnit, subUnit);
-    const subStock = (storedSubStock === 0 && stock !== 0 && computedSubStock !== 0)
+    const computedSubStock = convertBetweenUnits(stock, mainUnit, subUnit, { record: row?.products || row });
+    const subStock = (storedSubStock === 0 && stock !== 0 && Number.isFinite(computedSubStock) && computedSubStock !== 0)
       ? computedSubStock
       : storedSubStock;
     if (existing) {

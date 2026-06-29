@@ -223,7 +223,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       try {
         const { data: rows, error } = await supabase
           .from('product_inventory')
-          .select('id, product_id, stock, products(name, system_code, main_unit, sub_unit)')
+          .select('id, product_id, stock, products(name, system_code, main_unit, sub_unit, category, leather_width, lining_width, accessory_width)')
           .eq('bundle_id', recordId)
           .order('created_at', { ascending: true });
 
@@ -236,6 +236,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
           system_code: string;
           main_unit: string;
           sub_unit: string;
+          category?: string | null;
+          leather_width?: string | null;
+          lining_width?: string | null;
+          accessory_width?: string | null;
           quantity: number;
         }>();
 
@@ -257,13 +261,17 @@ const EditableTable: React.FC<EditableTableProps> = ({
             system_code: r.products?.system_code || '',
             main_unit: mainUnit,
             sub_unit: subUnit,
+            category: r.products?.category || null,
+            leather_width: r.products?.leather_width || null,
+            lining_width: r.products?.lining_width || null,
+            accessory_width: r.products?.accessory_width || null,
             quantity: qty,
           });
         });
 
         const mapped = Array.from(aggregate.values()).map((row, i) => {
           const subQty = row.main_unit && row.sub_unit
-            ? convertArea(row.quantity, row.main_unit as any, row.sub_unit as any)
+            ? convertArea(row.quantity, row.main_unit as any, row.sub_unit as any, { record: row })
             : 0;
           return {
             ...row,
@@ -298,7 +306,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   }, [data, tempData, isEditing, isAnyInvoiceItems, isShelfInventoryBlock, isProductStockMovements, userToggledCollapse]);
 
   const productsModule = MODULES['products'];
-  const editableAfterSelection = new Set(['buy_price', 'length', 'width', 'usage', 'waste_rate', 'main_unit']);
+  const editableAfterSelection = new Set(['buy_price', 'main_unit_price', 'sub_unit_price', 'length', 'width', 'usage', 'waste_rate', 'main_unit']);
   const productFieldMap: Record<string, string> = {
     leather_colors: 'colors',
     fitting_colors: 'colors',
@@ -405,7 +413,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
         if (isProductStockMovements) {
           const { data: productMeta } = await supabase
             .from('products')
-            .select('main_unit, sub_unit, stock')
+            .select('main_unit, sub_unit, stock, category, leather_width, lining_width, accessory_width')
             .eq('id', recordId)
             .maybeSingle();
 
@@ -450,7 +458,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
         let query = supabase
           .from('product_inventory')
           .select(
-            'id, product_id, shelf_id, warehouse_id, bundle_id, stock, created_at, products(main_unit,sub_unit), shelves(warehouse_id,system_code,shelf_number,name,warehouses(id,name)), product_bundles:bundle_id(id,bundle_number)'
+            'id, product_id, shelf_id, warehouse_id, bundle_id, stock, created_at, products(main_unit,sub_unit,category,leather_width,lining_width,accessory_width), shelves(warehouse_id,system_code,shelf_number,name,warehouses(id,name)), product_bundles:bundle_id(id,bundle_number)'
           );
         if (isProductInventory) query = query.eq('product_id', recordId);
         if (isShelfInventory) query = query.eq('shelf_id', recordId);
@@ -462,7 +470,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           try {
             const { data: productRow } = await supabase
               .from('products')
-              .select('main_unit, sub_unit')
+              .select('main_unit, sub_unit, category, leather_width, lining_width, accessory_width')
               .eq('id', recordId)
               .single();
             productUnits = {
@@ -483,7 +491,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
           const shelfCode = row?.shelves?.system_code || '';
           const stockValue = parseFloat(row?.stock) || 0;
           const subStock = mainUnit && subUnit
-            ? convertArea(stockValue, mainUnit as any, subUnit as any)
+            ? convertArea(stockValue, mainUnit as any, subUnit as any, { record: row?.products || productUnits as any })
             : 0;
           return {
             ...row,
@@ -607,7 +615,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       syncRowUnitQuantities(newData[index], key);
     }
 
-    if (['quantity', 'qty', 'usage', 'stock', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'discount_type', 'vat_type', 'length', 'width', 'main_quantity', 'sub_quantity'].includes(key)) {
+    if (['quantity', 'qty', 'usage', 'stock', 'main_unit_price', 'sub_unit_price', 'unit_price', 'price', 'buy_price', 'discount', 'vat', 'discount_type', 'vat_type', 'length', 'width', 'main_quantity', 'sub_quantity'].includes(key)) {
       newData[index]['total_price'] = calculateRow(newData[index], block.rowCalculationType);
     }
 
@@ -683,17 +691,29 @@ const EditableTable: React.FC<EditableTableProps> = ({
             }
           });
 
-            if (isAnyInvoiceItems && key === 'product_id') {
-              currentRow.main_unit = normalizeUnitValue(record?.main_unit || currentRow.main_unit || null) || null;
-              currentRow.sub_unit = normalizeUnitValue(record?.sub_unit || currentRow.sub_unit || null) || null;
+          if (key === 'product_id') {
+            currentRow.category = record?.category || currentRow.category || null;
+            currentRow.leather_width = record?.leather_width || currentRow.leather_width || null;
+            currentRow.lining_width = record?.lining_width || currentRow.lining_width || null;
+            currentRow.accessory_width = record?.accessory_width || currentRow.accessory_width || null;
+            currentRow.main_unit_price = record?.main_unit_price ?? currentRow.main_unit_price ?? null;
+            currentRow.sub_unit_price = record?.sub_unit_price ?? currentRow.sub_unit_price ?? null;
+            if (currentRow.unit_price === undefined || currentRow.unit_price === null || currentRow.unit_price === '') {
+              currentRow.unit_price = record?.main_unit_price ?? record?.buy_price ?? currentRow.unit_price ?? null;
             }
+          }
 
-            if (isBundleContents && key === 'product_id') {
-              currentRow.product_name = record?.name || currentRow.product_name || '';
-              currentRow.system_code = record?.system_code || currentRow.system_code || '';
-              currentRow.main_unit = normalizeUnitValue(record?.main_unit || currentRow.main_unit || '') || '';
-              currentRow.sub_unit = normalizeUnitValue(record?.sub_unit || currentRow.sub_unit || '') || '';
-            }
+          if (isAnyInvoiceItems && key === 'product_id') {
+            currentRow.main_unit = normalizeUnitValue(record?.main_unit || currentRow.main_unit || null) || null;
+            currentRow.sub_unit = normalizeUnitValue(record?.sub_unit || currentRow.sub_unit || null) || null;
+          }
+
+          if (isBundleContents && key === 'product_id') {
+            currentRow.product_name = record?.name || currentRow.product_name || '';
+            currentRow.system_code = record?.system_code || currentRow.system_code || '';
+            currentRow.main_unit = normalizeUnitValue(record?.main_unit || currentRow.main_unit || '') || '';
+            currentRow.sub_unit = normalizeUnitValue(record?.sub_unit || currentRow.sub_unit || '') || '';
+          }
 
           if (isAnyInvoiceItems && key === 'product_id') {
             currentRow.source_shelf_id = null;
@@ -729,6 +749,8 @@ const EditableTable: React.FC<EditableTableProps> = ({
 
     const numericDefaults: any = {};
     if (colKeys.has('quantity')) numericDefaults.quantity = 1;
+    if (colKeys.has('main_unit_price')) numericDefaults.main_unit_price = 0;
+    if (colKeys.has('sub_unit_price')) numericDefaults.sub_unit_price = 0;
     if (colKeys.has('unit_price')) numericDefaults.unit_price = 0;
     if (colKeys.has('discount')) numericDefaults.discount = 0;
     if (colKeys.has('vat')) numericDefaults.vat = 0;
@@ -1225,7 +1247,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             const { data: upsertedData, error: upsertError } = await supabase
               .from('bundle_items')
               .upsert(rowsToUpsert, { onConflict: 'id' })
-              .select('id, bundle_id, product_id, quantity, products(name, system_code, main_unit, sub_unit)');
+              .select('id, bundle_id, product_id, quantity, products(name, system_code, main_unit, sub_unit, category, leather_width, lining_width, accessory_width)');
 
             if (upsertError) {
               console.error('Error upserting bundle items:', upsertError);
@@ -1240,7 +1262,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             const subUnit = row.products?.sub_unit || '';
             const qtyMain = parseFloat(row.quantity) || 0;
             const subQty = mainUnit && subUnit
-              ? convertArea(qtyMain, mainUnit as any, subUnit as any)
+              ? convertArea(qtyMain, mainUnit as any, subUnit as any, { record: row?.products || row })
               : 0;
             return {
               ...row,
@@ -1429,7 +1451,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     (visibleColumns || []).forEach((col: any) => {
       const key = col.key;
       const productKey = productFieldMap[key] || key;
-      const productValue = (selected as any)[productKey];
+      const productValue = (selected as any)[productKey] ?? (key === 'lining_width' ? (selected as any)?.lining_width : undefined);
       if (productValue !== undefined) {
         nextRow[key] = productValue;
       }

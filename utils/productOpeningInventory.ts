@@ -266,6 +266,10 @@ export const reconcileMissingOpeningBalanceTransfers = async (
       {
         mainUnit: normalizeUnit(row?.main_unit),
         subUnit: normalizeUnit(row?.sub_unit),
+        category: normalizeUnit((row as any)?.category),
+        leather_width: normalizeUnit((row as any)?.leather_width),
+        lining_width: normalizeUnit((row as any)?.lining_width),
+        accessory_width: normalizeUnit((row as any)?.accessory_width),
       },
     ])
   );
@@ -309,7 +313,7 @@ export const reconcileMissingOpeningBalanceTransfers = async (
       let qtySub = qtyMain;
       if (unitMeta.mainUnit && unitMeta.subUnit && unitMeta.mainUnit !== unitMeta.subUnit) {
         if (isUnitValue(unitMeta.mainUnit) && isUnitValue(unitMeta.subUnit)) {
-          const converted = convertArea(qtyMain, unitMeta.mainUnit, unitMeta.subUnit);
+          const converted = convertArea(qtyMain, unitMeta.mainUnit, unitMeta.subUnit, { record: unitMeta as any });
           qtySub = Number.isFinite(converted) ? converted : qtyMain;
         }
       }
@@ -377,7 +381,7 @@ export const syncOpeningBalanceTransfersForInventoryRows = async ({
 
   const { data: products, error: productsError } = await supabase
     .from('products')
-    .select('id, main_unit, sub_unit')
+    .select('id, main_unit, sub_unit, category, leather_width, lining_width, accessory_width')
     .in('id', productIds);
   if (productsError) throw productsError;
 
@@ -387,6 +391,10 @@ export const syncOpeningBalanceTransfersForInventoryRows = async ({
       {
         mainUnit: normalizeUnit(row?.main_unit),
         subUnit: normalizeUnit(row?.sub_unit),
+        category: normalizeUnit((row as any)?.category),
+        leather_width: normalizeUnit((row as any)?.leather_width),
+        lining_width: normalizeUnit((row as any)?.lining_width),
+        accessory_width: normalizeUnit((row as any)?.accessory_width),
       },
     ])
   );
@@ -436,7 +444,7 @@ export const syncOpeningBalanceTransfersForInventoryRows = async ({
     let subQty = currentRow.stock;
     if (unitMeta.mainUnit && unitMeta.subUnit && unitMeta.mainUnit !== unitMeta.subUnit) {
       if (isUnitValue(unitMeta.mainUnit) && isUnitValue(unitMeta.subUnit)) {
-        const converted = convertArea(currentRow.stock, unitMeta.mainUnit, unitMeta.subUnit);
+        const converted = convertArea(currentRow.stock, unitMeta.mainUnit, unitMeta.subUnit, { record: unitMeta as any });
         subQty = Number.isFinite(converted) ? converted : currentRow.stock;
       }
     }
@@ -504,7 +512,7 @@ export const recordInventoryRowDeletionTransfers = async ({
   const productIds = Array.from(new Set(rows.map((row) => row.productId)));
   const { data: products, error: productsError } = await supabase
     .from('products')
-    .select('id, main_unit, sub_unit')
+    .select('id, main_unit, sub_unit, category, leather_width, lining_width, accessory_width')
     .in('id', productIds);
   if (productsError) throw productsError;
 
@@ -514,6 +522,10 @@ export const recordInventoryRowDeletionTransfers = async ({
       {
         mainUnit: normalizeUnit(row?.main_unit),
         subUnit: normalizeUnit(row?.sub_unit),
+        category: normalizeUnit((row as any)?.category),
+        leather_width: normalizeUnit((row as any)?.leather_width),
+        lining_width: normalizeUnit((row as any)?.lining_width),
+        accessory_width: normalizeUnit((row as any)?.accessory_width),
       },
     ])
   );
@@ -523,7 +535,7 @@ export const recordInventoryRowDeletionTransfers = async ({
     let subQty = row.stock;
     if (unitMeta.mainUnit && unitMeta.subUnit && unitMeta.mainUnit !== unitMeta.subUnit) {
       if (isUnitValue(unitMeta.mainUnit) && isUnitValue(unitMeta.subUnit)) {
-        const converted = convertArea(row.stock, unitMeta.mainUnit, unitMeta.subUnit);
+        const converted = convertArea(row.stock, unitMeta.mainUnit, unitMeta.subUnit, { record: unitMeta as any });
         subQty = Number.isFinite(converted) ? converted : row.stock;
       }
     }

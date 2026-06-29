@@ -273,6 +273,14 @@ const findSheetMatrix = (sheets: WorkbookSheets, sheetName: string): string[][] 
   return found?.[1] || null;
 };
 
+const findSheetMatrixByCandidates = (sheets: WorkbookSheets, sheetNames: string[]): string[][] | null => {
+  for (const sheetName of sheetNames) {
+    const found = findSheetMatrix(sheets, sheetName);
+    if (found) return found;
+  }
+  return null;
+};
+
 const getCellValue = (row: Record<string, string>, ...keys: string[]): string => {
   for (const key of keys) {
     const exact = row[key];
@@ -875,6 +883,11 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
   const handleProductionBomTemplateImport = useCallback(async () => {
     const bomMatrix = findSheetMatrix(workbookSheets, "BOM");
     const materialMatrix = findSheetMatrix(workbookSheets, "مواد اولیه");
+    const draftStagesMatrix = findSheetMatrixByCandidates(workbookSheets, [
+      "مراحل پیش نویس تولید",
+      "مراحل پیش‌نویس تولید",
+      "Draft Stages",
+    ]);
     if (!bomMatrix || !materialMatrix) {
       message.error("فایل نمونه BOM باید شیت‌های «BOM» و «مواد اولیه» داشته باشد.");
       return;
@@ -882,6 +895,9 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
 
     const bomRows = matrixToSheetData(bomMatrix, true).rows.filter(buildRowHasAnyValue);
     const materialRows = matrixToSheetData(materialMatrix, true).rows.filter(buildRowHasAnyValue);
+    const draftStageRows = draftStagesMatrix
+      ? matrixToSheetData(draftStagesMatrix, true).rows.filter(buildRowHasAnyValue)
+      : [];
     if (!bomRows.length) {
       message.error("در شیت BOM داده‌ای پیدا نشد.");
       return;
@@ -896,10 +912,17 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
         [normalizeKey("صفحه چرم"), { key: "leather_finish_1", category: "leather_finish" }],
         [normalizeKey("افکت چرم"), { key: "leather_effect", category: "leather_effect", multi: true }],
         [normalizeKey("سورت چرم"), { key: "leather_sort", category: "leather_sort" }],
+        [normalizeKey("عرض چرم"), { key: "leather_width", category: "leather_width" }],
+        [normalizeKey("عرض چرم (میلیمتر)"), { key: "leather_width", category: "leather_width" }],
         [normalizeKey("جنس آستر"), { key: "lining_material", category: "lining_material" }],
+        [normalizeKey("نوع آستر"), { key: "lining_type", category: "lining_type" }],
         [normalizeKey("رنگ آستر"), { key: "lining_color", category: "general_color" }],
         [normalizeKey("عرض آستر"), { key: "lining_width", category: "lining_width" }],
+        [normalizeKey("عرض آستر (میلیمتر)"), { key: "lining_width", category: "lining_width" }],
         [normalizeKey("جنس خرجکار"), { key: "acc_material", category: "acc_material" }],
+        [normalizeKey("نوع خرجکار"), { key: "accessory_type", category: "accessory_type" }],
+        [normalizeKey("عرض خرجکار"), { key: "accessory_width", category: "accessory_width" }],
+        [normalizeKey("عرض خرجکار (میلیمتر)"), { key: "accessory_width", category: "accessory_width" }],
         [normalizeKey("نوع یراق"), { key: "fitting_type", category: "fitting_type" }],
         [normalizeKey("جنس یراق"), { key: "fitting_material", category: "fitting_material" }],
         [normalizeKey("رنگ یراق"), { key: "fitting_colors", category: "general_color", multi: true }],
@@ -927,9 +950,13 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           "افکت چرم",
           "سورت چرم",
           "جنس آستر",
+          "نوع آستر",
           "رنگ آستر",
-          "عرض آستر",
+          "عرض آستر (میلیمتر)",
           "جنس خرجکار",
+          "نوع خرجکار",
+          "عرض چرم (میلیمتر)",
+          "عرض خرجکار (میلیمتر)",
           "نوع یراق",
           "جنس یراق",
           "رنگ یراق",
@@ -961,15 +988,20 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
         "افکت چرم",
         "سورت چرم",
         "جنس آستر",
+        "نوع آستر",
         "رنگ آستر",
-        "عرض آستر",
+        "عرض آستر (میلیمتر)",
         "جنس خرجکار",
+        "نوع خرجکار",
+        "عرض چرم (میلیمتر)",
+        "عرض خرجکار (میلیمتر)",
         "نوع یراق",
         "جنس یراق",
         "رنگ یراق",
         "سایز یراق",
       ];
       const materialsByBom = new Map<string, Map<string, any>>();
+      const draftStagesByBom = new Map<string, any[]>();
 
       const calculateGridRow = (gridRow: any) => {
         let totalQty = 0;
@@ -1069,6 +1101,39 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
         });
       });
 
+      draftStageRows.forEach((row, rowIndex) => {
+        const bomKey = getCellValue(row, "کلید BOM", "عنوان مدل");
+        const stageName = getCellValue(row, "عنوان مرحله", "نام مرحله", "مرحله", "name", "title");
+        if (!bomKey || !stageName) return;
+
+        if (!draftStagesByBom.has(bomKey)) draftStagesByBom.set(bomKey, []);
+        const currentStages = draftStagesByBom.get(bomKey)!;
+        const fallbackSortOrder = (currentStages.length + 1) * 10;
+        const stageId = getCellValue(row, "شناسه مرحله", "id", "stage_id") || createImportKey("draft_stage");
+        const sortOrder = parseNumber(getCellValue(row, "ترتیب", "sort_order", "order"));
+        const wage = parseNumber(getCellValue(row, "دستمزد", "wage", "stage_wage"));
+
+        currentStages.push({
+          id: stageId,
+          name: stageName,
+          sort_order: sortOrder ?? fallbackSortOrder,
+          ...(wage !== null ? { wage } : {}),
+          _rowIndex: rowIndex,
+        });
+      });
+
+      draftStagesByBom.forEach((stages, bomKey) => {
+        const normalized = [...stages]
+          .sort((a, b) => {
+            const aOrder = Number(a?.sort_order ?? 0);
+            const bOrder = Number(b?.sort_order ?? 0);
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return Number(a?._rowIndex ?? 0) - Number(b?._rowIndex ?? 0);
+          })
+          .map(({ _rowIndex, ...stage }) => stage);
+        draftStagesByBom.set(bomKey, normalized);
+      });
+
       let inserted = 0;
       let updated = 0;
       let failed = 0;
@@ -1096,6 +1161,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           product_category: getCellValue(row, "دسته بندی محصول") || null,
           model_name: getCellValue(row, "نام مدل") || null,
           grid_materials,
+          ...(draftStagesMatrix ? { production_stages_draft: draftStagesByBom.get(bomKey) || [] } : {}),
         };
 
         try {

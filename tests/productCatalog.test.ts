@@ -5,6 +5,8 @@ import {
   buildCatalogGroupPrefixedName,
   buildSeedVariantValues,
   buildVariantCombinations,
+  composeNameWithAutoSuffix,
+  extractManualNamePrefix,
   mapFieldTypeToAttributeValueType,
   normalizeCatalogProductPayload,
   isEligibleProductAttributeField,
@@ -254,8 +256,15 @@ runTest('prefixes catalog parent and variant auto names with the selected attrib
   assert.equal(buildCatalogGroupPrefixedName('چرم کیف مدل آریا', groupLabel), 'چرم کیف مدل آریا');
 });
 
+runTest('preserves a manual product name prefix before the auto-generated suffix', () => {
+  const autoName = 'چرم کیف مدل آریا';
+  assert.equal(extractManualNamePrefix('پیشوند سفارشی چرم کیف مدل آریا', autoName), 'پیشوند سفارشی');
+  assert.equal(composeNameWithAutoSuffix('پیشوند سفارشی', autoName), 'پیشوند سفارشی چرم کیف مدل آریا');
+});
+
 runTest('excludes parent-only price fields from attribute source candidates', () => {
   assert.equal(isEligibleProductAttributeField({ key: 'waste_rate', type: FieldType.NUMBER, labels: { fa: 'نرخ پرت' } }), false);
+  assert.equal(isEligibleProductAttributeField({ key: 'main_unit_price', type: FieldType.PRICE as any, labels: { fa: 'قیمت واحد اصلی' } }), false);
   assert.equal(isEligibleProductAttributeField({ key: 'model_name', type: FieldType.SELECT, labels: { fa: 'مدل' } }), true);
 });
 
@@ -289,6 +298,8 @@ runTest('persists parent variants with prefixed names, variant prices, and bundl
         {
           variant_values: { color: 'مشکی' },
           waste_rate: 3,
+          main_unit_price: 450,
+          sub_unit_price: 45,
           buy_price: 1200,
           sell_price: 1800,
           bundle_id: 'bundle-1',
@@ -306,9 +317,65 @@ runTest('persists parent variants with prefixed names, variant prices, and bundl
   assert.equal(variant?.parent_product_id, persisted.id);
   assert.equal(variant?.name, 'چرم کیف مدل آریا - رنگ: مشکی');
   assert.equal(variant?.waste_rate, 3);
+  assert.equal(variant?.main_unit_price, 450);
+  assert.equal(variant?.sub_unit_price, 45);
   assert.equal(variant?.buy_price, 1200);
   assert.equal(variant?.sell_price, 1800);
   assert.equal(variant?.bundle_id, 'bundle-1');
+  assert.deepEqual(supabase.getTable('product_attribute_options'), [
+    {
+      id: 'product_attribute_options_1',
+      attribute_id: 'product_attributes_1',
+      label: 'مشکی',
+      value: 'مشکی',
+      sort_order: 0,
+      is_active: true,
+    },
+  ]);
+});
+
+runTest('keeps a user-provided product name prefix when persisting parent and variant auto names', async () => {
+  const supabase = new MockSupabase({
+    products: [],
+    product_attributes: [],
+    product_attribute_options: [],
+  });
+
+  const persisted = await persistProductCatalogData({
+    supabase: supabase as any,
+    values: {
+      catalog_role: 'parent',
+      product_type: 'raw',
+      category: 'leather',
+      name: 'پیشوند سفارشی چرم کیف مدل آریا',
+      __auto_name_prefix: 'پیشوند سفارشی',
+      auto_name_enabled: true,
+      main_unit: 'عدد',
+      sub_unit: 'عدد',
+      __product_attributes: [
+        makeAttribute({
+          key: 'color',
+          label: 'رنگ',
+          option_source_type: 'custom',
+          source_field_key: null,
+          options: [{ label: 'مشکی', value: 'مشکی' }],
+        }),
+      ],
+      __product_variations: [
+        {
+          variant_values: { color: 'مشکی' },
+          opening_stock: 0,
+        },
+      ],
+    },
+  });
+
+  const products = supabase.getTable('products');
+  const parent = products.find((row) => row.id === persisted.id);
+  const variant = products.find((row) => row.catalog_role === 'variant');
+
+  assert.equal(parent?.name, 'پیشوند سفارشی چرم کیف مدل آریا');
+  assert.equal(variant?.name, 'پیشوند سفارشی چرم کیف مدل آریا - رنگ: مشکی');
 });
 
 runTest('combination builder stays responsive near the configured UI cap', () => {

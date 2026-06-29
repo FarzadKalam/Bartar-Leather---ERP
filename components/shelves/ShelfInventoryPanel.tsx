@@ -29,7 +29,7 @@ const ShelfInventoryPanel: React.FC<ShelfInventoryPanelProps> = ({
     try {
       const { data, error } = await supabase
         .from('product_inventory')
-        .select('id, product_id, bundle_id, stock, created_at, products(name, system_code, main_unit, sub_unit), product_bundles:bundle_id(id, bundle_number)')
+        .select('id, product_id, bundle_id, stock, created_at, products(name, system_code, main_unit, sub_unit, category, leather_width, lining_width, accessory_width), product_bundles:bundle_id(id, bundle_number)')
         .eq('shelf_id', recordId)
         .order('created_at', { ascending: true });
 
@@ -41,7 +41,7 @@ const ShelfInventoryPanel: React.FC<ShelfInventoryPanelProps> = ({
         const subUnit = row?.products?.sub_unit || null;
         const mainStock = parseFloat(row?.stock) || 0;
         const subStock = mainUnit && subUnit
-          ? convertArea(mainStock, mainUnit as any, subUnit as any)
+          ? convertArea(mainStock, mainUnit as any, subUnit as any, { record: row?.products || row })
           : 0;
         return {
           id: row?.id,

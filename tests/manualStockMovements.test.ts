@@ -175,6 +175,35 @@ runTest('unit conversion handles square millimeter and square foot both ways', (
   }, subToMain!), 18580608);
 });
 
+runTest('unit conversion resolves area to length with material width in millimeters', () => {
+  const conversion = getUnitQuantityConversion('quantity', {
+    availableKeys: ['quantity', 'main_unit', 'sub_unit', 'sub_quantity', 'category', 'lining_width'],
+  });
+
+  assert.equal(calculateUnitQuantity({
+    quantity: 20000,
+    main_unit: 'میلیمتر مربع',
+    sub_unit: 'میلیمتر طول',
+    category: 'lining',
+    lining_width: 100,
+  }, conversion!), 200);
+});
+
+runTest('unit conversion rejects cross-dimension conversion when material width is empty', () => {
+  const conversion = getUnitQuantityConversion('quantity', {
+    availableKeys: ['quantity', 'main_unit', 'sub_unit', 'sub_quantity'],
+  });
+
+  assert.throws(
+    () => calculateUnitQuantity({
+      quantity: 2,
+      main_unit: 'متر مربع',
+      sub_unit: 'متر طول',
+    }, conversion!),
+    /عرض اختصاصی ماده اولیه/,
+  );
+});
+
 let failures = 0;
 for (const { name, fn } of tests) {
   try {

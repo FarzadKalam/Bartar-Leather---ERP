@@ -9,6 +9,13 @@ export type UnitValue =
   | 'سانتیمتر طول'
   | 'متر طول';
 
+export type UnitConversionRecord = Record<string, unknown>;
+
+export type UnitConversionContext = {
+  record?: UnitConversionRecord | null;
+  widthMm?: number | null;
+};
+
 export const HARD_CODED_UNIT_OPTIONS: Array<{ label: UnitValue; value: UnitValue }> = [
   { label: 'عدد', value: 'عدد' },
   { label: 'بسته', value: 'بسته' },
@@ -30,6 +37,13 @@ const M_IN_CM = 100;
 const AREA_UNITS: UnitValue[] = ['فوت مربع', 'سانتیمتر مربع', 'میلیمتر مربع', 'متر مربع'];
 const LENGTH_UNITS: UnitValue[] = ['میلیمتر طول', 'سانتیمتر طول', 'متر طول'];
 const DISCRETE_UNITS = new Set<string>(['عدد', 'بسته']);
+
+const MATERIAL_WIDTH_FIELD_KEYS = {
+  leather: 'leather_width',
+  lining: 'lining_width',
+  accessory: 'accessory_width',
+} as const;
+
 export const normalizeUnitValue = (raw?: string | null): UnitValue | '' => {
   const value = String(raw || '')
     .trim()
@@ -55,6 +69,75 @@ const roundToThree = (value: number) => {
   return Math.round((value + Number.EPSILON) * 1000) / 1000;
 };
 
+const normalizeNumericInput = (raw: unknown) => {
+  if (raw === null || raw === undefined) return '';
+  return String(raw)
+    .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
+    .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/[\u066C\u060C]/g, ',')
+    .replace(/\s+/g, '')
+    .replace(/,/g, '');
+};
+
+const toNumber = (raw: unknown) => {
+  const normalized = normalizeNumericInput(raw);
+  if (!normalized || normalized === '-' || normalized === '.' || normalized === '-.') return 0;
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeMaterialCategory = (raw?: unknown) => {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value === 'چرم') return 'leather';
+  if (value === 'آستر') return 'lining';
+  if (value === 'خرجکار') return 'accessory';
+  if (value === 'یراق') return 'fitting';
+  return value;
+};
+
+const getWidthFieldCandidates = (record?: UnitConversionRecord | null) => {
+  const category = normalizeMaterialCategory(record?.category ?? record?.material_category);
+  const preferred = category && category in MATERIAL_WIDTH_FIELD_KEYS
+    ? [MATERIAL_WIDTH_FIELD_KEYS[category as keyof typeof MATERIAL_WIDTH_FIELD_KEYS]]
+    : [];
+
+  return [
+    ...preferred,
+    'conversion_width_mm',
+    'material_width_mm',
+    'leather_width',
+    'lining_width',
+    'accessory_width',
+  ];
+};
+
+export const resolveUnitConversionWidthMm = (context?: UnitConversionContext | null) => {
+  const directWidth = toNumber(context?.widthMm);
+  if (directWidth > 0) return directWidth;
+
+  const record = context?.record;
+  if (!record) return null;
+
+  const candidates = getWidthFieldCandidates(record);
+  for (const key of candidates) {
+    const width = toNumber(record?.[key]);
+    if (width > 0) return width;
+  }
+  return null;
+};
+
+export const isAreaUnit = (value?: string | null) => AREA_UNITS.includes(normalizeUnitValue(value) as UnitValue);
+export const isLengthUnit = (value?: string | null) => LENGTH_UNITS.includes(normalizeUnitValue(value) as UnitValue);
+
+export const isCrossDimensionUnitConversion = (from?: string | null, to?: string | null) => {
+  const source = normalizeUnitValue(from);
+  const target = normalizeUnitValue(to);
+  if (!source || !target || source === target) return false;
+  return (AREA_UNITS.includes(source) && LENGTH_UNITS.includes(target))
+    || (LENGTH_UNITS.includes(source) && AREA_UNITS.includes(target));
+};
+
 export const canConvertUnits = (from?: string | null, to?: string | null) => {
   const source = normalizeUnitValue(from);
   const target = normalizeUnitValue(to);
@@ -62,27 +145,39 @@ export const canConvertUnits = (from?: string | null, to?: string | null) => {
   if (DISCRETE_UNITS.has(source) || DISCRETE_UNITS.has(target)) return false;
   const isArea = AREA_UNITS.includes(source) && AREA_UNITS.includes(target);
   const isLength = LENGTH_UNITS.includes(source) && LENGTH_UNITS.includes(target);
-  return isArea || isLength;
+  const isCrossDimension = isCrossDimensionUnitConversion(source, target);
+  return isArea || isLength || isCrossDimension;
 };
 
-export const convertBetweenUnits = (value: number, from?: string | null, to?: string | null) => {
+export const convertBetweenUnits = (
+  value: number,
+  from?: string | null,
+  to?: string | null,
+  context?: UnitConversionContext | null,
+) => {
   if (!Number.isFinite(value)) return 0;
   const source = normalizeUnitValue(from);
   const target = normalizeUnitValue(to);
   if (!source || !target) return 0;
   if (source === target) return roundToThree(value);
-  if (!canConvertUnits(source, target)) return 0;
-  return convertArea(value, source, target);
+  if (!canConvertUnits(source, target)) return Number.NaN;
+  return convertArea(value, source, target, context);
 };
 
-export const convertArea = (value: number, from: UnitValue, to: UnitValue) => {
+export const convertArea = (
+  value: number,
+  from: UnitValue,
+  to: UnitValue,
+  context?: UnitConversionContext | null,
+) => {
   if (!Number.isFinite(value)) return 0;
   if (from === to) return roundToThree(value);
   if (['عدد', 'بسته'].includes(from) || ['عدد', 'بسته'].includes(to)) return 0;
 
   const isArea = AREA_UNITS.includes(from) && AREA_UNITS.includes(to);
   const isLength = LENGTH_UNITS.includes(from) && LENGTH_UNITS.includes(to);
-  if (!isArea && !isLength) return 0;
+  const isCrossDimension = isCrossDimensionUnitConversion(from, to);
+  if (!isArea && !isLength && !isCrossDimension) return Number.NaN;
 
   const toFt2 = (val: number, unit: UnitValue) => {
     switch (unit) {
@@ -144,5 +239,20 @@ export const convertArea = (value: number, from: UnitValue, to: UnitValue) => {
     return roundToThree(fromMeter(toMeter(value, from), to));
   }
 
-  return roundToThree(fromFt2(toFt2(value, from), to));
+  if (isArea) {
+    return roundToThree(fromFt2(toFt2(value, from), to));
+  }
+
+  const widthMm = resolveUnitConversionWidthMm(context);
+  if (!widthMm || widthMm <= 0) return Number.NaN;
+
+  if (AREA_UNITS.includes(from) && LENGTH_UNITS.includes(to)) {
+    const areaMm2 = fromFt2(toFt2(value, from), 'میلیمتر مربع');
+    const lengthMm = areaMm2 / widthMm;
+    return roundToThree(fromMeter(lengthMm / M_IN_MM, to));
+  }
+
+  const lengthMm = toMeter(value, from) * M_IN_MM;
+  const areaMm2 = lengthMm * widthMm;
+  return roundToThree(fromFt2(areaMm2 / FT2_IN_MM2, to));
 };

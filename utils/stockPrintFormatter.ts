@@ -45,13 +45,13 @@ export const formatStockPrintValue = (fieldKey: string, value: any, record?: any
     if (!subUnit || subUnit === mainUnit) return mainLabel;
 
     const storedSecondaryValue = normalizeNumericValue(record?.sub_stock);
-    const computedSecondaryValue = convertBetweenUnits(numericValue, mainUnit, subUnit);
+    const computedSecondaryValue = convertBetweenUnits(numericValue, mainUnit, subUnit, { record });
     const secondaryValue = storedSecondaryValue === null
-      || (storedSecondaryValue === 0 && numericValue !== 0 && computedSecondaryValue !== 0)
+      || (storedSecondaryValue === 0 && numericValue !== 0 && Number.isFinite(computedSecondaryValue) && computedSecondaryValue !== 0)
       ? computedSecondaryValue
       : storedSecondaryValue;
 
-    if (secondaryValue === null) return mainLabel;
+    if (!Number.isFinite(secondaryValue)) return mainLabel;
     return `${mainLabel} (${buildUnitLabel(secondaryValue, subUnit)})`;
   }
 
@@ -60,12 +60,12 @@ export const formatStockPrintValue = (fieldKey: string, value: any, record?: any
     if (!mainUnit || !subUnit || mainUnit === subUnit) return subLabel;
 
     const storedMainValue = normalizeNumericValue(record?.stock);
-    const computedMainValue = convertBetweenUnits(numericValue, subUnit, mainUnit);
+    const computedMainValue = convertBetweenUnits(numericValue, subUnit, mainUnit, { record });
     const mainValue = storedMainValue === null
-      || (storedMainValue === 0 && numericValue !== 0 && computedMainValue !== 0)
+      || (storedMainValue === 0 && numericValue !== 0 && Number.isFinite(computedMainValue) && computedMainValue !== 0)
       ? computedMainValue
       : storedMainValue;
-    if (mainValue === null) return subLabel;
+    if (!Number.isFinite(mainValue)) return subLabel;
     return `${subLabel} (${buildUnitLabel(mainValue, mainUnit)})`;
   }
 

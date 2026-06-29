@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   buildCanonicalVariantIdentity,
   buildCatalogGroupPrefixedName,
+  composeNameWithAutoSuffix,
   buildVariantName,
   buildVariantSignature,
   normalizeCatalogProductPayload,
@@ -32,6 +33,8 @@ const PRODUCT_BASE_COPY_EXCLUDED = new Set<string>([
   'stock',
   'sub_stock',
   'waste_rate',
+  'main_unit_price',
+  'sub_unit_price',
   'buy_price',
   'sell_price',
   'bundle_id',
@@ -134,6 +137,39 @@ const upsertAttributeRows = async (
   return (data || []) as ProductAttributeRecord[];
 };
 
+const mergePersistedAttributeOptions = (
+  persistedRows: ProductAttributeRecord[],
+  sourceAttributes: ProductAttributeRecord[],
+): ProductAttributeRecord[] => {
+  const sourceById = new Map<string, ProductAttributeRecord>();
+  const sourceByScopeKey = new Map<string, ProductAttributeRecord>();
+
+  sourceAttributes.forEach((attribute) => {
+    if (attribute.id) {
+      sourceById.set(String(attribute.id), attribute);
+    }
+    const scopeKey = [
+      attribute.scope_type,
+      attribute.parent_product_id || '',
+      attribute.key,
+    ].join('::');
+    sourceByScopeKey.set(scopeKey, attribute);
+  });
+
+  return persistedRows.map((row) => {
+    const scopeKey = [
+      row.scope_type,
+      row.parent_product_id || '',
+      row.key,
+    ].join('::');
+    const source = (row.id ? sourceById.get(String(row.id)) : undefined) || sourceByScopeKey.get(scopeKey);
+    return {
+      ...row,
+      options: source?.options || [],
+    };
+  });
+};
+
 export const loadProductCatalogData = async (
   supabase: SupabaseClient,
   productId?: string | null,
@@ -156,7 +192,7 @@ export const loadProductCatalogData = async (
     normalizedProductId
       ? supabase
           .from('products')
-          .select('id, name, system_code, site_code, waste_rate, buy_price, sell_price, bundle_id, image_url, site_product_link, status, related_bom, stock, site_sync_enabled, site_sync_status, variant_values')
+          .select('id, name, system_code, site_code, waste_rate, main_unit_price, sub_unit_price, buy_price, sell_price, bundle_id, image_url, site_product_link, status, related_bom, stock, site_sync_enabled, site_sync_status, variant_values')
           .eq('parent_product_id', normalizedProductId)
           .eq('catalog_role', 'variant')
           .order('created_at', { ascending: true })
@@ -180,6 +216,8 @@ export const loadProductCatalogData = async (
     name: row.name ? String(row.name) : null,
     site_code: row.site_code ? String(row.site_code) : null,
     waste_rate: toNumberOrNull(row.waste_rate),
+    main_unit_price: toNumberOrNull(row.main_unit_price),
+    sub_unit_price: toNumberOrNull(row.sub_unit_price),
     buy_price: toNumberOrNull(row.buy_price),
     sell_price: toNumberOrNull(row.sell_price),
     bundle_id: row.bundle_id ? String(row.bundle_id) : null,
@@ -248,9 +286,17 @@ export const persistProductCatalogData = async ({
   }
 
   if (productPayload.auto_name_enabled && shouldPrefixProductAttributeGroup(productPayload)) {
-    productPayload.name = buildCatalogGroupPrefixedName(
-      String(productPayload.name || ''),
-      resolveProductAttributeGroupLabel(productPayload),
+    const manualPrefix = String(values?.__auto_name_prefix || '').trim();
+    const currentName = String(productPayload.name || '').trim();
+    const autoPortion = manualPrefix && currentName.startsWith(`${manualPrefix} `)
+      ? currentName.slice(manualPrefix.length + 1).trim()
+      : currentName;
+    productPayload.name = composeNameWithAutoSuffix(
+      manualPrefix,
+      buildCatalogGroupPrefixedName(
+        autoPortion,
+        resolveProductAttributeGroupLabel(productPayload),
+      ),
     );
   }
 
@@ -296,7 +342,10 @@ export const persistProductCatalogData = async ({
   );
 
   if (normalizedGlobalAttributes.length > 0) {
-    const upsertedGlobals = await upsertAttributeRows(supabase, normalizedGlobalAttributes);
+    const upsertedGlobals = mergePersistedAttributeOptions(
+      await upsertAttributeRows(supabase, normalizedGlobalAttributes),
+      normalizedGlobalAttributes,
+    );
     for (const attribute of upsertedGlobals) {
       if (attribute.option_source_type === 'custom') {
         await upsertAttributeOptions(supabase, String(attribute.id), attribute.options || []);
@@ -313,7 +362,10 @@ export const persistProductCatalogData = async ({
   const existingParentIds = new Set((existingParentRows || []).map((row: any) => String(row.id)));
 
   const upsertedParents = normalizedParentAttributes.length > 0
-    ? await upsertAttributeRows(supabase, normalizedParentAttributes)
+    ? mergePersistedAttributeOptions(
+        await upsertAttributeRows(supabase, normalizedParentAttributes),
+        normalizedParentAttributes,
+      )
     : [];
   const keptParentIds = new Set(upsertedParents.map((attribute) => String(attribute.id || '')));
 
@@ -350,16 +402,16 @@ export const persistProductCatalogData = async ({
       const openingSubStock = toNumberOrNull(rawVariation?.opening_sub_stock);
       const openingShelfId = rawVariation?.opening_shelf_id ? String(rawVariation.opening_shelf_id).trim() : null;
       const bundleId = rawVariation?.bundle_id ? String(rawVariation.bundle_id).trim() : null;
-      const variationBaseName = buildCatalogGroupPrefixedName(
-        String(parentBase.name || previousRecord?.name || 'محصول'),
-        resolveProductAttributeGroupLabel(parentBase),
-      );
+      const variationBaseName = String(parentBase.name || previousRecord?.name || '').trim()
+        || buildCatalogGroupPrefixedName('محصول', resolveProductAttributeGroupLabel(parentBase));
       const payload: Record<string, any> = {
         ...parentBase,
         catalog_role: 'variant',
         parent_product_id: productId,
         site_code: siteCode || null,
         waste_rate: toNumberOrNull(rawVariation?.waste_rate),
+        main_unit_price: toNumberOrNull(rawVariation?.main_unit_price),
+        sub_unit_price: toNumberOrNull(rawVariation?.sub_unit_price),
         buy_price: toNumberOrNull(rawVariation?.buy_price),
         sell_price: toNumberOrNull(rawVariation?.sell_price),
         bundle_id: bundleId,

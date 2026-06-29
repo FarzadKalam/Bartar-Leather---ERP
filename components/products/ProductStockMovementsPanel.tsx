@@ -56,6 +56,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
   const onInventoryUpdatedRef = useRef(onInventoryUpdated);
   const messageRef = useRef(msg);
   const lastFetchedUnitsRef = useRef<{ mainUnit: string | null; subUnit: string | null }>({ mainUnit: null, subUnit: null });
+  const lastFetchedProductMetaRef = useRef<Record<string, any> | null>(null);
 
   useEffect(() => {
     onProductStockUpdatedRef.current = onProductStockUpdated;
@@ -93,7 +94,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
     try {
       const { data: productMeta, error: productMetaError } = await supabase
         .from('products')
-        .select('main_unit, sub_unit, stock')
+        .select('main_unit, sub_unit, stock, category, leather_width, lining_width, accessory_width')
         .eq('id', recordId)
         .maybeSingle();
       if (productMetaError) throw productMetaError;
@@ -104,6 +105,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       };
       setProductUnits(nextUnits);
       lastFetchedUnitsRef.current = nextUnits;
+      lastFetchedProductMetaRef.current = productMeta || null;
       let transferRows: any[] = [];
       let nextStock = parseFloat(productMeta?.stock) || 0;
 
@@ -188,7 +190,9 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       const { mainUnit, subUnit } = lastFetchedUnitsRef.current;
       const injected = (invRows || []).map((row: any) => {
         const stockVal = parseFloat(row?.stock) || 0;
-        const subStock = mainUnit && subUnit ? convertArea(stockVal, mainUnit as any, subUnit as any) : 0;
+        const subStock = mainUnit && subUnit
+          ? convertArea(stockVal, mainUnit as any, subUnit as any, { record: lastFetchedProductMetaRef.current as any })
+          : 0;
         return {
           ...row,
           main_unit: mainUnit || null,

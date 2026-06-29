@@ -27,9 +27,18 @@ export const calculateRow = (row: any, type: RowCalculationType = RowCalculation
         || toSafeNumber(row.qty)
         || toSafeNumber(row.stock)
         || 0;
-    const price = toSafeNumber(row.unit_price) || toSafeNumber(row.buy_price) || toSafeNumber(row.price) || 0;
-    
-    let baseTotal = qty * price;
+    const subQty = toSafeNumber(row.sub_quantity) || toSafeNumber(row.sub_stock) || 0;
+    const mainPrice = toSafeNumber(row.main_unit_price) || toSafeNumber(row.unit_price) || toSafeNumber(row.buy_price) || toSafeNumber(row.price) || 0;
+    const subPrice = toSafeNumber(row.sub_unit_price) || 0;
+
+    let baseTotal = 0;
+    if (qty > 0 && mainPrice > 0) {
+        baseTotal = qty * mainPrice;
+    } else if (subQty > 0 && subPrice > 0) {
+        baseTotal = subQty * subPrice;
+    } else {
+        baseTotal = qty * mainPrice;
+    }
 
     // محاسبات فاکتور
     if (type === RowCalculationType.INVOICE_ROW) {

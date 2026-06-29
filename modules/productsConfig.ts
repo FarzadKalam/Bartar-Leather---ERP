@@ -61,6 +61,14 @@ const fieldsArray: any[] = [
     nature: FieldNature.PREDEFINED,
     isKey: false
   },
+  {
+    key: 'main_unit_price', labels: { fa: 'قیمت واحد اصلی', en: 'Main Unit Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/3,
+    nature: FieldNature.STANDARD,
+  },
+  {
+    key: 'sub_unit_price', labels: { fa: 'قیمت واحد فرعی', en: 'Sub Unit Price' }, type: FieldType.PRICE, location: FieldLocation.BLOCK, blockId: 'baseInfo', order: 1/2,
+    nature: FieldNature.STANDARD,
+  },
 
   { 
     key: 'product_category', 
@@ -250,17 +258,21 @@ const fieldsArray: any[] = [
     isKey: false
   },
   { key: 'leather_colors', labels: { fa: 'رنگ چرم', en: 'Leather Colors' }, type: FieldType.MULTI_SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 2.5, dynamicOptionsCategory: 'general_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
+  { key: 'leather_width', labels: { fa: 'عرض چرم (میلیمتر)', en: 'Leather Width (mm)' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 3, dynamicOptionsCategory: 'leather_width', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   { key: 'leather_finish_1', labels: { fa: 'صفحه چرم', en: 'Finish 1' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 4, dynamicOptionsCategory: 'leather_finish', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   { key: 'leather_effect', labels: { fa: 'افکت چرم', en: 'leather_effect' }, type: FieldType.MULTI_SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 5, dynamicOptionsCategory: 'leather_effect', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   { key: 'leather_sort', labels: { fa: 'سورت چرم', en: 'Sort' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'leatherSpec', order: 6, dynamicOptionsCategory: 'leather_sort', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'leather' } } },
   
   // فیلدهای اختصاصی آستر
-  { key: 'lining_material', labels: { fa: 'جنس آستر', en: 'Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 1, dynamicOptionsCategory: 'lining_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
+  { key: 'lining_material', labels: { fa: 'جنس آستر', en: 'Lining Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 1, dynamicOptionsCategory: 'lining_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
+  { key: 'lining_type', labels: { fa: 'نوع آستر', en: 'Lining Type' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 1.5, dynamicOptionsCategory: 'lining_type', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
   { key: 'lining_color', labels: { fa: 'رنگ آستر', en: 'Color' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 2, dynamicOptionsCategory: 'general_color', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
-  { key: 'lining_width', labels: { fa: 'عرض آستر', en: 'width' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 3, dynamicOptionsCategory: 'lining_width', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
+  { key: 'lining_width', labels: { fa: 'عرض آستر (میلیمتر)', en: 'Lining Width (mm)' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'liningSpec', order: 3, dynamicOptionsCategory: 'lining_width', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'lining' } } },
 
   // فیلدهای اختصاصی خرجکار
-  { key: 'acc_material', labels: { fa: 'جنس خرجکار', en: 'Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'kharjkarSpec', order: 1, dynamicOptionsCategory: 'acc_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'accessory' } } },
+  { key: 'acc_material', labels: { fa: 'جنس خرجکار', en: 'Accessory Material' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'kharjkarSpec', order: 1, dynamicOptionsCategory: 'acc_material', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'accessory' } } },
+  { key: 'accessory_type', labels: { fa: 'نوع خرجکار', en: 'Accessory Type' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'kharjkarSpec', order: 1.5, dynamicOptionsCategory: 'accessory_type', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'accessory' } } },
+  { key: 'accessory_width', labels: { fa: 'عرض خرجکار (میلیمتر)', en: 'Accessory Width (mm)' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'kharjkarSpec', order: 2, dynamicOptionsCategory: 'accessory_width', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'accessory' } } },
   
   // فیلدهای اختصاصی یراق
   { key: 'fitting_type', labels: { fa: 'نوع یراق', en: 'fitting_type' }, type: FieldType.SELECT, location: FieldLocation.BLOCK, blockId: 'yaraghSpec', order: 1, dynamicOptionsCategory: 'fitting_type', logic: { visibleIf: { field: 'category', operator: LogicOperator.EQUALS, value: 'fitting' } } },

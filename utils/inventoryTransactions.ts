@@ -20,6 +20,10 @@ type ProductCatalogMeta = {
   sub_unit: string | null;
   catalog_role: string | null;
   parent_product_id: string | null;
+  category: string | null;
+  leather_width: string | null;
+  lining_width: string | null;
+  accessory_width: string | null;
 };
 
 export type UnitMismatchConfirmPayload = {
@@ -196,7 +200,7 @@ export const applyInventoryDeltas = async (
 export const syncSingleProductStock = async (supabase: SupabaseClient, productId: string) => {
   const { data: productRow, error: productError } = await supabase
     .from('products')
-    .select('main_unit, sub_unit, catalog_role, parent_product_id')
+    .select('main_unit, sub_unit, catalog_role, parent_product_id, category, leather_width, lining_width, accessory_width')
     .eq('id', productId)
     .maybeSingle();
   if (productError) throw productError;
@@ -206,6 +210,10 @@ export const syncSingleProductStock = async (supabase: SupabaseClient, productId
     sub_unit: normalizeUnitValue(productRow?.sub_unit) || (productRow?.sub_unit ? String(productRow.sub_unit) : null),
     catalog_role: productRow?.catalog_role ? String(productRow.catalog_role) : null,
     parent_product_id: productRow?.parent_product_id ? String(productRow.parent_product_id) : null,
+    category: productRow?.category ? String(productRow.category) : null,
+    leather_width: productRow?.leather_width ? String(productRow.leather_width) : null,
+    lining_width: productRow?.lining_width ? String(productRow.lining_width) : null,
+    accessory_width: productRow?.accessory_width ? String(productRow.accessory_width) : null,
   };
 
   let totalStock = 0;
@@ -228,7 +236,10 @@ export const syncSingleProductStock = async (supabase: SupabaseClient, productId
 
   const mainUnit = catalogMeta.main_unit as UnitValue | undefined;
   const subUnit = catalogMeta.sub_unit as UnitValue | undefined;
-  const subStock = mainUnit && subUnit ? convertArea(totalStock, mainUnit, subUnit) : 0;
+  const computedSubStock = mainUnit && subUnit
+    ? convertArea(totalStock, mainUnit, subUnit, { record: catalogMeta as any })
+    : 0;
+  const subStock = Number.isFinite(computedSubStock) ? computedSubStock : 0;
 
   const { error: updateError } = await supabase
     .from('products')

@@ -160,8 +160,12 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
   const invoiceItems = Array.isArray(data.invoiceItems) ? data.invoiceItems : [];
   const calculatedItems = invoiceItems.map((item: any) => {
     const quantity = toNumber(item.quantity);
-    const unitPrice = toNumber(item.unit_price);
-    const baseTotal = quantity * unitPrice;
+    const subQuantity = toNumber(item.sub_quantity);
+    const unitPrice = toNumber(item.main_unit_price ?? item.unit_price);
+    const subUnitPrice = toNumber(item.sub_unit_price);
+    const baseTotal = quantity > 0 && unitPrice > 0
+      ? quantity * unitPrice
+      : subQuantity * subUnitPrice;
 
     const discountValue = toNumber(item.discount);
     const discountType = item.discount_type === 'percent' ? 'percent' : 'amount';
@@ -178,8 +182,10 @@ export const InvoiceCard: React.FC<InvoiceCardProps> = ({
       item,
       productLabel: getInvoiceItemProductLabel(item),
       quantity,
+      subQuantity,
       unit: item.unit || item.main_unit || '-',
       unitPrice,
+      subUnitPrice,
       baseTotal,
       discountValue,
       discountType,

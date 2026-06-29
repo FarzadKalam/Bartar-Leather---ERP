@@ -374,6 +374,37 @@ runTest('invoice finalization derives main quantity from sub-unit quantity when 
   assert.equal(supabase.getTable('stock_transfers')[0].required_qty, 10000);
 });
 
+runTest('invoice finalization derives length quantity from area using stored raw-material width', async () => {
+  const supabase = new MockSupabase({
+    products: [{ id: 'p1', name: 'Lining', category: 'lining', lining_width: '1000', main_unit: 'متر طول', sub_unit: 'میلیمتر مربع', stock: 0, sub_stock: 0 }],
+    product_inventory: [],
+    stock_transfers: [],
+  });
+
+  const result = await applyInvoiceFinalizationInventory({
+    supabase: supabase as any,
+    moduleId: 'purchase_invoices',
+    recordId: 'inv-purchase-cross-1',
+    previousStatus: 'draft',
+    nextStatus: 'final',
+    invoiceItems: [{
+      product_id: 'p1',
+      shelf_id: 's1',
+      quantity: 0,
+      sub_quantity: 2000000,
+      main_unit: 'متر طول',
+      sub_unit: 'میلیمتر مربع',
+      category: 'lining',
+      lining_width: 1000,
+    }],
+    userId: 'u1',
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(supabase.getTable('product_inventory')[0].stock, 2);
+  assert.equal(supabase.getTable('stock_transfers')[0].delivered_qty, 2);
+});
+
 runTest('sales invoice finalization decreases stock and logs outgoing transfer', async () => {
   const supabase = new MockSupabase({
     products: [{ id: 'p1', name: 'Leather', main_unit: 'متر', sub_unit: 'سانتی‌متر', stock: 8, sub_stock: 800 }],

@@ -71,6 +71,8 @@ CREATE TABLE public.products (
   site_product_link text,
   main_unit text,
   sub_unit text,
+  main_unit_price int8,
+  sub_unit_price int8,
   colors jsonb, -- آرایه‌ای از رنگ‌ها
   supplier_id uuid REFERENCES public.suppliers(id),
   brand text,
@@ -339,19 +341,26 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS site_product_link text;
 
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_type text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_color_1 text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_width text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_finish_1 text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS leather_sort text;
 
 -- فیلدهای آستر
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS lining_material text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS lining_type text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS lining_color text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS lining_dims text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS lining_width text;
 
 -- فیلدهای خرجکار و یراق
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS acc_material text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS accessory_type text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS accessory_width text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_type text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_material text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_size text;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS main_unit_price int8;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS sub_unit_price int8;
 
 -- فیلد برای ذخیره اقلام جدول (BOM) به صورت JSON
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS bundle_items jsonb;
