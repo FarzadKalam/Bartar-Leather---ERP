@@ -500,6 +500,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
               targetField,
               relationKey: quickField.key,
               filter: quickField.relationConfig?.filter,
+              limit: targetModule === 'product_bundles' ? 500 : 200,
             });
             relationQueryCache.set(queryCacheKey, options);
           }

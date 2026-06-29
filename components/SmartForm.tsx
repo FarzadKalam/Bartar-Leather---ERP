@@ -244,7 +244,6 @@ const SmartForm: React.FC<SmartFormProps> = ({
   // --- 2. دریافت آپشن‌های ارتباطی (Relation) ---
   const fetchRelationOptions = async () => {
     const options: Record<string, any[]> = {};
-
     const requests: Array<Promise<void>> = [];
 
     module.fields.forEach((field) => {
@@ -253,13 +252,13 @@ const SmartForm: React.FC<SmartFormProps> = ({
       if (!relationKey) return;
       const targetModule = field.relationConfig?.targetModule;
       if (!targetModule) return;
-      requests.push((async () => {
+        requests.push((async () => {
         options[relationKey] = await fetchFullRelationOptions({
           targetModule,
           targetField: field.relationConfig?.targetField,
           relationKey,
           filter: (field.relationConfig as any)?.filter,
-          limit: 120,
+          limit: targetModule === 'product_bundles' ? 500 : 120,
         });
       })());
     });
@@ -277,7 +276,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
             targetField: col.relationConfig?.targetField,
             relationKey: key,
             filter: (col.relationConfig as any)?.filter,
-            limit: 120,
+            limit: targetModule === 'product_bundles' ? 500 : 120,
           });
           if (!options[plainKey]) options[plainKey] = options[key];
         })());

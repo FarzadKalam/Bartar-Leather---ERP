@@ -13,7 +13,10 @@ import {
   type ProductAttributeRecord,
   type ProductVariationRecord,
 } from './productCatalog';
-import { persistProductOpeningInventory } from './productOpeningInventory';
+import {
+  persistInitialOpeningInventoryForExistingProduct,
+  persistProductOpeningInventory,
+} from './productOpeningInventory';
 
 type SaveProductCatalogOptions = {
   supabase: SupabaseClient;
@@ -467,6 +470,29 @@ export const persistProductCatalogData = async ({
         .from('products')
         .upsert(upsertPayload, { onConflict: 'id' });
       if (error) throw error;
+    }
+
+    const existingOpeningInventoryJobs = preparedVariations.map((item) => {
+      if (!item.existingId || (!item.openingStock && !item.openingSubStock) || !item.openingShelfId) {
+        return null;
+      }
+      return persistInitialOpeningInventoryForExistingProduct({
+        supabase,
+        productId: item.existingId,
+        productMainUnit: item.payload?.main_unit ?? null,
+        productSubUnit: item.payload?.sub_unit ?? null,
+        rows: [{
+          shelf_id: item.openingShelfId,
+          bundle_id: item.bundleId,
+          stock: item.openingStock,
+          sub_stock: item.openingSubStock,
+        }],
+        userId: userId ?? null,
+      });
+    }).filter(Boolean) as Promise<any>[];
+
+    if (existingOpeningInventoryJobs.length > 0) {
+      await Promise.all(existingOpeningInventoryJobs);
     }
 
     const newVariationPayloads = preparedVariations.filter((item) => !item.existingId);

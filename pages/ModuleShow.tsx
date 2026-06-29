@@ -1452,8 +1452,12 @@ const ModuleShow: React.FC = () => {
       const filterSelect = filterKeys.length > 0 ? `, ${filterKeys.join(', ')}` : '';
       let query = supabase
         .from(targetModule)
-        .select(`id, ${normalizedTargetField}, system_code${extraSelect}${filterSelect}${isProductsTarget ? ', catalog_role' : ''}`)
-        .limit(200);
+        .select(`id, ${normalizedTargetField}, system_code${extraSelect}${filterSelect}${isProductsTarget ? ', catalog_role' : ''}`);
+      if (targetModule === 'product_bundles') {
+        query = query.order('created_at', { ascending: false }).limit(500);
+      } else {
+        query = query.limit(200);
+      }
       query = applyRelationTargetFilters(query, targetModule, fieldKey);
 
       if (filter) {
@@ -1760,7 +1764,44 @@ const ModuleShow: React.FC = () => {
     }, [id, moduleId, msg, modal, syncBomFilesToOrder]);
 
   const handleDelete = () => {
-    modal.confirm({ title: 'حذف رکورد', okType: 'danger', onOk: async () => { await supabase.from(moduleId).delete().eq('id', id); navigate(`/${moduleId}`); } });
+    modal.confirm({
+      title: 'حذف رکورد',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          if (!id) throw new Error('شناسه رکورد نامعتبر است.');
+
+          if (moduleId === 'product_bundles') {
+            const { error: unlinkProductsError } = await supabase
+              .from('products')
+              .update({ bundle_id: null })
+              .eq('bundle_id', id);
+            if (unlinkProductsError) throw unlinkProductsError;
+
+            const { error: unlinkInventoryError } = await supabase
+              .from('product_inventory')
+              .update({ bundle_id: null })
+              .eq('bundle_id', id);
+            if (unlinkInventoryError) throw unlinkInventoryError;
+
+            const { error: unlinkTransfersError } = await supabase
+              .from('stock_transfers')
+              .update({ bundle_id: null })
+              .eq('bundle_id', id);
+            if (unlinkTransfersError) throw unlinkTransfersError;
+          }
+
+          const { error: deleteError } = await supabase.from(moduleId).delete().eq('id', id);
+          if (deleteError) throw deleteError;
+
+          msg.success('رکورد حذف شد.');
+          navigate(`/${moduleId}`);
+        } catch (error: any) {
+          msg.error(`حذف رکورد ناموفق بود: ${getErrorMessage(error, 'خطای نامشخص')}`);
+          throw error;
+        }
+      }
+    });
   };
 
   const handleCopyRecord = useCallback(() => {
