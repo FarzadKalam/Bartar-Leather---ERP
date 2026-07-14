@@ -301,6 +301,7 @@ runTest('persists parent variants with prefixed names, variant prices, and bundl
           main_unit_price: 450,
           sub_unit_price: 45,
           buy_price: 1200,
+          sub_buy_price: 0.25,
           sell_price: 1800,
           bundle_id: 'bundle-1',
           opening_stock: 0,
@@ -320,6 +321,7 @@ runTest('persists parent variants with prefixed names, variant prices, and bundl
   assert.equal(variant?.main_unit_price, 450);
   assert.equal(variant?.sub_unit_price, 45);
   assert.equal(variant?.buy_price, 1200);
+  assert.equal(variant?.sub_buy_price, 0.25);
   assert.equal(variant?.sell_price, 1800);
   assert.equal(variant?.bundle_id, 'bundle-1');
   assert.deepEqual(supabase.getTable('product_attribute_options'), [

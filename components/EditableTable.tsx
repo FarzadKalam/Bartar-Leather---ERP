@@ -47,6 +47,7 @@ const normalizeDigitsToEnglish = (raw: any): string => {
 const normalizeNumericString = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
   const englishDigits = normalizeDigitsToEnglish(raw)
+    .replace(/\u066B/g, '.')
     .replace(/[\u066C\u060C]/g, ',')
     .replace(/\s+/g, '')
     .replace(/,/g, '');
@@ -306,7 +307,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
   }, [data, tempData, isEditing, isAnyInvoiceItems, isShelfInventoryBlock, isProductStockMovements, userToggledCollapse]);
 
   const productsModule = MODULES['products'];
-  const editableAfterSelection = new Set(['buy_price', 'main_unit_price', 'sub_unit_price', 'length', 'width', 'usage', 'waste_rate', 'main_unit']);
+  const editableAfterSelection = new Set(['buy_price', 'sub_buy_price', 'main_unit_price', 'sub_unit_price', 'length', 'width', 'usage', 'waste_rate', 'main_unit']);
   const productFieldMap: Record<string, string> = {
     leather_colors: 'colors',
     fitting_colors: 'colors',
@@ -689,6 +690,9 @@ const EditableTable: React.FC<EditableTableProps> = ({
             if (col.key === 'buy_price' && record['buy_price']) {
               currentRow[col.key] = record['buy_price'];
             }
+            if (col.key === 'sub_buy_price' && record['sub_buy_price']) {
+              currentRow[col.key] = record['sub_buy_price'];
+            }
           });
 
           if (key === 'product_id') {
@@ -697,7 +701,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
             currentRow.lining_width = record?.lining_width || currentRow.lining_width || null;
             currentRow.accessory_width = record?.accessory_width || currentRow.accessory_width || null;
             currentRow.main_unit_price = record?.main_unit_price ?? currentRow.main_unit_price ?? null;
-            currentRow.sub_unit_price = record?.sub_unit_price ?? currentRow.sub_unit_price ?? null;
+            currentRow.sub_unit_price = record?.sub_unit_price ?? record?.sub_buy_price ?? currentRow.sub_unit_price ?? null;
             if (currentRow.unit_price === undefined || currentRow.unit_price === null || currentRow.unit_price === '') {
               currentRow.unit_price = record?.main_unit_price ?? record?.buy_price ?? currentRow.unit_price ?? null;
             }
@@ -751,6 +755,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
     if (colKeys.has('quantity')) numericDefaults.quantity = 1;
     if (colKeys.has('main_unit_price')) numericDefaults.main_unit_price = 0;
     if (colKeys.has('sub_unit_price')) numericDefaults.sub_unit_price = 0;
+    if (colKeys.has('sub_buy_price')) numericDefaults.sub_buy_price = 0;
     if (colKeys.has('unit_price')) numericDefaults.unit_price = 0;
     if (colKeys.has('discount')) numericDefaults.discount = 0;
     if (colKeys.has('vat')) numericDefaults.vat = 0;

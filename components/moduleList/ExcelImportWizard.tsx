@@ -238,6 +238,9 @@ const parseNumber = (value: string): number | null => {
 const guessTargetField = (sourceColumn: string, fields: ModuleField[]): string | null => {
   const sourceKey = normalizeKey(sourceColumn);
   if (!sourceKey) return null;
+  if (sourceKey === normalizeKey('قیمت خرید') && fields.some((field) => field.key === 'buy_price')) {
+    return 'buy_price';
+  }
 
   for (const field of fields) {
     if (normalizeKey(field.key) === sourceKey) return field.key;

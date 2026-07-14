@@ -71,16 +71,17 @@ CREATE TABLE public.products (
   site_product_link text,
   main_unit text,
   sub_unit text,
-  main_unit_price int8,
-  sub_unit_price int8,
+  main_unit_price numeric,
+  sub_unit_price numeric,
   colors jsonb, -- آرایه‌ای از رنگ‌ها
   supplier_id uuid REFERENCES public.suppliers(id),
   brand text,
   waste_rate numeric DEFAULT 0,
-  buy_price int8,
+  buy_price numeric,
+  sub_buy_price numeric,
   buy_price_updated_at timestamptz,
-  cost_price int8,
-  sell_price int8,
+  cost_price numeric,
+  sell_price numeric,
   sell_price_updated_at timestamptz,
   stock numeric DEFAULT 0,
   reorder_point numeric DEFAULT 0,
@@ -158,10 +159,10 @@ CREATE TABLE public.invoices (
   payment_method text,
   marketer_id uuid REFERENCES public.profiles(id),
   sales_channel text,
-  total_amount int8,
-  total_discount int8,
-  total_tax int8,
-  final_payable int8,
+  total_amount numeric,
+  total_discount numeric,
+  total_tax numeric,
+  final_payable numeric,
   financial_approval bool DEFAULT false,
   terms_conditions text,
   created_at timestamptz DEFAULT now(),
@@ -174,10 +175,10 @@ CREATE TABLE public.invoice_items (
   invoice_id uuid REFERENCES public.invoices(id) ON DELETE CASCADE,
   product_id uuid REFERENCES public.products(id),
   quantity numeric,
-  unit_price int8,
-  tax int8,
-  discount int8,
-  row_total int8
+  unit_price numeric,
+  tax numeric,
+  discount numeric,
+  row_total numeric
 );
 
 -- ۱۳. اسناد مالی
@@ -185,7 +186,7 @@ CREATE TABLE public.financial_documents (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   invoice_id uuid REFERENCES public.invoices(id),
   doc_type text, -- income, expense
-  amount int8,
+  amount numeric,
   payment_date timestamptz,
   due_date timestamptz,
   payer_id uuid, -- می‌تواند به مشتری یا پروفایل وصل شود
@@ -359,8 +360,10 @@ ALTER TABLE public.products ADD COLUMN IF NOT EXISTS accessory_width text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_type text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_material text;
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS fitting_size text;
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS main_unit_price int8;
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS sub_unit_price int8;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS main_unit_price numeric;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS sub_unit_price numeric;
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS sub_buy_price numeric;
+ALTER TABLE public.products ALTER COLUMN buy_price TYPE numeric USING buy_price::numeric;
 
 -- فیلد برای ذخیره اقلام جدول (BOM) به صورت JSON
 ALTER TABLE public.products ADD COLUMN IF NOT EXISTS bundle_items jsonb;

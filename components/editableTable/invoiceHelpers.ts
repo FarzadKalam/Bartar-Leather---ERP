@@ -3,6 +3,7 @@ const normalizeNumericInput = (raw: any): string => {
   return String(raw)
     .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
     .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/\u066B/g, '.')
     .replace(/[\u066C\u060C]/g, ',')
     .replace(/\s+/g, '')
     .replace(/,/g, '');

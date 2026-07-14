@@ -39,6 +39,7 @@ const PRODUCT_BASE_COPY_EXCLUDED = new Set<string>([
   'main_unit_price',
   'sub_unit_price',
   'buy_price',
+  'sub_buy_price',
   'sell_price',
   'bundle_id',
   'site_product_link',
@@ -195,7 +196,7 @@ export const loadProductCatalogData = async (
     normalizedProductId
       ? supabase
           .from('products')
-          .select('id, name, system_code, site_code, waste_rate, main_unit_price, sub_unit_price, buy_price, sell_price, bundle_id, image_url, site_product_link, status, related_bom, stock, site_sync_enabled, site_sync_status, variant_values')
+          .select('id, name, system_code, site_code, waste_rate, main_unit_price, sub_unit_price, buy_price, sub_buy_price, sell_price, bundle_id, image_url, site_product_link, status, related_bom, stock, site_sync_enabled, site_sync_status, variant_values')
           .eq('parent_product_id', normalizedProductId)
           .eq('catalog_role', 'variant')
           .order('created_at', { ascending: true })
@@ -222,6 +223,7 @@ export const loadProductCatalogData = async (
     main_unit_price: toNumberOrNull(row.main_unit_price),
     sub_unit_price: toNumberOrNull(row.sub_unit_price),
     buy_price: toNumberOrNull(row.buy_price),
+    sub_buy_price: toNumberOrNull(row.sub_buy_price),
     sell_price: toNumberOrNull(row.sell_price),
     bundle_id: row.bundle_id ? String(row.bundle_id) : null,
     image_url: row.image_url ? String(row.image_url) : null,
@@ -416,6 +418,7 @@ export const persistProductCatalogData = async ({
         main_unit_price: toNumberOrNull(rawVariation?.main_unit_price),
         sub_unit_price: toNumberOrNull(rawVariation?.sub_unit_price),
         buy_price: toNumberOrNull(rawVariation?.buy_price),
+        sub_buy_price: toNumberOrNull(rawVariation?.sub_buy_price),
         sell_price: toNumberOrNull(rawVariation?.sell_price),
         bundle_id: bundleId,
         image_url: rawVariation?.image_url || parentBase.image_url || null,

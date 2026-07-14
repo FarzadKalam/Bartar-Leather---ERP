@@ -21,7 +21,7 @@ type RelationOption = { label: string; value: string };
 type BulkRow = Record<string, unknown> & { key: string };
 
 const PRODUCTS_MODULE = MODULES.products;
-const SHARED_KEYS = new Set(['status', 'main_unit', 'sub_unit', 'buy_price', 'sell_price', 'brand_name']);
+const SHARED_KEYS = new Set(['status', 'main_unit', 'sub_unit', 'buy_price', 'sub_buy_price', 'sell_price', 'brand_name']);
 const EXCLUDED_KEYS = new Set([
   'id',
   'system_code',
@@ -58,6 +58,7 @@ const toNum = (v: unknown) => {
   const s = String(v ?? '')
     .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
     .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/\u066B/g, '.')
     .replace(/[\u066C\u060C]/g, ',')
     .replace(/,/g, '')
     .trim();

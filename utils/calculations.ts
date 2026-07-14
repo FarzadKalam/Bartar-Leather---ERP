@@ -5,6 +5,7 @@ const normalizeNumericInput = (raw: any): string => {
     return String(raw)
         .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06f0))
         .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+        .replace(/\u066B/g, '.')
         .replace(/[\u066C\u060C]/g, ',')
         .replace(/\s+/g, '')
         .replace(/,/g, '');
@@ -29,7 +30,7 @@ export const calculateRow = (row: any, type: RowCalculationType = RowCalculation
         || 0;
     const subQty = toSafeNumber(row.sub_quantity) || toSafeNumber(row.sub_stock) || 0;
     const mainPrice = toSafeNumber(row.main_unit_price) || toSafeNumber(row.unit_price) || toSafeNumber(row.buy_price) || toSafeNumber(row.price) || 0;
-    const subPrice = toSafeNumber(row.sub_unit_price) || 0;
+    const subPrice = toSafeNumber(row.sub_unit_price) || toSafeNumber(row.sub_buy_price) || 0;
 
     let baseTotal = 0;
     if (qty > 0 && mainPrice > 0) {

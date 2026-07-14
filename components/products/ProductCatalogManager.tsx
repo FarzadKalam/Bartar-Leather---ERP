@@ -73,7 +73,8 @@ const VARIATION_COMMON_FIELDS: ModuleField[] = [
   { key: 'waste_rate', type: FieldType.NUMBER, labels: { fa: 'نرخ پرت' } },
   { key: 'main_unit_price', type: FieldType.PRICE, labels: { fa: 'قیمت واحد اصلی' } },
   { key: 'sub_unit_price', type: FieldType.PRICE, labels: { fa: 'قیمت واحد فرعی' } },
-  { key: 'buy_price', type: FieldType.PRICE, labels: { fa: 'قیمت خرید' } },
+  { key: 'buy_price', type: FieldType.PRICE, labels: { fa: 'قیمت خرید واحد اصلی' } },
+  { key: 'sub_buy_price', type: FieldType.PRICE, labels: { fa: 'قیمت خرید واحد فرعی' } },
   { key: 'sell_price', type: FieldType.PRICE, labels: { fa: 'قیمت فروش' } },
   {
     key: 'bundle_id',
@@ -681,6 +682,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
         main_unit_price: product?.main_unit_price ?? null,
         sub_unit_price: product?.sub_unit_price ?? null,
         buy_price: null,
+        sub_buy_price: null,
         sell_price: null,
         bundle_id: null,
         image_url: product?.image_url ?? null,
@@ -713,12 +715,13 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
 
   const calculateVariationUnit = (index: number, fieldKey: string) => {
     const conversion = getUnitQuantityConversion(fieldKey, {
-      availableKeys: ['opening_stock', 'opening_sub_stock'],
+      availableKeys: VARIATION_COMMON_FIELDS.map((field) => String(field.key)),
     });
     const variation = variations[index];
     if (!conversion || !variation) return;
     try {
       const converted = calculateUnitQuantity({
+        ...product,
         ...variation,
         main_unit: product?.main_unit,
         sub_unit: product?.sub_unit,
@@ -768,6 +771,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
             main_unit_price: product?.main_unit_price ?? null,
             sub_unit_price: product?.sub_unit_price ?? null,
             buy_price: null,
+            sub_buy_price: null,
             sell_price: null,
             bundle_id: null,
             image_url: product?.image_url ?? null,
@@ -1145,12 +1149,12 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                       );
                     }
 
-                    if (fieldKey === 'waste_rate' || fieldKey === 'main_unit_price' || fieldKey === 'sub_unit_price' || fieldKey === 'buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock' || fieldKey === 'opening_sub_stock') {
+                    if (fieldKey === 'waste_rate' || fieldKey === 'main_unit_price' || fieldKey === 'sub_unit_price' || fieldKey === 'buy_price' || fieldKey === 'sub_buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock' || fieldKey === 'opening_sub_stock') {
                       const openingUnitsConvertible = !!product?.main_unit && !!product?.sub_unit
                         && (String(product.main_unit) === String(product.sub_unit) || canConvertUnits(product.main_unit, product.sub_unit));
                       const isOpeningSubStock = fieldKey === 'opening_sub_stock';
                       const conversion = getUnitQuantityConversion(fieldKey, {
-                        availableKeys: ['opening_stock', 'opening_sub_stock'],
+                        availableKeys: VARIATION_COMMON_FIELDS.map((item) => String(item.key)),
                       });
                       return (
                         <div key={`${variation.id || variationIndex}_${field.key}`}>

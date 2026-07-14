@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Select, Input, Button, Divider, App, Modal } from 'antd';
+import type { InputRef } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { migrateDynamicOptionUsage } from '../utils/dynamicOptionManagement';
@@ -163,6 +164,10 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   const [editTarget, setEditTarget] = useState<ManagedOption | null>(null);
   const [editOptionValue, setEditOptionValue] = useState('');
   const [dropdownSearchValue, setDropdownSearchValue] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const selectRef = useRef<any>(null);
+  const dropdownSearchInputRef = useRef<InputRef>(null);
+  const newOptionInputRef = useRef<InputRef>(null);
   const isMobileViewport = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
   const isLocalMode = manageMode === 'local';
   const mobileDropdownAlign = isMobileViewport
@@ -239,6 +244,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
   }, [deleteTarget, normalizedOptions, persistedOptionValues]);
 
   const filteredDropdownOptions = useMemo(() => {
+    if (!showSearch) return normalizedOptions;
     const normalizedSearch = String(dropdownSearchValue || '').trim().toLowerCase();
     if (!normalizedSearch) return normalizedOptions;
 
@@ -321,7 +327,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
       }
 
       setNewOptionValue('');
-      onOptionsUpdate?.();
+      await Promise.resolve(onOptionsUpdate?.());
     } catch (error: any) {
       console.error('Error adding option:', error);
       msg.error('خطا در افزودن گزینه: ' + error.message);
@@ -388,7 +394,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
 
       applyCurrentValueRemap(deleteTarget.value, deleteReplacementValue);
       closeDeleteModal();
-      onOptionsUpdate?.();
+      await Promise.resolve(onOptionsUpdate?.());
       msg.success(
         migration.updatedRecords > 0
           ? `گزینه حذف شد و ${migration.updatedRecords} رکورد به مقدار جدید منتقل شد`
@@ -465,7 +471,7 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
 
       applyCurrentValueRemap(editTarget.value, trimmedValue);
       closeEditModal();
-      onOptionsUpdate?.();
+      await Promise.resolve(onOptionsUpdate?.());
       msg.success(
         migration.updatedRecords > 0
           ? `گزینه ویرایش شد و ${migration.updatedRecords} رکورد به‌روزرسانی شد`
@@ -484,16 +490,35 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
     event.stopPropagation();
   };
 
+  const stopDropdownEvent = (event: React.MouseEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
+
+  const stopDropdownPointerEvent = (event: React.PointerEvent<HTMLElement>) => {
+    event.stopPropagation();
+  };
+
+  const focusCustomInput = (inputRef: React.RefObject<InputRef | null>) => {
+    selectRef.current?.blur?.();
+    setIsDropdownOpen(true);
+    window.setTimeout(() => {
+      inputRef.current?.focus?.();
+    }, 0);
+  };
+
   return (
     <>
       <Select
+        ref={selectRef}
         mode={mode}
+        open={disabled ? false : isDropdownOpen}
         value={normalizedSelectValue as any}
         onChange={handleSelectChange as any}
         placeholder={placeholder}
         className={className}
-        showSearch={isMobileViewport ? false : showSearch}
-        onDropdownVisibleChange={(open) => {
+        showSearch={false}
+        onOpenChange={(open) => {
+          setIsDropdownOpen(open);
           if (!open) {
             setDropdownSearchValue('');
           }
@@ -563,31 +588,51 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
             {menu}
             <Divider style={{ margin: '8px 0' }} />
             <div style={{ padding: '0 10px 10px' }}>
-              <div
-                style={{ marginBottom: 8 }}
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-              >
-                <Input
-                  placeholder="جستجو در گزینه‌ها..."
-                  value={dropdownSearchValue}
-                  onChange={(event) => setDropdownSearchValue(event.target.value)}
-                  disabled={loading}
-                  className="w-full"
-                  onKeyDown={(event) => event.stopPropagation()}
-                />
-              </div>
-              <Divider style={{ margin: '8px 0' }} />
+              {showSearch && (
+                <>
+                  <div
+                    style={{ marginBottom: 8 }}
+                    onMouseDown={stopDropdownEvent}
+                    onMouseDownCapture={stopDropdownEvent}
+                    onPointerDown={stopDropdownPointerEvent}
+                    onPointerDownCapture={stopDropdownPointerEvent}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      focusCustomInput(dropdownSearchInputRef);
+                    }}
+                  >
+                    <Input
+                      ref={dropdownSearchInputRef}
+                      placeholder="جستجو در گزینه‌ها..."
+                      value={dropdownSearchValue}
+                      onChange={(event) => setDropdownSearchValue(event.target.value)}
+                      disabled={loading}
+                      className="w-full"
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onFocus={() => focusCustomInput(dropdownSearchInputRef)}
+                      onMouseDown={stopDropdownEvent}
+                      onMouseDownCapture={stopDropdownEvent}
+                      onPointerDown={stopDropdownPointerEvent}
+                      onPointerDownCapture={stopDropdownPointerEvent}
+                      onClick={stopDropdownEvent}
+                    />
+                  </div>
+                  <Divider style={{ margin: '8px 0' }} />
+                </>
+              )}
               <div
                 style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-                onMouseDown={(event) => {
-                  event.preventDefault();
+                onMouseDown={stopDropdownEvent}
+                onMouseDownCapture={stopDropdownEvent}
+                onPointerDown={stopDropdownPointerEvent}
+                onPointerDownCapture={stopDropdownPointerEvent}
+                onClick={(event) => {
                   event.stopPropagation();
+                  focusCustomInput(newOptionInputRef);
                 }}
               >
                 <Input
+                  ref={newOptionInputRef}
                   placeholder="افزودن گزینه جدید..."
                   value={newOptionValue}
                   onChange={(e) => setNewOptionValue(e.target.value)}
@@ -595,12 +640,22 @@ const DynamicSelectField: React.FC<DynamicSelectFieldProps> = ({
                   disabled={loading}
                   className="w-full"
                   onKeyDown={(event) => event.stopPropagation()}
+                  onFocus={() => focusCustomInput(newOptionInputRef)}
+                  onMouseDown={stopDropdownEvent}
+                  onMouseDownCapture={stopDropdownEvent}
+                  onPointerDown={stopDropdownPointerEvent}
+                  onPointerDownCapture={stopDropdownPointerEvent}
+                  onClick={stopDropdownEvent}
                 />
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <Button
                     type="primary"
                     icon={<PlusOutlined />}
                     onClick={handleAddOption}
+                    onMouseDown={stopDropdownEvent}
+                    onMouseDownCapture={stopDropdownEvent}
+                    onPointerDown={stopDropdownPointerEvent}
+                    onPointerDownCapture={stopDropdownPointerEvent}
                     loading={loading}
                   >
                     افزودن

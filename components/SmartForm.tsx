@@ -539,7 +539,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
       try {
         const { data, error } = await supabase
           .from('products')
-          .select('product_type, category, product_category, model_name, sewing_type, warranty_months, after_sales_service_months, brand_name, main_unit, sub_unit, main_unit_price, sub_unit_price, buy_price, sell_price, related_bom, image_url, leather_width, lining_width, accessory_width, lining_material, lining_type, acc_material, accessory_type, fitting_type')
+          .select('product_type, category, product_category, model_name, sewing_type, warranty_months, after_sales_service_months, brand_name, main_unit, sub_unit, main_unit_price, sub_unit_price, buy_price, sub_buy_price, sell_price, related_bom, image_url, leather_width, lining_width, accessory_width, lining_material, lining_type, acc_material, accessory_type, fitting_type')
           .eq('id', parentProductId)
           .single();
         if (error) throw error;
@@ -558,6 +558,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
           main_unit_price: data?.main_unit_price ?? null,
           sub_unit_price: data?.sub_unit_price ?? null,
           buy_price: data?.buy_price ?? null,
+          sub_buy_price: data?.sub_buy_price ?? null,
           sell_price: data?.sell_price ?? null,
           related_bom: data?.related_bom || null,
           image_url: data?.image_url || null,
@@ -1323,6 +1324,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                             moduleId={module.id}
                             recordId={recordId}
                             allValues={{ ...formData, ...currentValues }}
+                            onOptionsUpdate={loadDynamicOptions}
                             onRelationOptionsUpdate={mergeRelationOptions}
                           />
                               </div>
@@ -1430,7 +1432,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     .filter(f => !(module.id === 'products' && (currentValues as any)?.catalog_role === 'parent' && (
                       String(f.key) === 'category'
                         ? (currentValues as any)?.product_type !== 'raw'
-                        : ['waste_rate', 'buy_price', 'sell_price'].includes(String(f.key))
+                        : ['waste_rate', 'buy_price', 'sub_buy_price', 'sell_price'].includes(String(f.key))
                     )))
                     .sort((a, b) => (a.order || 0) - (b.order || 0));
 
@@ -1469,6 +1471,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                    forceEditMode={true} options={options}
                                    moduleId={module.id}
                                    allValues={{ ...formData, ...currentValues }}
+                                   onOptionsUpdate={loadDynamicOptions}
                                    onRelationOptionsUpdate={mergeRelationOptions}
                                  />
                                 </div>

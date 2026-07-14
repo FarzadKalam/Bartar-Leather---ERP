@@ -120,6 +120,7 @@ const collectDynamicOptionReferences = (category: string): DynamicOptionFieldRef
         table: moduleDef.table,
         fieldKey: field.key,
         fieldType: String(field.type),
+        blockId: field.blockId ? String(field.blockId) : undefined,
       });
     });
 

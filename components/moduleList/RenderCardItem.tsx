@@ -291,7 +291,7 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
               <>
                 {item.buy_price && (canViewField ? canViewField('buy_price') !== false : true) && (
                   <div className="flex flex-col gap-0">
-                    <span className="text-gray-500 dark:text-gray-400 text-[8px]">خرید</span>
+                    <span className="text-gray-500 dark:text-gray-400 text-[8px]">خرید واحد اصلی</span>
                     <span className="font-bold text-gray-700 dark:text-gray-300 persian-number text-[11px]">
                       {formatPersianPrice(item.buy_price, true)}
                     </span>
@@ -302,6 +302,14 @@ const RenderCardItem: React.FC<RenderCardItemProps> = ({
                     <span className="text-gray-500 dark:text-gray-400 text-[8px]">فروش</span>
                     <span className="font-bold text-gray-700 dark:text-gray-300 persian-number text-[11px]">
                       {formatPersianPrice(item.sell_price, true)}
+                    </span>
+                  </div>
+                )}
+                {item.sub_buy_price && (canViewField ? canViewField('sub_buy_price') !== false : true) && (
+                  <div className="flex flex-col gap-0">
+                    <span className="text-gray-500 dark:text-gray-400 text-[8px]">خرید واحد فرعی</span>
+                    <span className="font-bold text-gray-700 dark:text-gray-300 persian-number text-[11px]">
+                      {formatPersianPrice(item.sub_buy_price, true)}
                     </span>
                   </div>
                 )}

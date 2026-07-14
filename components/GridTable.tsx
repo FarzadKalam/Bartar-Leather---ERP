@@ -79,7 +79,7 @@ const toEnglishDigits = (value: any) =>
     .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
 
 const normalizeNumberInput = (value: any) =>
-  toEnglishDigits(value).replace(/,/g, '').replace(/\u066C/g, '').trim();
+  toEnglishDigits(value).replace(/\u066B/g, '.').replace(/,/g, '').replace(/\u066C/g, '').trim();
 
 const addCommas = (value: string) => value.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
@@ -234,7 +234,7 @@ const GridTable: React.FC<GridTableProps> = ({
   };
 
   const getPieceUnitConversion = (fieldKey: string) => getUnitQuantityConversion(fieldKey, {
-    availableKeys: ['qty_main', 'qty_sub'],
+    availableKeys: ['qty_main', 'qty_sub', 'unit_price', 'sub_unit_price'],
   });
 
   const buildPieceUnitConversionContext = (row: any, piece: any) => ({
@@ -720,7 +720,7 @@ const GridTable: React.FC<GridTableProps> = ({
         main_unit: productMainUnit ?? piece.main_unit,
         sub_unit: productSubUnit ?? piece.sub_unit,
         unit_price: product?.main_unit_price ?? product?.buy_price ?? piece.unit_price,
-        sub_unit_price: product?.sub_unit_price ?? piece.sub_unit_price,
+        sub_unit_price: product?.sub_unit_price ?? product?.sub_buy_price ?? piece.sub_unit_price,
       }));
       row.pieces = pieces;
 
@@ -1097,6 +1097,7 @@ const GridTable: React.FC<GridTableProps> = ({
       'system_code',
       'stock',
       'buy_price',
+      'sub_buy_price',
       'sell_price',
       'category',
       'product_type',
@@ -1861,9 +1862,12 @@ const GridTable: React.FC<GridTableProps> = ({
                             title: 'قیمت واحد اصلی',
                             dataIndex: 'unit_price',
                             key: 'unit_price',
-                            render: (val: any, _record: any, pieceIndex: number) => (
-                              rowCanEdit
-                                ? (
+                            render: (val: any, _record: any, pieceIndex: number) => {
+                              const conversion = getPieceUnitConversion('unit_price');
+                              return (
+                                <div className="flex items-center gap-1">
+                                  {rowCanEdit
+                                    ? (
                                   <InputNumber
                                     className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
                                     style={{ minWidth: 0, maxWidth: '100%' }}
@@ -1873,17 +1877,36 @@ const GridTable: React.FC<GridTableProps> = ({
                                     parser={(v) => parseNumberInput(v)}
                                     onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                   />
-                                )
-                                : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>
-                            ),
+                                    )
+                                    : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>}
+                                  {conversion ? (
+                                    <Button
+                                      size="small"
+                                      type="text"
+                                      className="px-1 text-[10px] whitespace-nowrap shrink-0"
+                                      icon={<CalculatorOutlined />}
+                                      title={conversion.title}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        applyPieceUnitConversion(rowIndex, pieceIndex, 'unit_price');
+                                      }}
+                                    />
+                                  ) : null}
+                                </div>
+                              );
+                            },
                           },
                           {
                             title: 'قیمت واحد فرعی',
                             dataIndex: 'sub_unit_price',
                             key: 'sub_unit_price',
-                            render: (val: any, _record: any, pieceIndex: number) => (
-                              rowCanEdit
-                                ? (
+                            render: (val: any, _record: any, pieceIndex: number) => {
+                              const conversion = getPieceUnitConversion('sub_unit_price');
+                              return (
+                                <div className="flex items-center gap-1">
+                                  {rowCanEdit
+                                    ? (
                                   <InputNumber
                                     className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
                                     style={{ minWidth: 0, maxWidth: '100%' }}
@@ -1893,9 +1916,25 @@ const GridTable: React.FC<GridTableProps> = ({
                                     parser={(v) => parseNumberInput(v)}
                                     onKeyDown={(e) => handleNumericPieceEditorKeyDown(e, { rowIndex, rowKey, rowCanEdit })}
                                   />
-                                )
-                                : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>
-                            ),
+                                    )
+                                    : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>}
+                                  {conversion ? (
+                                    <Button
+                                      size="small"
+                                      type="text"
+                                      className="px-1 text-[10px] whitespace-nowrap shrink-0"
+                                      icon={<CalculatorOutlined />}
+                                      title={conversion.title}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        applyPieceUnitConversion(rowIndex, pieceIndex, 'sub_unit_price');
+                                      }}
+                                    />
+                                  ) : null}
+                                </div>
+                              );
+                            },
                           },
                           {
                             title: 'هزینه هر عدد',
@@ -2110,7 +2149,8 @@ const ProductsPreview: React.FC<{
           { title: 'کد سیستمی', dataIndex: 'system_code', key: 'system_code', responsive: ['sm'] as ResponsiveBreakpoint[] },
           ...specColumns,
           { title: 'موجودی', dataIndex: 'stock', key: 'stock', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => toPersianNumber(val ?? 0) },
-          { title: 'قیمت خرید', dataIndex: 'buy_price', key: 'buy_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
+          { title: 'قیمت خرید واحد اصلی', dataIndex: 'buy_price', key: 'buy_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
+          { title: 'قیمت خرید واحد فرعی', dataIndex: 'sub_buy_price', key: 'sub_buy_price', responsive: ['lg'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
           { title: 'قیمت فروش', dataIndex: 'sell_price', key: 'sell_price', responsive: ['md'] as ResponsiveBreakpoint[], render: (val: any) => formatPersianPrice(val ?? 0, true) },
         ]}
         scroll={{ x: 'max-content' }}

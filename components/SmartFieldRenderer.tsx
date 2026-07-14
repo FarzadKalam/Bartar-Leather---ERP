@@ -35,6 +35,7 @@ const normalizeDigitsToEnglish = (raw: any): string => {
 const normalizeNumericString = (raw: any): string => {
   if (raw === null || raw === undefined) return '';
   const englishDigits = normalizeDigitsToEnglish(raw)
+    .replace(/\u066B/g, '.')
     .replace(/[\u066C\u060C]/g, ',')
     .replace(/\s+/g, '')
     .replace(/,/g, '');
@@ -124,6 +125,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const [quickCreateLoading, setQuickCreateLoading] = useState(false);
   const [quickCreateRelationOptions, setQuickCreateRelationOptions] = useState<Record<string, any[]>>({});
   const [quickCreateDynamicOptions, setQuickCreateDynamicOptions] = useState<Record<string, any[]>>({});
+  const [dynamicFieldOptionsOverride, setDynamicFieldOptionsOverride] = useState<any[] | null>(null);
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState('');
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
@@ -165,6 +167,9 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   const fieldKey = field?.key || 'unknown';
   const isRequired = field?.validation?.required || false;
   const fieldOptions = field?.options || options || [];
+  const effectiveDynamicFieldOptions = field.dynamicOptionsCategory
+    ? (dynamicFieldOptionsOverride || fieldOptions)
+    : fieldOptions;
   const isReadonly = field?.readonly === true || field?.nature === FieldNature.SYSTEM;
   const relationConfigAny = field.relationConfig as any;
   const quickCreateTargetModuleId = relationConfigAny?.targetModule as string | undefined;
@@ -523,11 +528,44 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
   }, [quickCreateOpen, quickCreateFields]);
 
   useEffect(() => {
+    setDynamicFieldOptionsOverride(null);
+  }, [field.dynamicOptionsCategory, options]);
+
+  useEffect(() => {
     if (fieldType !== FieldType.RELATION) return;
     setRelationSearchTerm('');
     setRelationSearchOptions([]);
     setResolvedRelationOptions([]);
   }, [fieldKey, fieldType]);
+
+  const refreshDynamicOptions = async () => {
+    if (onOptionsUpdate) {
+      await Promise.resolve(onOptionsUpdate());
+      setDynamicFieldOptionsOverride(null);
+      return;
+    }
+
+    const category = String(field.dynamicOptionsCategory || '').trim();
+    if (!category) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('dynamic_options')
+        .select('label, value')
+        .eq('category', category)
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (error) throw error;
+
+      setDynamicFieldOptionsOverride((data || []).map((item: any) => ({
+        label: item.label,
+        value: item.value,
+      })));
+    } catch (error) {
+      console.warn('Failed refreshing dynamic options for field', fieldKey, error);
+    }
+  };
 
   useEffect(() => {
     if (fieldType !== FieldType.RELATION || !relationTargetModule) return;
@@ -850,10 +888,10 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                   <DynamicSelectField
                     value={normalizedSingleSelectValue as any}
                     onChange={onChange}
-                    options={fieldOptions}
+                    options={effectiveDynamicFieldOptions}
                     category={field.dynamicOptionsCategory}
                     placeholder={compactMode ? '' : "انتخاب کنید"}
-                    onOptionsUpdate={onOptionsUpdate}
+                    onOptionsUpdate={refreshDynamicOptions}
                     disabled={!forceEditMode}
                     showSearch={shouldEnableSearch}
                     getPopupContainer={(trigger) => resolvePopupContainer(trigger)}
@@ -884,11 +922,11 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                  <DynamicSelectField
                     value={normalizedMultiSelectValue as any}
                     onChange={onChange}
-                    options={fieldOptions}
+                    options={effectiveDynamicFieldOptions}
                     category={field.dynamicOptionsCategory}
                     placeholder={compactMode ? '' : "انتخاب کنید"}
                     mode="multiple"
-                onOptionsUpdate={onOptionsUpdate}
+                onOptionsUpdate={refreshDynamicOptions}
                 disabled={!forceEditMode}
                 showSearch={shouldEnableSearch}
                 getPopupContainer={(trigger) => resolvePopupContainer(trigger)}

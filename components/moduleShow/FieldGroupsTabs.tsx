@@ -37,7 +37,7 @@ const FieldGroupsTabs: React.FC<FieldGroupsTabsProps> = ({
   onDataUpdate,
   stockMovementQuickAddSignal = 0,
 }) => {
-  const parentProductHiddenFieldKeys = new Set(['category', 'waste_rate', 'buy_price', 'sell_price']);
+  const parentProductHiddenFieldKeys = new Set(['category', 'waste_rate', 'buy_price', 'sub_buy_price', 'sell_price']);
   const inventoryRefreshSignalRef = useRef(0);
   const [inventoryRefreshSignal, setInventoryRefreshSignal] = useState(0);
 

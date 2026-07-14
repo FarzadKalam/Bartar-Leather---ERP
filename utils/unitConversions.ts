@@ -74,6 +74,7 @@ const normalizeNumericInput = (raw: unknown) => {
   return String(raw)
     .replace(/[\u06F0-\u06F9]/g, (digit) => String(digit.charCodeAt(0) - 0x06F0))
     .replace(/[\u0660-\u0669]/g, (digit) => String(digit.charCodeAt(0) - 0x0660))
+    .replace(/\u066B/g, '.')
     .replace(/[\u066C\u060C]/g, ',')
     .replace(/\s+/g, '')
     .replace(/,/g, '');
@@ -164,14 +165,16 @@ export const convertBetweenUnits = (
   return convertArea(value, source, target, context);
 };
 
-export const convertArea = (
+const convertAreaValue = (
   value: number,
   from: UnitValue,
   to: UnitValue,
   context?: UnitConversionContext | null,
+  roundResult = true,
 ) => {
+  const finalize = (result: number) => roundResult ? roundToThree(result) : result;
   if (!Number.isFinite(value)) return 0;
-  if (from === to) return roundToThree(value);
+  if (from === to) return finalize(value);
   if (['عدد', 'بسته'].includes(from) || ['عدد', 'بسته'].includes(to)) return 0;
 
   const isArea = AREA_UNITS.includes(from) && AREA_UNITS.includes(to);
@@ -236,11 +239,11 @@ export const convertArea = (
   };
 
   if (isLength) {
-    return roundToThree(fromMeter(toMeter(value, from), to));
+    return finalize(fromMeter(toMeter(value, from), to));
   }
 
   if (isArea) {
-    return roundToThree(fromFt2(toFt2(value, from), to));
+    return finalize(fromFt2(toFt2(value, from), to));
   }
 
   const widthMm = resolveUnitConversionWidthMm(context);
@@ -249,10 +252,30 @@ export const convertArea = (
   if (AREA_UNITS.includes(from) && LENGTH_UNITS.includes(to)) {
     const areaMm2 = fromFt2(toFt2(value, from), 'میلیمتر مربع');
     const lengthMm = areaMm2 / widthMm;
-    return roundToThree(fromMeter(lengthMm / M_IN_MM, to));
+    return finalize(fromMeter(lengthMm / M_IN_MM, to));
   }
 
   const lengthMm = toMeter(value, from) * M_IN_MM;
   const areaMm2 = lengthMm * widthMm;
-  return roundToThree(fromFt2(areaMm2 / FT2_IN_MM2, to));
+  return finalize(fromFt2(areaMm2 / FT2_IN_MM2, to));
+};
+
+export const convertArea = (
+  value: number,
+  from: UnitValue,
+  to: UnitValue,
+  context?: UnitConversionContext | null,
+) => convertAreaValue(value, from, to, context, true);
+
+export const getUnitConversionFactor = (
+  from?: string | null,
+  to?: string | null,
+  context?: UnitConversionContext | null,
+) => {
+  const source = normalizeUnitValue(from);
+  const target = normalizeUnitValue(to);
+  if (!source || !target) return Number.NaN;
+  if (source === target) return 1;
+  if (!canConvertUnits(source, target)) return Number.NaN;
+  return convertAreaValue(1, source, target, context, false);
 };

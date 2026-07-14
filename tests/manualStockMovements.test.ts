@@ -4,7 +4,7 @@ import {
   buildStockTransferPayloadFromMovement,
   normalizeManualStockMovement,
 } from '../utils/manualStockMovements';
-import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
+import { calculateUnitQuantity, getUnitQuantityConversion, toUnitQuantityNumber } from '../utils/unitQuantityConversion';
 
 const tests: Array<{ name: string; fn: () => void }> = [];
 const runTest = (name: string, fn: () => void) => {
@@ -202,6 +202,52 @@ runTest('unit conversion rejects cross-dimension conversion when material width 
     }, conversion!),
     /عرض اختصاصی ماده اولیه/,
   );
+});
+
+runTest('unit price conversion uses the inverse quantity factor in both directions', () => {
+  const mainToSub = getUnitQuantityConversion('main_unit_price', {
+    availableKeys: ['main_unit_price', 'sub_unit_price'],
+  });
+  const subToMain = getUnitQuantityConversion('sub_unit_price', {
+    availableKeys: ['main_unit_price', 'sub_unit_price'],
+  });
+
+  assert.equal(calculateUnitQuantity({
+    main_unit_price: 100000,
+    sub_unit_price: 0,
+    main_unit: 'متر طول',
+    sub_unit: 'سانتیمتر طول',
+  }, mainToSub!), 1000);
+  assert.equal(calculateUnitQuantity({
+    main_unit_price: 0,
+    sub_unit_price: 1000,
+    main_unit: 'متر طول',
+    sub_unit: 'سانتیمتر طول',
+  }, subToMain!), 100000);
+});
+
+runTest('unit price conversion resolves a dynamic accessory width from the parent context', () => {
+  const conversion = getUnitQuantityConversion('main_unit_price', {
+    availableKeys: ['main_unit_price', 'sub_unit_price'],
+  });
+
+  assert.equal(calculateUnitQuantity({
+    main_unit_price: 1000000,
+    main_unit: 'متر مربع',
+    sub_unit: 'متر طول',
+    category: 'accessory',
+    accessory_width: '1400',
+  }, conversion!), 1400000);
+});
+
+runTest('price parsing preserves values between zero and one with Persian decimal digits', () => {
+  assert.equal(toUnitQuantityNumber('۰٫۲۵'), 0.25);
+});
+
+runTest('unit calculator is not exposed when the paired field is absent', () => {
+  assert.equal(getUnitQuantityConversion('buy_price', {
+    availableKeys: ['buy_price', 'main_unit', 'sub_unit'],
+  }), null);
 });
 
 let failures = 0;

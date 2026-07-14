@@ -205,7 +205,8 @@ const Dashboard: React.FC = () => {
       const fieldLabelMap: Record<string, string> = {
         name: 'نام',
         sell_price: 'قیمت فروش',
-        buy_price: 'قیمت خرید',
+        buy_price: 'قیمت خرید واحد اصلی',
+        sub_buy_price: 'قیمت خرید واحد فرعی',
         price: 'قیمت',
       };
 

@@ -37,6 +37,7 @@ export interface ProductVariationRecord {
   main_unit_price?: number | null;
   sub_unit_price?: number | null;
   buy_price?: number | null;
+  sub_buy_price?: number | null;
   sell_price?: number | null;
   bundle_id?: string | null;
   image_url?: string | null;
@@ -119,6 +120,7 @@ const PRODUCT_ATTRIBUTE_EXCLUDED_SOURCE_KEYS = new Set<string>([
   'main_unit_price',
   'sub_unit_price',
   'buy_price',
+  'sub_buy_price',
   'sell_price',
 ]);
 
