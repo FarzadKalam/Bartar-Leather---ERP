@@ -51,6 +51,7 @@ type ProductionOrderRecord = {
   grid_materials?: any[] | null;
   production_moves?: any[] | null;
   production_shelf_id?: string | null;
+  production_stages_draft?: any[] | null;
 };
 
 type RelationOption = {
@@ -98,6 +99,9 @@ const toNumber = (value: any) => {
 };
 
 const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
+  if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
+    return Math.max(0, toNumber((row as any)?.mainQuantity));
+  }
   const length = Math.max(0, toNumber((row as any)?.length));
   const width = Math.max(0, toNumber((row as any)?.width));
   const quantity = Math.max(0, toNumber((row as any)?.quantity));
@@ -144,8 +148,7 @@ const toGroupTotals = (groups: any[]) => {
     const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
     const qty = rows.length > 0
       ? rows.reduce(
-          (sum: number, row: any) =>
-            sum + (Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity))),
+          (sum: number, row: any) => sum + Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
           0
         )
       : Math.max(0, toNumber(group?.totalHandoverQty ?? group?.totalDeliveredQty));
@@ -492,7 +495,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
   }, []);
 
   const loadSelectableOrders = useCallback(async (currentSelectedIds: string[]) => {
-    const selectFields = 'id,name,system_code,status,quantity,bom_id,grid_materials,production_moves,production_shelf_id';
+    const selectFields = 'id,name,system_code,status,quantity,bom_id,grid_materials,production_moves,production_shelf_id,production_stages_draft';
     const { data: pendingRows, error: pendingError } = await supabase
       .from('production_orders')
       .select(selectFields)
@@ -528,7 +531,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       return;
     }
 
-    const selectFields = 'id,name,system_code,status,quantity,bom_id,grid_materials,production_moves,production_shelf_id';
+    const selectFields = 'id,name,system_code,status,quantity,bom_id,grid_materials,production_moves,production_shelf_id,production_stages_draft';
     const { data: rows, error } = await supabase.from('production_orders').select(selectFields).in('id', ids);
     if (error) throw error;
 
@@ -750,6 +753,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
         quantity: Math.max(0, toNumber(row?.quantity)),
         mainUnit: String(row?.mainUnit || row?.main_unit || ''),
         subUnit: String(row?.subUnit || row?.sub_unit || ''),
+        mainQuantity: Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? row?.delivered_qty)),
+        subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
         deliveredQty: calcDeliveredQty(row),
       }));
       const totalHandoverQty = deliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0);
@@ -1295,7 +1300,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
       quantity: Math.max(0, toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1)),
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
+      mainQuantity: toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? 0),
+      subQuantity: toNumber(rawRow?.subQuantity ?? 0),
       deliveredQty: calcDeliveredQty({
+        mainQuantity: rawRow?.mainQuantity ?? rawRow?.deliveredQty,
         length: rawRow?.length ?? firstPiece?.length ?? 0,
         width: rawRow?.width ?? firstPiece?.width ?? 0,
         quantity: rawRow?.quantity ?? firstPiece?.quantity ?? 1,
@@ -1414,7 +1422,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const targetIndex = rows.findIndex((row) => String(row.key) === String(rowKey));
       if (targetIndex < 0) return prev;
       const row = rows[targetIndex];
-      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['length', 'width', 'quantity'];
+      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['mainQuantity', 'subQuantity'];
       const nextValue = numericFields.includes(field) ? Math.max(0, toNumber(value)) : String(value ?? '');
       const updatedRow = { ...row, [field]: nextValue };
       rows[targetIndex] = { ...updatedRow, deliveredQty: calcDeliveredQty(updatedRow) };
@@ -2093,6 +2101,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
             bundle_id: move?.bundle_id ?? null,
             sender_id: currentUserId || null,
             receiver_id: currentUserId || null,
+            delivered_at: new Date().toISOString(),
           });
         });
       });
@@ -2435,6 +2444,19 @@ const ProductionGroupOrderWizard: React.FC = () => {
                   moduleId="production_orders"
                   compact
                   readOnly={!canEditGroup || groupStatus === 'completed'}
+                  draftStages={Array.isArray((order as any).production_stages_draft) ? (order as any).production_stages_draft : []}
+                  onDraftStagesChange={(stages) => {
+                    setSelectedOrders((previous) => previous.map((item) =>
+                      String(item.id) === String(order.id) ? { ...item, production_stages_draft: stages } : item
+                    ));
+                    void supabase
+                      .from('production_orders')
+                      .update({ production_stages_draft: stages })
+                      .eq('id', order.id)
+                      .then(({ error }) => {
+                        if (error) msg.error(`ذخیره پیش‌نویس مراحل ناموفق بود: ${error.message}`);
+                      });
+                  }}
                   onQuantityChange={(qty) => {
                     const parsed = toNumber(qty);
                     setOrderQuantityMap((prev) => ({ ...prev, [order.id]: parsed }));

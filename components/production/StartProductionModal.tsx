@@ -1,9 +1,9 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, InputNumber, Modal, Select, Table } from 'antd';
+import { Button, InputNumber, Modal, Select, Table } from 'antd';
 import { CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
-import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
+import { convertBetweenUnits, HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 
 export type StartMaterialPiece = {
   key: string;
@@ -24,12 +24,14 @@ export type StartMaterialDeliveryRow = {
   pieceKey?: string;
   sourceBundleId?: string | null;
   sourceShelfId?: string | null;
-  name: string;
-  length: number;
-  width: number;
-  quantity: number;
+  name?: string;
+  length?: number;
+  width?: number;
+  quantity?: number;
   mainUnit: string;
   subUnit: string;
+  mainQuantity: number;
+  subQuantity: number;
   deliveredQty: number;
 };
 
@@ -146,6 +148,9 @@ const formatQty = (value: number) => {
 };
 
 const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
+  if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
+    return Math.max(0, parseNumberInput((row as any).mainQuantity));
+  }
   const length = parseNumberInput((row as any)?.length);
   const width = parseNumberInput((row as any)?.width);
   const quantity = parseNumberInput((row as any)?.quantity);
@@ -759,19 +764,6 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                           }}
                           columns={[
                             {
-                              title: 'نام قطعه',
-                              dataIndex: 'name',
-                              key: 'name',
-                              width: isMobile ? 280 : 180,
-                              render: (value: string, record: StartMaterialDeliveryRow) => (
-                                <Input
-                                  value={value}
-                                  onChange={(e) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', e.target.value)}
-                                  onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
-                                />
-                              ),
-                            },
-                            {
                               title: 'بسته برداشت',
                               dataIndex: 'sourceBundleId',
                               key: 'sourceBundleId',
@@ -800,57 +792,6 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               },
                             },
                             {
-                              title: 'طول',
-                              dataIndex: 'length',
-                              key: 'length',
-                              width: isMobile ? 180 : 130,
-                              render: (value: number, record: StartMaterialDeliveryRow) => (
-                                <InputNumber
-                                  value={value}
-                                  onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextValue)}
-                                  className="w-full persian-number"
-                                  stringMode
-                                  formatter={(v) => formatGroupedInput(v)}
-                                  parser={(v) => parseNumberInput(v)}
-                                  onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
-                                />
-                              ),
-                            },
-                            {
-                              title: 'عرض',
-                              dataIndex: 'width',
-                              key: 'width',
-                              width: isMobile ? 180 : 130,
-                              render: (value: number, record: StartMaterialDeliveryRow) => (
-                                <InputNumber
-                                  value={value}
-                                  onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextValue)}
-                                  className="w-full persian-number"
-                                  stringMode
-                                  formatter={(v) => formatGroupedInput(v)}
-                                  parser={(v) => parseNumberInput(v)}
-                                  onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
-                                />
-                              ),
-                            },
-                            {
-                              title: 'تعداد',
-                              dataIndex: 'quantity',
-                              key: 'quantity',
-                              width: isMobile ? 180 : 130,
-                              render: (value: number, record: StartMaterialDeliveryRow) => (
-                                <InputNumber
-                                  value={value}
-                                  onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextValue)}
-                                  className="w-full persian-number"
-                                  stringMode
-                                  formatter={(v) => formatGroupedInput(v)}
-                                  parser={(v) => parseNumberInput(v)}
-                                  onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
-                                />
-                              ),
-                            },
-                            {
                               title: 'واحد اصلی',
                               dataIndex: 'mainUnit',
                               key: 'mainUnit',
@@ -868,6 +809,15 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   />
                                 )
                               ),
+                            },
+                            {
+                              title: 'مقدار واحد اصلی',
+                              dataIndex: 'mainQuantity',
+                              key: 'mainQuantity',
+                              width: isMobile ? 200 : 160,
+                              render: (value: number, record: StartMaterialDeliveryRow) => <InputNumber value={value}
+                                onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
+                                className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />,
                             },
                             {
                               title: 'واحد فرعی',
@@ -889,14 +839,18 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               ),
                             },
                             {
-                              title: 'مقدار تحویل شده',
-                              dataIndex: 'deliveredQty',
-                              key: 'deliveredQty',
-                              width: isMobile ? 230 : 170,
-                              render: (_value: number, record: StartMaterialDeliveryRow) => (
-                                <span className="font-semibold text-[#17372a]">
-                                  {formatQty(calcDeliveredQty(record))}
-                                </span>
+                              title: 'مقدار واحد فرعی',
+                              dataIndex: 'subQuantity',
+                              key: 'subQuantity',
+                              width: isMobile ? 200 : 160,
+                              render: (value: number, record: StartMaterialDeliveryRow) => (
+                                <div className="flex gap-1">
+                                  <InputNumber value={value} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />
+                                  <Button type="text" size="small" title="محاسبه از مقدار واحد اصلی" icon={<SwapOutlined />} onClick={() => {
+                                    const nextValue = convertBetweenUnits(parseNumberInput(record.mainQuantity), record.mainUnit, record.subUnit, { widthMm: group.pieces?.[0]?.width });
+                                    if (Number.isFinite(nextValue)) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue);
+                                  }} />
+                                </div>
                               ),
                             },
                             {

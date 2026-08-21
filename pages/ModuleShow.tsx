@@ -213,6 +213,9 @@ const ModuleShow: React.FC = () => {
   };
 
   const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
+    if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
+      return Math.max(0, toNumber((row as any)?.mainQuantity));
+    }
     const length = Math.max(0, toNumber((row as any)?.length));
     const width = Math.max(0, toNumber((row as any)?.width));
     const quantity = Math.max(0, toNumber((row as any)?.quantity));
@@ -238,7 +241,10 @@ const ModuleShow: React.FC = () => {
       quantity: toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1),
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
+      mainQuantity: toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? 0),
+      subQuantity: toNumber(rawRow?.subQuantity ?? 0),
       deliveredQty: calcDeliveredQty({
+        mainQuantity: rawRow?.mainQuantity ?? rawRow?.deliveredQty,
         length: rawRow?.length ?? firstPiece?.length ?? 0,
         width: rawRow?.width ?? firstPiece?.width ?? 0,
         quantity: rawRow?.quantity ?? firstPiece?.quantity ?? 1,
@@ -481,7 +487,7 @@ const ModuleShow: React.FC = () => {
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['length', 'width', 'quantity'];
+      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['mainQuantity', 'subQuantity'];
       const nextValue = numericFields.includes(field)
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
@@ -650,7 +656,7 @@ const ModuleShow: React.FC = () => {
             if (!productId) return;
             if (deliveryRows.length > 0) {
               deliveryRows.forEach((row: any) => {
-                const explicitQty = parseFloat(row?.deliveredQty ?? row?.delivered_qty);
+                const explicitQty = parseFloat(row?.mainQuantity ?? row?.deliveredQty ?? row?.delivered_qty);
                 const calculatedQty = (parseFloat(row?.length) || 0) * (parseFloat(row?.width) || 0) * (parseFloat(row?.quantity) || 0);
                 const quantity = Number.isFinite(explicitQty) && explicitQty > 0 ? explicitQty : calculatedQty;
                 if (!quantity || quantity <= 0) return;

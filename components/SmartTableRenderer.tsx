@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Table, Tag, Avatar, Input, Button, Space, Popover } from 'antd';
+import { Table, Tag, Avatar, Input, Button, Space, Popover, Select } from 'antd';
 import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { ModuleDefinition, FieldType } from '../types';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
@@ -152,7 +152,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
   });
 
   // ✅ فیلتر تگ‌ها (برای ستون‌های تگ) - مشابه MULTI_SELECT
-  const getTagFilterProps = (dataIndex: string, _title: string) => {
+  const getTagFilterProps = (dataIndex: string, _title: string): ColumnType<any> => {
     const allTags = new Map<string, string>();
     data.forEach((record: any) => {
       const tags = record[dataIndex];
@@ -166,8 +166,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
 
     return {
       filters: Array.from(allTags.values()).map(tag => ({ text: tag, value: tag })),
-      multiple: true,
-      onFilter: (value: string, record: any) => {
+      onFilter: (value: any, record: any) => {
         const tags = record[dataIndex];
         if (!Array.isArray(tags)) return false;
         return tags.some((tag: any) => {
@@ -177,6 +176,30 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
       }
     };
   };
+
+  const getOptionFilterProps = (options: Array<{ text: string; value: any }>, onFilter: (value: any, record: any) => boolean): ColumnType<any> => ({
+    filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters, close }) => (
+      <div className="p-2 min-w-[220px]" onKeyDown={(event) => event.stopPropagation()}>
+        <Select
+          mode="multiple"
+          showSearch
+          optionFilterProp="label"
+          placeholder="جستجو و انتخاب گزینه"
+          className="w-full mb-2"
+          value={selectedKeys}
+          options={options.map((option) => ({ label: option.text, value: option.value }))}
+          onChange={(value) => setSelectedKeys(value)}
+        />
+        <Space>
+          <Button size="small" type="primary" onClick={() => confirm()}>اعمال</Button>
+          <Button size="small" onClick={() => { clearFilters?.(); confirm(); }}>حذف</Button>
+          <Button size="small" type="link" onClick={() => close()}>بستن</Button>
+        </Space>
+      </div>
+    ),
+    filterIcon: (filtered: boolean) => <SearchOutlined style={{ color: filtered ? '#356d52' : undefined }} />,
+    onFilter,
+  });
 
   // --- ساخت ستون‌ها ---
   let tableFields = moduleConfig.fields
@@ -262,6 +285,23 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
       }
     };
 
+    const optionFilters = !isTagField && (field.type === FieldType.STATUS || field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT || field.type === FieldType.RELATION || field.type === FieldType.USER)
+      ? (() => {
+          let options: any[] = [];
+          if (field.options) options = field.options.map((option) => ({ text: option.label, value: option.value }));
+          else if ((field as any).dynamicOptionsCategory) options = (dynamicOptions[(field as any).dynamicOptionsCategory] || []).map((option) => ({ text: option.label, value: option.value }));
+          else if (field.type === FieldType.RELATION || field.type === FieldType.USER) {
+            const relationItems = relationOptions[field.key] || relationOptions[(field as any).relationConfig?.targetModule] || relationOptions.profiles || [];
+            options = relationItems.map((option: any) => ({ text: option.label, value: option.value }));
+          }
+          return options;
+        })()
+      : [];
+    const optionOnFilter = (value: any, record: any) => {
+      const recordValue = record[field.key];
+      return field.type === FieldType.MULTI_SELECT && Array.isArray(recordValue) ? recordValue.includes(value) : recordValue === value;
+    };
+
     return {
       title: <span className="text-[11px] text-gray-500">{field.labels.fa}</span>,
       dataIndex: field.key,
@@ -278,31 +318,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
       ...(isSearchable ? getColumnSearchProps(field.key, field.labels.fa) : {}),
       ...(isTagField ? getTagFilterProps(field.key, field.labels.fa) : {}),
 
-      filters: !isTagField && (field.type === FieldType.STATUS || field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT || field.type === FieldType.RELATION || field.type === FieldType.USER)
-          ? (() => {
-              let options: any[] = [];
-              if (field.options) {
-                options = field.options.map(o => ({ text: o.label, value: o.value }));
-              } else if ((field as any).dynamicOptionsCategory) {
-                const category = (field as any).dynamicOptionsCategory;
-                const dynopts = dynamicOptions[category] || [];
-                options = dynopts.map(o => ({ text: o.label, value: o.value }));
-              } else if (field.type === FieldType.RELATION || field.type === FieldType.USER) {
-                const rellopts = relationOptions[field.key] || relationOptions[(field as any).relationConfig?.targetModule] || relationOptions['profiles'] || [];
-                options = rellopts.map(o => ({ text: o.label, value: o.value }));
-              }
-              return options.length > 0 ? options : undefined;
-            })()
-          : undefined,
-      onFilter: !isTagField && (field.type === FieldType.STATUS || field.type === FieldType.SELECT || field.type === FieldType.MULTI_SELECT || field.type === FieldType.RELATION || field.type === FieldType.USER)
-          ? (value, record) => {
-              const recordValue = record[field.key];
-              if (field.type === FieldType.MULTI_SELECT && Array.isArray(recordValue)) {
-                return recordValue.includes(value);
-              }
-              return recordValue === value;
-            }
-          : undefined,
+      ...(optionFilters.length > 0 ? getOptionFilterProps(optionFilters, optionOnFilter) : {}),
 
       render: (value: any, record: any) => {
         // Shared fallback for empty/invalid dates

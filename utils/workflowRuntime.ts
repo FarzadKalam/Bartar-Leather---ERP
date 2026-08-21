@@ -215,9 +215,15 @@ const evaluateWorkflow = (
   return allPass && anyPass;
 };
 
-const renderTemplate = (template: string, record: Record<string, any>) => {
+const renderTemplate = (template: string, record: Record<string, any>, moduleId?: string) => {
   return String(template || '').replace(/\{\{\s*([^}]+)\s*\}\}/g, (_, key: string) => {
     const fieldKey = String(key || '').trim();
+    if (fieldKey === 'record_link') {
+      const recordId = String(record?.id || '').trim();
+      if (!recordId || !moduleId) return '';
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      return origin ? `${origin}/${moduleId}/${recordId}` : `/${moduleId}/${recordId}`;
+    }
     const val = record?.[fieldKey];
     return val === null || val === undefined ? '' : String(val);
   });
@@ -343,7 +349,7 @@ const executeAction = async (
 ) => {
   const config = action?.config || {};
   if (action.type === 'send_sms') {
-    const messageText = renderTemplate(String(config.message || ''), currentRecord).trim();
+    const messageText = renderTemplate(String(config.message || ''), currentRecord, moduleId).trim();
     if (!messageText) return;
     const recipientsFromFields = asArray(config.recipient_fields)
       .map((fieldKey) => normalizePhone(currentRecord?.[String(fieldKey)]))
@@ -366,7 +372,7 @@ const executeAction = async (
   }
 
   if (action.type === 'send_note') {
-    const noteText = renderTemplate(String(config.note_text || ''), currentRecord).trim();
+    const noteText = renderTemplate(String(config.note_text || ''), currentRecord, moduleId).trim();
     if (!noteText) return;
     const recordId = currentRecord?.id;
     if (!recordId) return;

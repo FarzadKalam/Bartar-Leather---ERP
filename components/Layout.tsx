@@ -20,6 +20,7 @@ import {
   GoldOutlined,
   ExclamationCircleOutlined,
   PictureOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
@@ -168,6 +169,16 @@ const Layout: React.FC<LayoutProps> = ({ children, isDarkMode }) => {
       { key: '/customers', icon: <ShopOutlined />, label: 'مشتریان' },
       { key: '/hr', icon: <TeamOutlined />, label: 'منابع انسانی' },
       { key: '/gallery', icon: <PictureOutlined />, label: 'گالری فایل‌ها' },
+      {
+        key: 'reports', icon: <BarChartOutlined />, label: 'گزارش‌ها',
+        children: [
+          { key: '/reports/inventory', label: 'موجودی لحظه‌ای' },
+          { key: '/reports/movements', label: 'گردش موجودی' },
+          { key: '/reports/trade', label: 'خرید و فروش' },
+          { key: '/reports/production_flow', label: 'مصرف و خروجی تولید' },
+          { key: '/reports/performance', label: 'عملکرد تولید' },
+        ],
+      },
       { key: '/settings', icon: <SettingOutlined />, label: 'تنظیمات' },
     ];
 

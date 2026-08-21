@@ -144,6 +144,15 @@ export const stockTransfersConfig: ModuleDefinition = {
       relationConfig: { targetModule: 'profiles', targetField: 'full_name' },
     },
     {
+      key: 'delivered_at',
+      labels: { fa: 'تاریخ تحویل', en: 'Delivered At' },
+      type: FieldType.DATETIME,
+      location: FieldLocation.HEADER,
+      order: 10.5,
+      nature: FieldNature.STANDARD,
+      isTableColumn: true,
+    },
+    {
       key: 'created_at',
       labels: { fa: 'زمان ثبت', en: 'Created At' },
       type: FieldType.DATETIME,

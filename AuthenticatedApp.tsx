@@ -22,6 +22,7 @@ const ProductionGroupOrdersList = lazy(() => import("./pages/ProductionGroupOrde
 const ProductionGroupOrderWizard = lazy(() => import("./pages/ProductionGroupOrderWizard"));
 const HRPage = lazy(() => import("./pages/HRPage"));
 const FilesGalleryPage = lazy(() => import("./pages/FilesGalleryPage"));
+const ReportsPage = lazy(() => import("./pages/ReportsPage"));
 const ModuleListRefine = lazy(() =>
   import("./pages/ModuleList_Refine").then((module) => ({ default: module.ModuleListRefine }))
 );
@@ -79,6 +80,7 @@ function AuthenticatedApp() {
     if (pathname.startsWith("/profile")) return "پروفایل";
     if (pathname.startsWith("/hr")) return "منابع انسانی";
     if (pathname.startsWith("/gallery")) return "گالری فایل‌ها";
+    if (pathname.startsWith("/reports")) return "گزارش‌ها";
     return null;
   };
 
@@ -209,6 +211,8 @@ function AuthenticatedApp() {
             <Route path="/hr" element={<HRPage />} />
             <Route path="/hr/:employeeId" element={<HRPage />} />
             <Route path="/gallery" element={<FilesGalleryPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/reports/:reportId" element={<ReportsPage />} />
 
             <Route path="/:moduleId">
               <Route index element={<ModuleListRefine />} />

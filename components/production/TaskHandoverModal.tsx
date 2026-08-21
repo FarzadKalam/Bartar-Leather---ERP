@@ -8,7 +8,7 @@ import gregorian from 'react-date-object/calendars/gregorian';
 import gregorianEn from 'react-date-object/locales/gregorian_en';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import QrScanPopover from '../QrScanPopover';
-import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
+import { convertBetweenUnits, HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 
 export type StageHandoverPiece = {
   key: string;
@@ -27,12 +27,14 @@ export type StageHandoverPiece = {
 export type StageHandoverDeliveryRow = {
   key: string;
   pieceKey?: string;
-  name: string;
-  length: number;
-  width: number;
-  quantity: number;
+  name?: string;
+  length?: number;
+  width?: number;
+  quantity?: number;
   mainUnit: string;
   subUnit: string;
+  mainQuantity: number;
+  subQuantity: number;
   deliveredQty: number;
   sourceBundleId?: string | null;
   sourceShelfId?: string | null;
@@ -160,6 +162,9 @@ const toQty = (value: number) => {
 };
 
 const calcDeliveredQty = (row?: Partial<StageHandoverDeliveryRow> | null) => {
+  if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
+    return Math.max(0, parseNumberInput((row as any).mainQuantity));
+  }
   const length = parseNumberInput((row as any)?.length);
   const width = parseNumberInput((row as any)?.width);
   const quantity = parseNumberInput((row as any)?.quantity);
@@ -663,72 +668,11 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         }}
                         columns={[
                           {
-                            title: 'نام قطعه',
-                            dataIndex: 'name',
-                            key: 'name',
-                            width: isMobile ? 280 : 180,
-                            render: (value: string, record: StageHandoverDeliveryRow) => (
-                              <Input
-                                value={value}
-                                onChange={(e) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', e.target.value)}
-                                onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
-                                disabled={locked}
-                              />
-                            ),
-                          },
-                          {
-                            title: 'طول',
-                            dataIndex: 'length',
-                            key: 'length',
-                            width: isMobile ? 180 : 130,
-                            render: (value: number, record: StageHandoverDeliveryRow) => (
-                              <InputNumber
-                                value={value}
-                                onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextValue)}
-                                className="w-full persian-number"
-                                stringMode
-                                formatter={(v) => formatGroupedInput(v)}
-                                parser={(v) => parseNumberInput(v)}
-                                onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
-                                disabled={locked}
-                              />
-                            ),
-                          },
-                          {
-                            title: 'عرض',
-                            dataIndex: 'width',
-                            key: 'width',
-                            width: isMobile ? 180 : 130,
-                            render: (value: number, record: StageHandoverDeliveryRow) => (
-                              <InputNumber
-                                value={value}
-                                onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextValue)}
-                                className="w-full persian-number"
-                                stringMode
-                                formatter={(v) => formatGroupedInput(v)}
-                                parser={(v) => parseNumberInput(v)}
-                                onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
-                                disabled={locked}
-                              />
-                            ),
-                          },
-                          {
-                            title: 'تعداد',
-                            dataIndex: 'quantity',
-                            key: 'quantity',
-                            width: isMobile ? 180 : 130,
-                            render: (value: number, record: StageHandoverDeliveryRow) => (
-                              <InputNumber
-                                value={value}
-                                onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextValue)}
-                                className="w-full persian-number"
-                                stringMode
-                                formatter={(v) => formatGroupedInput(v)}
-                                parser={(v) => parseNumberInput(v)}
-                                onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
-                                disabled={locked}
-                              />
-                            ),
+                            title: 'بسته برداشت',
+                            dataIndex: 'sourceBundleId',
+                            key: 'sourceBundleId',
+                            width: isMobile ? 190 : 150,
+                            render: (value: string | null | undefined) => <span className="text-xs text-gray-700">{value || '-'}</span>,
                           },
                           {
                             title: 'واحد اصلی',
@@ -745,6 +689,18 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
+                            ),
+                          },
+                          {
+                            title: 'مقدار واحد اصلی',
+                            dataIndex: 'mainQuantity',
+                            key: 'mainQuantity',
+                            width: isMobile ? 200 : 160,
+                            render: (value: number, record: StageHandoverDeliveryRow) => (
+                              <InputNumber value={value} className="w-full persian-number" stringMode
+                                formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)}
+                                onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
+                                onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} disabled={locked} />
                             ),
                           },
                           {
@@ -765,14 +721,18 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             ),
                           },
                           {
-                            title: `مقدار تحویل شده به ${taskName}`,
-                            dataIndex: 'deliveredQty',
-                            key: 'deliveredQty',
-                            width: isMobile ? 230 : 170,
-                            render: (_value: number, record: StageHandoverDeliveryRow) => (
-                              <span className="font-semibold text-[#17372a]">
-                                {toQty(calcDeliveredQty(record))}
-                              </span>
+                            title: 'مقدار واحد فرعی',
+                            dataIndex: 'subQuantity',
+                            key: 'subQuantity',
+                            width: isMobile ? 200 : 160,
+                            render: (value: number, record: StageHandoverDeliveryRow) => (
+                              <div className="flex gap-1">
+                                <InputNumber value={value} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} disabled={locked} />
+                                <Button type="text" size="small" title="محاسبه از مقدار واحد اصلی" icon={<SwapOutlined />} disabled={locked} onClick={() => {
+                                  const nextValue = convertBetweenUnits(parseNumberInput(record.mainQuantity), record.mainUnit, record.subUnit, { widthMm: group.pieces?.[0]?.width });
+                                  if (Number.isFinite(nextValue)) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue);
+                                }} />
+                              </div>
                             ),
                           },
                           {

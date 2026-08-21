@@ -235,6 +235,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
   }, [currentStageInventory, currentStageName, forms, summaries, taskName]);
 
   const [tabKey, setTabKey] = useState<string>(summaryTabs[0]?.key || 'order');
+  const [reportsOpen, setReportsOpen] = useState(false);
   useEffect(() => {
     if (!summaryTabs.some((tab) => tab.key === tabKey)) {
       setTabKey(summaryTabs[0]?.key || 'order');
@@ -564,6 +565,15 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
         ) : null}
 
         <div className="rounded-xl border border-gray-200 overflow-hidden">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between px-4 py-3 text-right font-semibold text-[#17372a] bg-[#f7f1ea] hover:bg-[#f1e6da]"
+            onClick={() => setReportsOpen((value) => !value)}
+          >
+            <span>گزارشات موجودی این مرحله</span>
+            <DownOutlined className={`transition-transform ${reportsOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {reportsOpen ? <>
           <Tabs
             size="small"
             activeKey={tabKey}
@@ -611,6 +621,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
               </span>
             ))}
           </div>
+          </> : null}
         </div>
 
         <div className="rounded-xl border border-gray-200">

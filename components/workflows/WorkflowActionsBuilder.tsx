@@ -113,12 +113,15 @@ const WorkflowActionsBuilder: React.FC<WorkflowActionsBuilderProps> = ({
 
   const variableFieldOptions = useMemo(
     () =>
-      currentModuleFields
-        .filter((f) => !!f?.key && f?.nature !== 'system')
-        .map((field) => ({
+      [
+        ...currentModuleFields
+          .filter((f) => !!f?.key && f?.nature !== 'system')
+          .map((field) => ({
           label: getFieldLabel(field),
           value: field.key,
-        })),
+          })),
+        { label: 'لینک رکورد جاری', value: 'record_link' },
+      ],
     [currentModuleFields]
   );
 

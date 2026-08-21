@@ -226,7 +226,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       quantity,
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
-      deliveredQty: length * width * quantity,
+      mainQuantity: Math.max(0, toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? (length * width * quantity))),
+      subQuantity: Math.max(0, toNumber(rawRow?.subQuantity ?? 0)),
+      deliveredQty: Math.max(0, toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? (length * width * quantity))),
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || rawRow?.bundle_id || firstDeliveryRow?.sourceBundleId || (firstDeliveryRow as any)?.source_bundle_id || (firstDeliveryRow as any)?.bundle_id || group?.sourceBundleId || (group as any)?.source_bundle_id || (group as any)?.bundle_id || null,
       sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || firstDeliveryRow?.sourceShelfId || (firstDeliveryRow as any)?.source_shelf_id || group?.sourceShelfId || (group as any)?.source_shelf_id || null,
     };
@@ -234,7 +236,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const sumDeliveredRows = useCallback((rows: StageHandoverDeliveryRow[]) => {
     return rows.reduce(
-      (sum, row) => sum + (Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity))),
+      (sum, row) => sum + Math.max(0, toNumber((row as any)?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
       0
     );
   }, [toNumber]);
@@ -452,8 +454,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const deliveryRows = Array.isArray(anyGroup?.deliveryRows) ? anyGroup.deliveryRows : [];
       const qty = deliveryRows.length > 0
         ? deliveryRows.reduce(
-            (sum: number, row: any) =>
-              sum + (Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity))),
+            (sum: number, row: any) => sum + Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
             0
           )
         : (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).reduce(
@@ -479,9 +480,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       if (!productId) return;
       const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
       const sourceRows = rows.length > 0 ? rows : [{
-        length: 1,
-        width: 1,
-        quantity: (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
+        mainQuantity: (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
           (sum: number, piece: any) => sum + toNumber(piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0),
           0
         ),
@@ -489,7 +488,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         mainUnit: pickedPiece?.mainUnit || pickedPiece?.main_unit || null,
       }];
       sourceRows.forEach((row: any) => {
-        const quantity = Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity));
+        const quantity = Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity))));
         if (!quantity) return;
         const bundleId = row?.sourceBundleId || row?.source_bundle_id || row?.bundle_id || group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id || null;
         const normalizedBundleId = bundleId ? String(bundleId) : null;
@@ -1298,14 +1297,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'quantity'];
+      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['mainQuantity', 'subQuantity'];
       const nextValue = numericFields.includes(field)
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
       const updatedRow = { ...currentRow, [field]: nextValue };
       deliveryRows[rowIndex] = {
         ...updatedRow,
-        deliveredQty: Math.max(0, toNumber(updatedRow.length)) * Math.max(0, toNumber(updatedRow.width)) * Math.max(0, toNumber(updatedRow.quantity)),
+        deliveredQty: Math.max(0, toNumber((updatedRow as any).mainQuantity ?? updatedRow.deliveredQty)),
       };
       next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
@@ -1485,7 +1484,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const hasRowWithoutBundle = effectiveGroups.some((group: any) => {
         const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
         return rows.some((row: any) => (
-          Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity)) > 0
+          Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))) > 0
           && !(row?.sourceBundleId || row?.source_bundle_id || row?.bundle_id || group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id)
         ));
       });
@@ -1516,8 +1515,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const deliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
         const handoverQty = deliveryRows.length > 0
           ? deliveryRows.reduce(
-              (sum: number, row: any) =>
-                sum + (Math.max(0, toNumber(row?.length)) * Math.max(0, toNumber(row?.width)) * Math.max(0, toNumber(row?.quantity))),
+              (sum: number, row: any) => sum + Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
               0
             )
           : (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
@@ -2633,7 +2631,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           quantity: Math.max(0, toNumber(row?.quantity)),
           mainUnit: String(row?.mainUnit || row?.main_unit || ''),
           subUnit: String(row?.subUnit || row?.sub_unit || ''),
-          deliveredQty: Math.max(0, toNumber(row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
+          mainQuantity: Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
+          subQuantity: Math.max(0, toNumber(row?.subQuantity ?? 0)),
+          deliveredQty: Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
         }));
         if (!normalizedRows.length) return;
         map[groupKey] = [...(map[groupKey] || []), ...normalizedRows];

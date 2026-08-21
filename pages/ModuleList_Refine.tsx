@@ -34,6 +34,7 @@ import {
   mapBundleInventoryRowsToPrintItems,
 } from "../utils/productBundlePrint";
 import { formatStockPrintValue } from "../utils/stockPrintFormatter";
+import { toPersianNumber } from "../utils/persianNumberFormatter";
 import { DEFAULT_LIST_SORTERS } from "../utils/tableSorting";
 import { sanitizeViewFilters, toCrudViewFilters } from "../utils/viewFilters";
 import {
@@ -1305,6 +1306,19 @@ export const ModuleListRefine: React.FC<{ moduleIdOverride?: string }> = ({ modu
               : undefined
           }
         />
+        {viewMode === ViewMode.LIST && enrichedData.length > 0 ? (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <Button
+              size="small"
+              onClick={() => setSelectedRowKeys(enrichedData.map((row: any) => row.id).filter(Boolean))}
+            >
+              انتخاب همه نتایج ({toPersianNumber(enrichedData.length)})
+            </Button>
+            {selectedRowKeys.length > 0 ? (
+              <Button size="small" type="text" onClick={() => setSelectedRowKeys([])}>لغو انتخاب</Button>
+            ) : null}
+          </div>
+        ) : null}
         <PrintSection
           title="پرینت گروهی"
           isPrintModalOpen={isPrintModalOpen}
