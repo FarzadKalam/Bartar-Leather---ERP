@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, Button, Divider, Input, InputNumber, Modal, Select, Space, Switch, Tag } from 'antd';
 import { CalculatorOutlined, DeleteOutlined, LinkOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ModuleField } from '../../types';
@@ -251,6 +251,9 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   const [customAttributeOpen, setCustomAttributeOpen] = useState(false);
   const [customAttributeDraft, setCustomAttributeDraft] = useState<CustomAttributeDraft>(DEFAULT_ATTRIBUTE_DRAFT);
   const [openingShelfOptions, setOpeningShelfOptions] = useState<Array<{ label: string; value: string }>>([]);
+  // SmartForm هنگام هر رندر تابع onChange تازه‌ای می‌سازد. نگه‌داشتن آن در ref
+  // مانع از چرخهٔ «رندر والد → onChange → setFormData → رندر والد» می‌شود.
+  const onChangeRef = useRef(onChange);
   const debugVariationBinding = typeof window !== 'undefined'
     && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
@@ -290,12 +293,16 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
   }, [mode, productId, product?.catalog_role, product?.parent_product_id]);
 
   useEffect(() => {
-    onChange?.({
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    onChangeRef.current?.({
       attributes,
       globalAttributes: pendingGlobalAttributes,
       variations,
     });
-  }, [attributes, onChange, pendingGlobalAttributes, variations]);
+  }, [attributes, pendingGlobalAttributes, variations]);
 
   useEffect(() => {
     let cancelled = false;

@@ -18,6 +18,7 @@ const SEEN_NOTES_STORAGE_KEY = 'notif_seen_notes_v1';
 const SEEN_TASKS_STORAGE_KEY = 'notif_seen_tasks_v1';
 const SEEN_RESP_STORAGE_KEY = 'notif_seen_responsibilities_v1';
 const SEEN_COMPLETED_TASKS_STORAGE_KEY = 'notif_seen_completed_tasks_v1';
+const ASSIGNED_RECORDS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const loadSeenSet = (key: string) => {
   if (typeof window === 'undefined') return new Set<string>();
@@ -110,6 +111,11 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
   const prevTasksRef = useRef<Set<string>>(new Set());
   const prevResponsibilitiesRef = useRef<Set<string>>(new Set());
   const notificationsReadyRef = useRef(false);
+  const assignedRecordsCacheRef = useRef<{
+    profileKey: string;
+    expiresAt: number;
+    pairs: { module_id: string; record_id: string }[];
+  } | null>(null);
 
   const tasksConfig = MODULES['tasks'];
   const statusOptions = tasksConfig?.fields?.find((f: any) => f.key === 'status')?.options || [];
@@ -252,18 +258,26 @@ const NotificationsPopover: React.FC<NotificationsPopoverProps> = ({ isMobile })
     if (!profile.id) return [] as { module_id: string; record_id: string }[];
     const userId = profile.id;
     const roleId = profile.role_id;
+    const profileKey = `${userId}:${roleId || ''}`;
+    const cached = assignedRecordsCacheRef.current;
+    if (cached && cached.profileKey === profileKey && cached.expiresAt > Date.now()) {
+      return cached.pairs;
+    }
 
     const modules = Object.values(MODULES)
       .filter((mod: any) => mod?.id !== 'tasks' && (mod?.table || mod?.id));
 
-    const pairs: { module_id: string; record_id: string }[] = [];
-    for (const mod of modules) {
+    const resolvedPairs = await Promise.all(modules.map(async (mod: any) => {
       const table = mod.table || mod.id;
       const data = await fetchAssignedIdsForModule(table, userId, roleId);
-      (data || []).forEach((row: any) => {
-        pairs.push({ module_id: mod.id, record_id: row.id });
-      });
-    }
+      return (data || []).map((row: any) => ({ module_id: mod.id, record_id: row.id }));
+    }));
+    const pairs = resolvedPairs.flat();
+    assignedRecordsCacheRef.current = {
+      profileKey,
+      expiresAt: Date.now() + ASSIGNED_RECORDS_CACHE_TTL_MS,
+      pairs,
+    };
     return pairs;
   };
 

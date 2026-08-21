@@ -34,6 +34,8 @@ export type StageHandoverDeliveryRow = {
   mainUnit: string;
   subUnit: string;
   deliveredQty: number;
+  sourceBundleId?: string | null;
+  sourceShelfId?: string | null;
 };
 
 export type StageHandoverGroup = {
@@ -44,6 +46,7 @@ export type StageHandoverGroup = {
   selectedProductName: string;
   selectedProductCode: string;
   sourceShelfId: string | null;
+  sourceBundleId?: string | null;
   targetShelfId: string | null;
   pieces: StageHandoverPiece[];
   orderPieces: StageHandoverPiece[];

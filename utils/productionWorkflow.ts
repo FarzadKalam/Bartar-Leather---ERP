@@ -7,6 +7,8 @@ export type ProductionMove = {
   product_id: string;
   from_shelf_id: string;
   to_shelf_id: string;
+  // موجودی تولید همیشه در سطح محصول، قفسه و بسته (در صورت وجود) جابه‌جا می‌شود.
+  bundle_id?: string | null;
   quantity: number;
   unit?: string | null;
 };
@@ -24,12 +26,14 @@ export const collectProductionMoves = (order: any, productionShelfId: string) =>
   const moves: ProductionMove[] = [];
   const missingProduct = [] as string[];
   const missingShelf = [] as string[];
+  const missingBundle = [] as string[];
 
   ITEM_TABLES.forEach((table) => {
     const rows = Array.isArray(order?.[table]) ? order[table] : [];
     rows.forEach((row: any, idx: number) => {
       const productId = row?.selected_product_id || row?.product_id;
       const fromShelfId = row?.selected_shelf_id || row?.shelf_id;
+      const bundleId = row?.source_bundle_id || row?.bundle_id || null;
       const usage = getRowUsage(row);
       if (usage <= 0) return;
       if (!productId) {
@@ -40,17 +44,22 @@ export const collectProductionMoves = (order: any, productionShelfId: string) =>
         missingShelf.push(`${table}:${idx}`);
         return;
       }
+      if (!bundleId) {
+        missingBundle.push(`${table}:${idx}`);
+        return;
+      }
       moves.push({
         product_id: productId,
         from_shelf_id: fromShelfId,
         to_shelf_id: productionShelfId,
+        bundle_id: String(bundleId),
         quantity: usage * quantity,
         unit: row?.main_unit ? String(row.main_unit) : null,
       });
     });
   });
 
-  return { moves, missingProduct, missingShelf, quantity };
+  return { moves, missingProduct, missingShelf, missingBundle, quantity };
 };
 
 const getShelfWarehouseId = async (shelfId: string) => {
@@ -60,6 +69,22 @@ const getShelfWarehouseId = async (shelfId: string) => {
 
 const productLabelCache = new Map<string, string>();
 const shelfLabelCache = new Map<string, string>();
+const bundleLabelCache = new Map<string, string>();
+
+const getBundleLabel = async (bundleId?: string | null) => {
+  if (!bundleId) return 'بدون بسته';
+  const normalizedId = String(bundleId);
+  const cached = bundleLabelCache.get(normalizedId);
+  if (cached) return cached;
+  const { data } = await supabase
+    .from('product_bundles')
+    .select('bundle_number')
+    .eq('id', normalizedId)
+    .maybeSingle();
+  const label = String(data?.bundle_number || normalizedId);
+  bundleLabelCache.set(normalizedId, label);
+  return label;
+};
 
 const getProductLabel = async (productId: string) => {
   const cached = productLabelCache.get(productId);
@@ -96,41 +121,52 @@ const adjustStock = async (
   shelfId: string,
   delta: number,
   warehouseId?: string | null,
+  bundleId?: string | null,
   options?: { allowNegativeStock?: boolean }
 ) => {
-  const { data: row, error } = await supabase
-    .from('product_inventory')
-    .select('id, stock, warehouse_id')
-    .eq('product_id', productId)
-    .eq('shelf_id', shelfId)
-    .is('bundle_id', null)
-    .maybeSingle();
+  const normalizedBundleId = bundleId ? String(bundleId) : null;
+  const scopedQuery = normalizedBundleId
+    ? supabase
+      .from('product_inventory')
+      .select('id, stock, warehouse_id')
+      .eq('product_id', productId)
+      .eq('shelf_id', shelfId)
+      .eq('bundle_id', normalizedBundleId)
+      .maybeSingle()
+    : supabase
+      .from('product_inventory')
+      .select('id, stock, warehouse_id')
+      .eq('product_id', productId)
+      .eq('shelf_id', shelfId)
+      .is('bundle_id', null)
+      .maybeSingle();
+  const { data: scopedRow, error: scopedError } = await scopedQuery;
+  if (scopedError) throw scopedError;
 
-  if (error) throw error;
-
-  const current = parseFloat(row?.stock) || 0;
+  const current = parseFloat(scopedRow?.stock) || 0;
   const next = current + delta;
   const allowNegativeStock = typeof options?.allowNegativeStock === 'boolean'
     ? options.allowNegativeStock
     : await getAllowNegativeInventory(supabase as any);
   if (!allowNegativeStock && next < 0) {
-    const [productLabel, shelfLabel] = await Promise.all([
+    const [productLabel, shelfLabel, bundleLabel] = await Promise.all([
       getProductLabel(productId),
       getShelfLabel(shelfId),
+      getBundleLabel(normalizedBundleId),
     ]);
     throw new Error(
-      `موجودی قفسه کافی نیست. محصول: "${productLabel}"، قفسه: "${shelfLabel}"، موجودی فعلی: ${current}، مقدار موردنیاز: ${Math.abs(delta)}`
+      `موجودی بسته کافی نیست. محصول: "${productLabel}"، بسته: "${bundleLabel}"، قفسه: "${shelfLabel}"، موجودی فعلی: ${current}، مقدار موردنیاز: ${Math.abs(delta)}`
     );
   }
 
-  if (row?.id) {
+  if (scopedRow?.id) {
     const { error: updateError } = await supabase
       .from('product_inventory')
       .update({
-        warehouse_id: warehouseId ?? row?.warehouse_id ?? null,
+        warehouse_id: warehouseId ?? scopedRow?.warehouse_id ?? null,
         stock: next,
       })
-      .eq('id', row.id);
+      .eq('id', scopedRow.id);
     if (updateError) throw updateError;
     return;
   }
@@ -140,7 +176,7 @@ const adjustStock = async (
     .insert({
       product_id: productId,
       shelf_id: shelfId,
-      bundle_id: null,
+      bundle_id: normalizedBundleId,
       warehouse_id: warehouseId ?? null,
       stock: next,
     });
@@ -153,6 +189,9 @@ export const applyProductionMoves = async (moves: ProductionMove[]) => {
   const decisionCache = new Map<string, boolean>();
   const normalizedMoves: ProductionMove[] = [];
   for (const move of moves || []) {
+    if (!move?.bundle_id) {
+      throw new Error('برای برداشت یا جابه‌جایی مواد در تولید، بسته محصول الزامی است.');
+    }
     const normalizedQty = await normalizeQuantityToProductMainUnit(
       supabase as any,
       {
@@ -168,7 +207,7 @@ export const applyProductionMoves = async (moves: ProductionMove[]) => {
 
   const grouped = new Map<string, ProductionMove>();
   normalizedMoves.forEach((move) => {
-    const key = `${move.product_id}:${move.from_shelf_id}:${move.to_shelf_id}`;
+    const key = `${move.product_id}:${move.from_shelf_id}:${move.to_shelf_id}:${move.bundle_id || '__null__'}`;
     const existing = grouped.get(key);
     if (existing) {
       existing.quantity += move.quantity;
@@ -179,9 +218,9 @@ export const applyProductionMoves = async (moves: ProductionMove[]) => {
 
   const groupedMoves = Array.from(grouped.values());
   for (const move of groupedMoves) {
-    await adjustStock(move.product_id, move.from_shelf_id, -move.quantity, undefined, { allowNegativeStock });
+    await adjustStock(move.product_id, move.from_shelf_id, -move.quantity, undefined, move.bundle_id, { allowNegativeStock });
     const destWarehouseId = await getShelfWarehouseId(move.to_shelf_id);
-    await adjustStock(move.product_id, move.to_shelf_id, move.quantity, destWarehouseId, { allowNegativeStock });
+    await adjustStock(move.product_id, move.to_shelf_id, move.quantity, destWarehouseId, move.bundle_id, { allowNegativeStock });
   }
 };
 
@@ -200,6 +239,9 @@ export const consumeProductionMaterials = async (moves: ProductionMove[], produc
   const decisionCache = new Map<string, boolean>();
   const grouped = new Map<string, number>();
   for (const move of moves || []) {
+    if (!move?.bundle_id) {
+      throw new Error('برای مصرف مواد در تولید، بسته محصول الزامی است.');
+    }
     const normalizedQty = await normalizeQuantityToProductMainUnit(
       supabase as any,
       {
@@ -212,18 +254,18 @@ export const consumeProductionMaterials = async (moves: ProductionMove[], produc
     if (!normalizedQty) continue;
     const targetShelfId = move?.to_shelf_id || productionShelfId;
     if (!targetShelfId) continue;
-    const key = `${move.product_id}:${targetShelfId}`;
+    const key = `${move.product_id}:${targetShelfId}:${move.bundle_id || '__null__'}`;
     grouped.set(key, (grouped.get(key) || 0) + normalizedQty);
   }
   for (const [key, qty] of grouped.entries()) {
-    const [productId, shelfId] = key.split(':');
-    await adjustStock(productId, shelfId, -qty, undefined, { allowNegativeStock });
+    const [productId, shelfId, bundleKey] = key.split(':');
+    await adjustStock(productId, shelfId, -qty, undefined, bundleKey === '__null__' ? null : bundleKey, { allowNegativeStock });
   }
 };
 
-export const addFinishedGoods = async (productId: string, shelfId: string, quantity: number) => {
+export const addFinishedGoods = async (productId: string, shelfId: string, quantity: number, bundleId?: string | null) => {
   const warehouseId = await getShelfWarehouseId(shelfId);
-  await adjustStock(productId, shelfId, quantity, warehouseId);
+  await adjustStock(productId, shelfId, quantity, warehouseId, bundleId);
 };
 
 export const syncProductStock = async (productId: string) => {

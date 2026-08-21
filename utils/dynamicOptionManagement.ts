@@ -1,6 +1,6 @@
 import { MODULES } from '../moduleRegistry';
 import { supabase } from '../supabaseClient';
-import { FieldType } from '../types';
+import { BlockType, FieldType } from '../types';
 
 type DynamicOptionFieldReference = {
   moduleId: string;
@@ -115,16 +115,20 @@ const collectDynamicOptionReferences = (category: string): DynamicOptionFieldRef
     moduleDef.fields.forEach((field) => {
       if (normalizeComparableValue(field.dynamicOptionsCategory) !== normalizedCategory) return;
       if (!SUPPORTED_DYNAMIC_FIELD_TYPES.has(String(field.type))) return;
+      // شناسهٔ FIELD_GROUP فقط برای چیدمان فرم است؛ مقدار فیلد در ستون خودش
+      // در جدول ماژول نگهداری می‌شود، نه در ستونی هم‌نام با blockId.
       references.push({
         moduleId,
         table: moduleDef.table,
         fieldKey: field.key,
         fieldType: String(field.type),
-        blockId: field.blockId ? String(field.blockId) : undefined,
       });
     });
 
     moduleDef.blocks.forEach((block) => {
+      const isRowBasedBlock = block.type === BlockType.TABLE || block.type === BlockType.GRID_TABLE;
+      if (!isRowBasedBlock) return;
+
       (block.tableColumns || []).forEach((column) => {
         if (normalizeComparableValue(column.dynamicOptionsCategory) !== normalizedCategory) return;
         if (!SUPPORTED_DYNAMIC_FIELD_TYPES.has(String(column.type))) return;

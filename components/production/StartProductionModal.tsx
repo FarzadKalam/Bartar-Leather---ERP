@@ -22,6 +22,8 @@ export type StartMaterialPiece = {
 export type StartMaterialDeliveryRow = {
   key: string;
   pieceKey?: string;
+  sourceBundleId?: string | null;
+  sourceShelfId?: string | null;
   name: string;
   length: number;
   width: number;
@@ -50,6 +52,7 @@ export type StartMaterialGroup = {
   selectedProductName: string;
   selectedProductCode: string;
   sourceShelfId: string | null;
+  sourceBundleId?: string | null;
   productionShelfId: string | null;
   pieces: StartMaterialPiece[];
   deliveryRows: StartMaterialDeliveryRow[];
@@ -70,7 +73,14 @@ interface StartProductionModalProps {
   materials: StartMaterialGroup[];
   inline?: boolean;
   orderName?: string;
-  sourceShelfOptionsByProduct: Record<string, { label: string; value: string; stock?: number }[]>;
+  sourceBundleOptionsByProduct: Record<string, {
+    label: string;
+    value: string;
+    stock?: number;
+    shelfId?: string | null;
+    shelfLabel?: string | null;
+    disabled?: boolean;
+  }[]>;
   productionShelfOptions: { label: string; value: string }[];
   productionStageOptions?: { label: string; value: string; orderId?: string; shelfId?: string | null }[];
   productionTargetType?: 'shelf' | 'stage';
@@ -93,8 +103,7 @@ interface StartProductionModalProps {
     field: keyof Omit<StartMaterialDeliveryRow, 'key'>,
     value: any
   ) => void;
-  onSourceShelfChange: (groupIndex: number, shelfId: string | null) => void;
-  onSourceShelfScan: (groupIndex: number, shelfId: string) => void;
+  onDeliveryRowSourceBundleChange: (groupIndex: number, rowKey: string, bundleId: string | null) => void;
   onProductionShelfChange: (groupIndex: number, shelfId: string | null) => void;
   onProductionStageChange?: (groupIndex: number, stageTaskId: string | null) => void;
   onConfirmGroup: (groupIndex: number) => void;
@@ -162,7 +171,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
   materials,
   inline = false,
   orderName,
-  sourceShelfOptionsByProduct,
+  sourceBundleOptionsByProduct,
   productionShelfOptions,
   productionStageOptions = [],
   productionTargetType = 'shelf',
@@ -175,8 +184,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
   onDeliveryRowsDelete,
   onDeliveryRowsTransfer,
   onDeliveryRowFieldChange,
-  onSourceShelfChange,
-  onSourceShelfScan,
+  onDeliveryRowSourceBundleChange,
   onProductionShelfChange,
   onProductionStageChange,
   onConfirmGroup,
@@ -314,8 +322,8 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
           </div>
         ) : (
           materials.map((group, groupIndex) => {
-            const sourceShelfOptions = group.selectedProductId
-              ? (sourceShelfOptionsByProduct[group.selectedProductId] || [])
+            const sourceBundleOptions = group.selectedProductId
+              ? (sourceBundleOptionsByProduct[group.selectedProductId] || [])
               : [];
             const selectedRowKeys = getSelectedRowKeys(group.key);
             const consumptionUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.mainUnit));
@@ -764,6 +772,34 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               ),
                             },
                             {
+                              title: 'بسته برداشت',
+                              dataIndex: 'sourceBundleId',
+                              key: 'sourceBundleId',
+                              width: isMobile ? 280 : 240,
+                              render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
+                                <Select
+                                  value={value || undefined}
+                                  placeholder="انتخاب بسته"
+                                  options={sourceBundleOptions}
+                                  showSearch
+                                  optionFilterProp="label"
+                                  className="w-full"
+                                  getPopupContainer={() => document.body}
+                                  onChange={(bundleId) => onDeliveryRowSourceBundleChange(groupIndex, String(record.key), bundleId || null)}
+                                />
+                              ),
+                            },
+                            {
+                              title: 'قفسه برداشت',
+                              dataIndex: 'sourceShelfId',
+                              key: 'sourceShelfId',
+                              width: isMobile ? 220 : 170,
+                              render: (_value: string | null | undefined, record: StartMaterialDeliveryRow) => {
+                                const bundle = sourceBundleOptions.find((item) => String(item.value) === String(record.sourceBundleId || ''));
+                                return <span className="text-xs text-gray-700">{bundle?.shelfLabel || '-'}</span>;
+                              },
+                            },
+                            {
                               title: 'طول',
                               dataIndex: 'length',
                               key: 'length',
@@ -928,36 +964,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                       <div className={`grid grid-cols-1 ${hideSourceShelfSelector ? 'md:grid-cols-1' : 'md:grid-cols-2'} gap-3`}>
                         {!hideSourceShelfSelector ? (
                           <div className="space-y-2">
-                            <div className="text-xs text-gray-500">انتخاب قفسه برداشت</div>
-                            <div className="flex items-center gap-2">
-                              <Select
-                                placeholder="انتخاب قفسه برداشت"
-                                value={group.sourceShelfId}
-                                onChange={(val) => onSourceShelfChange(groupIndex, val || null)}
-                                options={sourceShelfOptions}
-                                showSearch
-                                optionFilterProp="label"
-                                className="w-full"
-                                getPopupContainer={() => document.body}
-                                onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
-                              />
-                              <QrScanPopover
-                                label=""
-                                buttonProps={{ type: 'default', shape: 'circle' }}
-                                onScan={({ moduleId, recordId }) => {
-                                  if (moduleId === 'shelves' && recordId) onSourceShelfScan(groupIndex, recordId);
-                                }}
-                              />
-                            </div>
-                            {(() => {
-                              const selected = sourceShelfOptions.find((item) => String(item.value) === String(group.sourceShelfId || ''));
-                              if (!selected || selected.stock === undefined) return null;
-                              return (
-                                <div className="text-[11px] text-gray-500">
-                                  موجودی قفسه انتخاب‌شده: {formatQty(selected.stock)}
-                                </div>
-                              );
-                            })()}
+                            <div className="text-xs text-gray-500">بسته و قفسهٔ برداشت را در هر ردیف تحویل انتخاب کنید.</div>
                           </div>
                         ) : null}
                         <div className="space-y-2">

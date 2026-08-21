@@ -113,7 +113,15 @@ const ModuleShow: React.FC = () => {
   const bomCopyPromptRef = useRef<string | null>(null);
   const [productionModal, setProductionModal] = useState<'start' | 'stop' | 'complete' | null>(null);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
-  const [sourceShelfOptionsByProduct, setSourceShelfOptionsByProduct] = useState<Record<string, { label: string; value: string; stock?: number }[]>>({});
+  const [, setSourceShelfOptionsByProduct] = useState<Record<string, { label: string; value: string; stock?: number }[]>>({});
+  const [sourceBundleOptionsByProduct, setSourceBundleOptionsByProduct] = useState<Record<string, {
+    label: string;
+    value: string;
+    stock?: number;
+    shelfId?: string | null;
+    shelfLabel?: string | null;
+    disabled?: boolean;
+  }[]>>({});
   const [startMaterials, setStartMaterials] = useState<StartMaterialGroup[]>([]);
   const [outputProductOptions, setOutputProductOptions] = useState<{ label: string; value: string; product_type?: string | null }[]>([]);
   const [outputShelfOptions, setOutputShelfOptions] = useState<{ label: string; value: string }[]>([]);
@@ -222,6 +230,8 @@ const ModuleShow: React.FC = () => {
     return {
       key: String(rawRow?.key || buildDeliveryRowKey()),
       pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
+      sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || null,
+      sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || null,
       name: String(rawRow?.name ?? firstPiece?.name ?? ''),
       length: toNumber(rawRow?.length ?? firstPiece?.length ?? 0),
       width: toNumber(rawRow?.width ?? firstPiece?.width ?? 0),
@@ -330,6 +340,11 @@ const ModuleShow: React.FC = () => {
           rowPieces.find((piece: any) => piece?.selected_shelf_id || piece?.shelf_id)?.selected_shelf_id ||
           rowPieces.find((piece: any) => piece?.selected_shelf_id || piece?.shelf_id)?.shelf_id ||
           null;
+        const sourceBundleId =
+          row?.source_bundle_id || row?.bundle_id ||
+          rowPieces.find((piece: any) => piece?.source_bundle_id || piece?.bundle_id)?.source_bundle_id ||
+          rowPieces.find((piece: any) => piece?.source_bundle_id || piece?.bundle_id)?.bundle_id ||
+          null;
         return {
           key: `${String(row?.key || 'group')}_${rowIndex}`,
           rowIndex,
@@ -338,6 +353,7 @@ const ModuleShow: React.FC = () => {
           selectedProductName,
           selectedProductCode,
           sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
+          sourceBundleId: sourceBundleId ? String(sourceBundleId) : null,
           productionShelfId: order?.production_shelf_id || null,
           pieces,
           deliveryRows: [],
@@ -476,6 +492,21 @@ const ModuleShow: React.FC = () => {
     });
   }, []);
 
+  const updateStartDeliveryRowSourceBundle = useCallback((groupIndex: number, rowKey: string, bundleId: string | null) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const options = group.selectedProductId ? (sourceBundleOptionsByProduct[group.selectedProductId] || []) : [];
+      const bundle = options.find((option) => String(option.value) === String(bundleId || ''));
+      const deliveryRows = (group.deliveryRows || []).map((row) => String(row.key) === String(rowKey)
+        ? { ...row, sourceBundleId: bundleId, sourceShelfId: bundle?.shelfId || null }
+        : row);
+      next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
+      return next;
+    });
+  }, [sourceBundleOptionsByProduct]);
+
   const setStartMaterialCollapsed = useCallback((groupIndex: number, collapsed: boolean) => {
     setStartMaterials((prev) => {
       const next = [...prev];
@@ -485,33 +516,6 @@ const ModuleShow: React.FC = () => {
       return next;
     });
   }, []);
-
-  const setStartMaterialSourceShelf = useCallback((groupIndex: number, shelfId: string | null) => {
-    setStartMaterials((prev) => {
-      const next = [...prev];
-      const group = next[groupIndex];
-      if (!group) return prev;
-      next[groupIndex] = { ...group, sourceShelfId: shelfId, isConfirmed: false };
-      return next;
-    });
-  }, []);
-
-  const handleSourceShelfScan = useCallback((groupIndex: number, shelfId: string) => {
-    const group = startMaterials[groupIndex];
-    if (!group) return;
-    const productId = group.selectedProductId;
-    if (!productId) {
-      msg.error('برای این ردیف، محصول انتخاب نشده است.');
-      return;
-    }
-    const validOptions = sourceShelfOptionsByProduct[productId] || [];
-    const isAllowed = validOptions.some((option) => option.value === shelfId);
-    if (!isAllowed) {
-      msg.error('این قفسه برای محصول انتخاب‌شده موجودی ندارد.');
-      return;
-    }
-    setStartMaterialSourceShelf(groupIndex, shelfId);
-  }, [msg, setStartMaterialSourceShelf, sourceShelfOptionsByProduct, startMaterials]);
 
   const setStartMaterialProductionShelf = useCallback((groupIndex: number, shelfId: string | null) => {
     setStartMaterials((prev) => {
@@ -559,7 +563,7 @@ const ModuleShow: React.FC = () => {
 
   const buildConsumptionMoves = useCallback((order: any, quantity: number, productionShelfId: string) => {
     const tables = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
-    const moves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }> = [];
+    const moves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; bundle_id?: string | null; quantity: number; unit?: string | null }> = [];
     tables.forEach((table) => {
       const rows = Array.isArray(order?.[table]) ? order[table] : [];
       rows.forEach((row: any) => {
@@ -571,6 +575,7 @@ const ModuleShow: React.FC = () => {
           product_id: productId,
           from_shelf_id: productionShelfId,
           to_shelf_id: productionShelfId,
+          bundle_id: row?.source_bundle_id || row?.bundle_id || null,
           quantity: usage * quantity,
           unit: row?.main_unit ? String(row.main_unit) : null,
         });
@@ -580,7 +585,7 @@ const ModuleShow: React.FC = () => {
   }, []);
 
   const buildFinalStageConsumptionMoves = useCallback(async () => {
-    if (!id) return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }>;
+    if (!id) return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; bundle_id?: string | null; quantity: number; unit?: string | null }>;
     try {
       const { data: taskRows, error } = await supabase
         .from('tasks')
@@ -598,7 +603,7 @@ const ModuleShow: React.FC = () => {
         byLine.get(lineKey)!.push(task);
       });
 
-      const finalMoves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }> = [];
+      const finalMoves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; bundle_id?: string | null; quantity: number; unit?: string | null }> = [];
       byLine.forEach((lineTasks) => {
         const ordered = [...lineTasks].sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0));
         const lastTask = ordered[ordered.length - 1];
@@ -643,16 +648,24 @@ const ModuleShow: React.FC = () => {
               || ''
             );
             if (!productId) return;
-            const qty = deliveryRows.length > 0
-              ? deliveryRows.reduce((sum: number, row: any) => {
-                  const explicitQty = parseFloat(row?.deliveredQty ?? row?.delivered_qty);
-                  if (Number.isFinite(explicitQty) && explicitQty > 0) return sum + explicitQty;
-                  const length = parseFloat(row?.length) || 0;
-                  const width = parseFloat(row?.width) || 0;
-                  const quantity = parseFloat(row?.quantity) || 0;
-                  return sum + (length * width * quantity);
-                }, 0)
-              : pieces.reduce((sum: number, piece: any) => {
+            if (deliveryRows.length > 0) {
+              deliveryRows.forEach((row: any) => {
+                const explicitQty = parseFloat(row?.deliveredQty ?? row?.delivered_qty);
+                const calculatedQty = (parseFloat(row?.length) || 0) * (parseFloat(row?.width) || 0) * (parseFloat(row?.quantity) || 0);
+                const quantity = Number.isFinite(explicitQty) && explicitQty > 0 ? explicitQty : calculatedQty;
+                if (!quantity || quantity <= 0) return;
+                finalMoves.push({
+                  product_id: productId,
+                  from_shelf_id: targetShelfId,
+                  to_shelf_id: targetShelfId,
+                  bundle_id: row?.sourceBundleId || row?.source_bundle_id || row?.bundle_id || group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id || null,
+                  quantity,
+                  unit: row?.mainUnit || row?.main_unit || selectedPiece?.mainUnit || selectedPiece?.main_unit || null,
+                });
+              });
+              return;
+            }
+            const qty = pieces.reduce((sum: number, piece: any) => {
                   const raw = piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0;
                   const value = parseFloat(raw);
                   return sum + (Number.isFinite(value) ? value : 0);
@@ -662,6 +675,7 @@ const ModuleShow: React.FC = () => {
               product_id: productId,
               from_shelf_id: targetShelfId,
               to_shelf_id: targetShelfId,
+              bundle_id: group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id || null,
               quantity: qty,
               unit: selectedPiece?.mainUnit || selectedPiece?.main_unit || deliveryRows[0]?.mainUnit || deliveryRows[0]?.main_unit || null,
             });
@@ -672,7 +686,7 @@ const ModuleShow: React.FC = () => {
       return finalMoves;
     } catch (err) {
       console.warn('Could not build final stage consumption moves', err);
-      return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; quantity: number; unit?: string | null }>;
+      return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; bundle_id?: string | null; quantity: number; unit?: string | null }>;
     }
   }, [data?.production_shelf_id, id]);
 
@@ -900,6 +914,7 @@ const ModuleShow: React.FC = () => {
   const loadSourceShelvesByProduct = useCallback(async (productIds: string[]) => {
     if (!productIds.length) {
       setSourceShelfOptionsByProduct({});
+      setSourceBundleOptionsByProduct({});
       return;
     }
     const allowNegativeInventory = await getAllowNegativeInventory(supabase as any);
@@ -917,7 +932,7 @@ const ModuleShow: React.FC = () => {
 
     let inventoryQuery = supabase
       .from('product_inventory')
-      .select('product_id, shelf_id, stock, bundle_id')
+      .select('product_id, shelf_id, stock, bundle_id, product_bundles:bundle_id(bundle_number)')
       .in('product_id', productIds);
     if (!allowNegativeInventory) {
       inventoryQuery = inventoryQuery.gt('stock', 0);
@@ -948,6 +963,7 @@ const ModuleShow: React.FC = () => {
     }
 
     const next: Record<string, { label: string; value: string; stock?: number }[]> = {};
+    const bundleRowsByProduct = new Map<string, Map<string, Array<{ shelfId: string; shelfLabel: string; stock: number }>>>();
     rows.forEach((row: any) => {
       const productId = String(row.product_id);
       const shelfId = String(row.shelf_id);
@@ -962,6 +978,15 @@ const ModuleShow: React.FC = () => {
       if (!next[productId].some((opt) => opt.value === shelfId)) {
         next[productId].push({ value: shelfId, label, stock });
       }
+      // تولید فقط از بسته برداشت می‌کند؛ موجودی قدیمی بدون بسته همچنان در سیستم
+      // باقی می‌ماند اما در فرم تولید قابل انتخاب نیست.
+      if (!row?.bundle_id) return;
+      const bundleId = String(row.bundle_id);
+      const bucketByBundle = bundleRowsByProduct.get(productId) || new Map();
+      const bundleRows = bucketByBundle.get(bundleId) || [];
+      bundleRows.push({ shelfId, shelfLabel: labelBase, stock });
+      bucketByBundle.set(bundleId, bundleRows);
+      bundleRowsByProduct.set(productId, bucketByBundle);
     });
 
     if (allowNegativeInventory) {
@@ -987,6 +1012,34 @@ const ModuleShow: React.FC = () => {
       });
     }
     setSourceShelfOptionsByProduct(next);
+    const nextBundles: Record<string, {
+      label: string;
+      value: string;
+      stock?: number;
+      shelfId?: string | null;
+      shelfLabel?: string | null;
+      disabled?: boolean;
+    }[]> = {};
+    bundleRowsByProduct.forEach((bundles, productId) => {
+      nextBundles[productId] = Array.from(bundles.entries()).map(([bundleId, bundleRows]) => {
+        const shelfIds = Array.from(new Set(bundleRows.map((item) => item.shelfId)));
+        const totalStock = bundleRows.reduce((sum, item) => sum + item.stock, 0);
+        const bundleNumber = ((inventoryRows || []).find((row: any) => String(row?.bundle_id || '') === bundleId) as any)?.product_bundles?.bundle_number || bundleId;
+        const hasSingleShelf = shelfIds.length === 1;
+        const shelfLabel = hasSingleShelf ? bundleRows[0]?.shelfLabel || shelfIds[0] : null;
+        return {
+          value: bundleId,
+          label: hasSingleShelf
+            ? `${String(bundleNumber)} — ${shelfLabel} (موجودی: ${toPersianNumber(totalStock)})`
+            : `${String(bundleNumber)} — نیازمند اصلاح: بسته در چند قفسه ثبت شده`,
+          stock: totalStock,
+          shelfId: hasSingleShelf ? shelfIds[0] : null,
+          shelfLabel,
+          disabled: !hasSingleShelf,
+        };
+      });
+    });
+    setSourceBundleOptionsByProduct(nextBundles);
   }, []);
 
   const loadOutputShelves = useCallback(async () => {
@@ -1180,6 +1233,7 @@ const ModuleShow: React.FC = () => {
           selectedProductName: savedName || baseWithMeta.selectedProductName,
           selectedProductCode: savedCode || baseWithMeta.selectedProductCode,
           sourceShelfId: savedGroup?.sourceShelfId ?? baseWithMeta.sourceShelfId,
+          sourceBundleId: savedGroup?.sourceBundleId ?? baseWithMeta.sourceBundleId,
           productionShelfId: savedGroup?.productionShelfId ?? baseWithMeta.productionShelfId,
           collapsed: typeof savedGroup?.collapsed === 'boolean' ? savedGroup.collapsed : baseWithMeta.collapsed,
           isConfirmed: savedGroup?.isConfirmed === true,
@@ -2492,17 +2546,11 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireSelectedProduct);
         return;
       }
-      const missingSourceShelf = materialsWithDelivery.filter((group) => !group.sourceShelfId);
-      if (missingSourceShelf.length > 0) {
-        msg.error('برای محصول‌های ثبت‌شده، قفسه برداشت انتخاب نشده است.');
-        return;
-      }
-      const invalidSourceShelf = materialsWithDelivery.filter((group) => {
-        const options = group.selectedProductId ? (sourceShelfOptionsByProduct[group.selectedProductId] || []) : [];
-        return !options.some((option) => option.value === group.sourceShelfId);
-      });
-      if (invalidSourceShelf.length > 0) {
-        msg.error('برخی قفسه‌های برداشت برای محصول انتخاب‌شده موجودی معتبر ندارند.');
+      const deliveryRows = materialsWithDelivery.flatMap((group) =>
+        (group.deliveryRows || []).map((row) => ({ group, row, quantity: calcDeliveredQty(row) }))
+      ).filter((item) => item.quantity > 0);
+      if (deliveryRows.some(({ row }) => !row.sourceBundleId || !row.sourceShelfId)) {
+        msg.error('برای هر ردیف تحویل، بسته محصول برداشت را انتخاب کنید.');
         return;
       }
       const missingProductionShelf = materialsWithDelivery.filter((group) => !group.productionShelfId);
@@ -2510,18 +2558,18 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
         return;
       }
-      const moves = materialsWithDelivery.map((group) => ({
+      const moves = deliveryRows.map(({ group, row, quantity }) => ({
         product_id: String(group.selectedProductId),
-        from_shelf_id: String(group.sourceShelfId),
+        from_shelf_id: String(row.sourceShelfId),
         to_shelf_id: String(group.productionShelfId),
-        quantity: group.totalDeliveredQty,
-        unit: group.deliveryRows?.find((row: any) => String(row?.mainUnit || '').trim())?.mainUnit
-          || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit
-          || null,
+        bundle_id: row.sourceBundleId,
+        quantity,
+        unit: row.mainUnit || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit || null,
       }));
 
       setStatusLoading(true);
       await applyProductionMoves(moves);
+      await Promise.all(Array.from(new Set(moves.map((move) => move.product_id))).map((productId) => syncProductStock(productId)));
       try {
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || null;
@@ -2534,6 +2582,7 @@ const ModuleShow: React.FC = () => {
           production_order_id: id || null,
           from_shelf_id: move.from_shelf_id,
           to_shelf_id: move.to_shelf_id,
+          bundle_id: move.bundle_id ?? null,
           sender_id: userId,
           receiver_id: userId,
         }));
@@ -2570,7 +2619,10 @@ const ModuleShow: React.FC = () => {
         });
         return {
           ...row,
-          selected_shelf_id: group.sourceShelfId || row?.selected_shelf_id || null,
+          // بسته و قفسهٔ برداشت در ردیف‌های تحویل ثبت می‌شوند؛ سربرگ نباید یک
+          // بسته/قفسهٔ دلخواه را به همهٔ برداشت‌های این کالا نسبت دهد.
+          selected_shelf_id: null,
+          source_bundle_id: null,
           production_shelf_id: group.productionShelfId || row?.production_shelf_id || null,
           delivered_total_qty: group.totalDeliveredQty,
           delivery_rows: group.deliveryRows || [],
@@ -2603,13 +2655,9 @@ const ModuleShow: React.FC = () => {
       msg.error('برای این محصول، محصول انتخاب‌شده مشخص نیست.');
       return;
     }
-    if (!group.sourceShelfId) {
-      msg.error('برای این محصول، قفسه برداشت انتخاب نشده است.');
-      return;
-    }
-    const validSourceShelves = group.selectedProductId ? (sourceShelfOptionsByProduct[group.selectedProductId] || []) : [];
-    if (!validSourceShelves.some((option) => option.value === group.sourceShelfId)) {
-      msg.error('قفسه برداشت انتخاب‌شده برای این محصول موجودی ندارد.');
+    const rowsWithQty = (group.deliveryRows || []).filter((row) => calcDeliveredQty(row) > 0);
+    if (!rowsWithQty.length || rowsWithQty.some((row) => !row.sourceBundleId || !row.sourceShelfId)) {
+      msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را انتخاب کنید.');
       return;
     }
     if (!group.productionShelfId) {
@@ -2628,7 +2676,7 @@ const ModuleShow: React.FC = () => {
       return next;
     });
     msg.success('این محصول ثبت شد.');
-  }, [msg, sourceShelfOptionsByProduct, startMaterials]);
+  }, [msg, startMaterials]);
 
   const handleConfirmStopProduction = async () => {
     try {
@@ -2730,7 +2778,7 @@ const ModuleShow: React.FC = () => {
         const productId = String(move?.product_id || '');
         const qty = parseFloat(move?.quantity) || 0;
         if (!productId || !shelfId || qty <= 0) return;
-        const key = `${productId}:${shelfId}`;
+        const key = `${productId}:${shelfId}:${String(move?.bundle_id || '__null__')}`;
         consumedGrouped.set(key, (consumedGrouped.get(key) || 0) + qty);
       });
       const consumedProductIds = Array.from(
@@ -2743,7 +2791,7 @@ const ModuleShow: React.FC = () => {
         const { data: authData } = await supabase.auth.getUser();
         const userId = authData?.user?.id || null;
         const consumptionTransferPayload = Array.from(consumedGrouped.entries()).map(([key, qty]) => {
-          const [productId, fromShelfId] = key.split(':');
+          const [productId, fromShelfId, bundleKey] = key.split(':');
           return {
             transfer_type: 'production',
             product_id: productId,
@@ -2753,6 +2801,7 @@ const ModuleShow: React.FC = () => {
             production_order_id: id || null,
             from_shelf_id: fromShelfId || null,
             to_shelf_id: null,
+            bundle_id: bundleKey === '__null__' ? null : bundleKey,
             sender_id: userId,
             receiver_id: userId,
           };
@@ -2907,7 +2956,7 @@ const ModuleShow: React.FC = () => {
         const productId = String(move?.product_id || '');
         const qty = parseFloat(move?.quantity) || 0;
         if (!productId || !shelfId || qty <= 0) return;
-        const key = `${productId}:${shelfId}`;
+        const key = `${productId}:${shelfId}:${String(move?.bundle_id || '__null__')}`;
         consumedGrouped.set(key, (consumedGrouped.get(key) || 0) + qty);
       });
       const consumedProductIds = Array.from(
@@ -2918,7 +2967,7 @@ const ModuleShow: React.FC = () => {
       }
       try {
         const consumptionTransferPayload = Array.from(consumedGrouped.entries()).map(([key, qty]) => {
-          const [productId, fromShelfId] = key.split(':');
+          const [productId, fromShelfId, bundleKey] = key.split(':');
           return {
             transfer_type: 'production',
             product_id: productId,
@@ -2928,6 +2977,7 @@ const ModuleShow: React.FC = () => {
             production_order_id: id || null,
             from_shelf_id: fromShelfId || null,
             to_shelf_id: null,
+            bundle_id: bundleKey === '__null__' ? null : bundleKey,
             sender_id: userId,
             receiver_id: userId,
           };
@@ -3348,7 +3398,7 @@ const ModuleShow: React.FC = () => {
             loading={statusLoading}
             materials={startMaterials}
             orderName={String(data?.name || '')}
-            sourceShelfOptionsByProduct={sourceShelfOptionsByProduct}
+            sourceBundleOptionsByProduct={sourceBundleOptionsByProduct}
             productionShelfOptions={productionShelfOptions}
             onCancel={() => setProductionModal(null)}
             onStart={handleConfirmStartProduction}
@@ -3357,8 +3407,7 @@ const ModuleShow: React.FC = () => {
             onDeliveryRowsDelete={deleteStartDeliveryRows}
             onDeliveryRowsTransfer={transferStartDeliveryRows}
             onDeliveryRowFieldChange={updateStartDeliveryRowField}
-            onSourceShelfChange={setStartMaterialSourceShelf}
-            onSourceShelfScan={handleSourceShelfScan}
+            onDeliveryRowSourceBundleChange={updateStartDeliveryRowSourceBundle}
             onProductionShelfChange={setStartMaterialProductionShelf}
             onConfirmGroup={handleConfirmStartGroup}
           />
