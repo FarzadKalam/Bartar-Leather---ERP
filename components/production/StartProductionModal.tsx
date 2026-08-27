@@ -341,17 +341,31 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
               parseNumberInput(group.previousDeliveredQty ?? previousDeliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0))
             );
             const totalDeliveredWithHistory = previousDeliveredQty + Math.max(0, parseNumberInput(group.totalDeliveredQty));
+            const isFullyDelivered = totalDeliveredWithHistory >= Math.max(0, parseNumberInput(group.totalUsage)) - 0.000001;
+            const currentSubQuantity = (group.deliveryRows || []).reduce(
+              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
+              0
+            );
+            const previousSubQuantity = previousDeliveryRows.reduce(
+              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
+              0
+            );
+            const totalSubQuantity = previousSubQuantity + currentSubQuantity;
+            const subUnitLabel = getUnitSummaryLabel([
+              ...(group.deliveryRows || []).map((row) => row.subUnit),
+              ...previousDeliveryRows.map((row) => row.subUnit),
+            ]);
 
-            const headerToneClass = hasDeliveryRows
+            const headerToneClass = isFullyDelivered
               ? 'bg-[#1f4534] text-white shadow-sm'
               : 'bg-white text-[#17372a] border-b border-dashed border-[#8bb49a]';
-            const headerButtonClass = hasDeliveryRows
+            const headerButtonClass = isFullyDelivered
               ? '!text-white hover:!text-white/90'
               : '!text-[#17372a] hover:!text-[#1f4534]';
-            const containerClass = hasDeliveryRows
+            const containerClass = isFullyDelivered
               ? 'rounded-xl border border-gray-200'
               : 'rounded-xl border-2 border-dashed border-[#8bb49a] bg-white';
-            const headerMetaClass = hasDeliveryRows ? 'text-white/90' : 'text-[#1f4534]';
+            const headerMetaClass = isFullyDelivered ? 'text-white/90' : 'text-[#1f4534]';
 
             return (
               <div key={group.key} className={containerClass}>
@@ -790,7 +804,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               width: isMobile ? 220 : 170,
                               render: (_value: string | null | undefined, record: StartMaterialDeliveryRow) => {
                                 const bundle = sourceBundleOptions.find((item) => String(item.value) === String(record.sourceBundleId || ''));
-                                return <span className="text-xs text-gray-700">{bundle?.shelfLabel || '-'}</span>;
+                                return <span className="block whitespace-normal break-words leading-5 text-xs text-gray-700">{bundle?.shelfLabel || '-'}</span>;
                               },
                             },
                             {
@@ -911,6 +925,12 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 تحویل شده کل: <span className="font-semibold">{formatQty(totalDeliveredWithHistory)}</span>
                                 {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                               </span>
+                              {subUnitLabel ? (
+                                <span>
+                                  جمع مقدار فرعی: <span className="font-semibold">{formatQty(totalSubQuantity)}</span>
+                                  <span className="font-semibold mr-1">{subUnitLabel}</span>
+                                </span>
+                              ) : null}
                               <span className={diffClass}>
                                 اختلاف مقدار تحویل شده با مقدار مورد نیاز: {formatQty(diff)}
                                 {deliveryUnitLabel ? <span className="mr-1">{deliveryUnitLabel}</span> : null}
@@ -985,6 +1005,15 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
         }
         .start-production-delivery-table .ant-input-number-input {
           height: 34px !important;
+        }
+        .start-production-delivery-table .ant-select-selection-item {
+          min-width: 0 !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+          white-space: nowrap !important;
+        }
+        .start-production-delivery-table .ant-table-cell {
+          overflow: hidden;
         }
         .start-production-row-actions .ant-btn .anticon {
           font-size: 12px;

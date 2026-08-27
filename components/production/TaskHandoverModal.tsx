@@ -491,6 +491,19 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             );
             const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalHandoverQty));
             const totalDeliveredWithHistory = previousDeliveredQty + currentDeliveredQty;
+            const currentSubQuantity = (group.deliveryRows || []).reduce(
+              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
+              0
+            );
+            const previousSubQuantity = previousDeliveryRows.reduce(
+              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
+              0
+            );
+            const totalSubQuantity = previousSubQuantity + currentSubQuantity;
+            const subUnitLabel = getUnitSummaryLabel([
+              ...(group.deliveryRows || []).map((row) => row.subUnit),
+              ...previousDeliveryRows.map((row) => row.subUnit),
+            ]);
             const deliveryUnitLabel = getUnitSummaryLabel([
               ...(group.deliveryRows || []).map((row) => row.mainUnit),
               ...previousDeliveryRows.map((row) => row.mainUnit),
@@ -815,6 +828,12 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               تحویل شده کل: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
                               {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                             </span>
+                            {subUnitLabel ? (
+                              <span>
+                                جمع مقدار فرعی: <span className="font-semibold">{toQty(totalSubQuantity)}</span>
+                                <span className="font-semibold mr-1">{subUnitLabel}</span>
+                              </span>
+                            ) : null}
                             <span className={diffClass}>
                               اختلاف مقدار تحویل شده با مقدار دریافتی: {toQty(diff)}
                               {deliveryUnitLabel ? <span className="mr-1">{deliveryUnitLabel}</span> : null}
