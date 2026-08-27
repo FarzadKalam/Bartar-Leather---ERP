@@ -24,6 +24,7 @@ const PAIRS = [
   { kind: 'quantity' as const, mainQtyKey: 'stock', subQtyKey: 'sub_stock' },
   { kind: 'quantity' as const, mainQtyKey: 'quantity', subQtyKey: 'sub_quantity' },
   { kind: 'quantity' as const, mainQtyKey: 'main_quantity', subQtyKey: 'sub_quantity' },
+  { kind: 'quantity' as const, mainQtyKey: 'mainQuantity', subQtyKey: 'subQuantity' },
   { kind: 'quantity' as const, mainQtyKey: 'qty_main', subQtyKey: 'qty_sub' },
   { kind: 'quantity' as const, mainQtyKey: 'delivered_qty', subQtyKey: 'required_qty' },
   { kind: 'quantity' as const, mainQtyKey: 'opening_stock', subQtyKey: 'opening_sub_stock' },

@@ -413,14 +413,17 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
   const loadGridOptions = useCallback(async () => {
     const [{ data: products }, { data: options }] = await Promise.all([
-      supabase.from('products').select('id, name, system_code, category').limit(3000),
+      supabase.from('products').select('id, name, system_code, category, catalog_role').limit(3000),
       supabase.from('dynamic_options').select('category, label, value').eq('is_active', true).limit(4000),
     ]);
 
-    const productOptions = (products || []).map((product: any) => ({
+    const productOptions = (products || [])
+      .filter((product: any) => String(product?.catalog_role || '').toLowerCase() !== 'parent')
+      .map((product: any) => ({
       value: String(product.id),
       label: `${product.system_code || '-'} - ${product.name || '-'}`,
       category: product.category || null,
+      catalog_role: product.catalog_role || null,
     }));
 
     const nextDynamicOptions: Record<string, any[]> = {};
@@ -555,7 +558,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const next = replaceRows ? {} : { ...prev };
       orderedRows.forEach((row) => {
         if (replaceRows || next[row.id] === undefined) {
-          next[row.id] = toNumber(row.quantity);
+          // یک سفارش می‌تواند چند خط تولید با تعدادهای متفاوت داشته باشد؛
+          // مبنای مصرف مواد، مجموع تعداد همان خطوط است.
+          const lineQuantity = toNumber((row as any)?.production_line_qty);
+          next[row.id] = lineQuantity > 0 ? lineQuantity : toNumber(row.quantity);
         }
       });
       return next;
@@ -611,7 +617,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
         lineNoMap.set(lineId, Number(line?.line_no ?? 0));
       });
 
-      const stageOptions: StartStageTaskOption[] = firstTasks
+      // تحویل اولیه می‌تواند مستقیماً به هر مرحلهٔ همان سفارش/خط ارسال شود،
+      // نه فقط نخستین مرحلهٔ خط تولید.
+      const stageOptions: StartStageTaskOption[] = taskRows
         .map((task: any) => {
           const taskId = String(task?.id || '');
           if (!taskId) return null;
@@ -2017,12 +2025,28 @@ const ProductionGroupOrderWizard: React.FC = () => {
           sourceShelfId: group.sourceShelfId ? String(group.sourceShelfId) : null,
           sourceBundleId: group.sourceBundleId === '__unbundled__' ? null : (group.sourceBundleId || null),
           targetShelfId: task?.production_shelf_id ? String(task.production_shelf_id) : null,
-          pieces: Array.isArray(group.pieces) ? group.pieces : [],
+          // موجودی در دست این مرحله فقط از تحویل‌های واقعی شروع تولید ساخته می‌شود.
+          // «pieces» سفارش صرفاً در orderPieces نگه‌داری می‌شود تا با موجودی اشتباه نشود.
+          pieces: (group.deliveryRows || [])
+            .filter((row: any) => calcDeliveredQty(row) > 0)
+            .map((row: any, rowIndex: number) => ({
+              key: String(row?.key || `${String(group.key)}_delivered_${rowIndex}`),
+              name: String(row?.name || `قطعه ${rowIndex + 1}`),
+              length: Math.max(0, toNumber(row?.length)),
+              width: Math.max(0, toNumber(row?.width)),
+              quantity: Math.max(0, toNumber(row?.quantity)),
+              totalQuantity: Math.max(0, toNumber(row?.quantity)),
+              mainUnit: String(row?.mainUnit || ''),
+              subUnit: String(row?.subUnit || ''),
+              subUsage: Math.max(0, toNumber(row?.subQuantity)),
+              sourceQty: calcDeliveredQty(row),
+              handoverQty: calcDeliveredQty(row),
+            })),
           orderPieces: (Array.isArray(group.orderRequirements) ? group.orderRequirements : []).flatMap((req: any) => (
             Array.isArray(req?.pieces) ? req.pieces : []
           )),
           deliveryRows: Array.isArray(group.deliveryRows) ? group.deliveryRows : [],
-          totalSourceQty: toNumber(group.totalUsage),
+          totalSourceQty: toNumber(group.totalDeliveredQty),
           totalOrderQty: toNumber(group.totalUsage),
           totalHandoverQty: toNumber(group.totalDeliveredQty),
           collapsed: true,

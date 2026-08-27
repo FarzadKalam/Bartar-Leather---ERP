@@ -25,6 +25,7 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 import { MODULES } from '../moduleRegistry';
 import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
+import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -600,7 +601,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const buildGroupsFromOrder = useCallback((order: any): StageHandoverGroup[] => {
     const rows = Array.isArray(order?.grid_materials) ? order.grid_materials : [];
-    const orderQty = Math.max(1, toNumber(order?.quantity));
+    // در سفارش تولید، مقدار واقعی برنامه از مجموع تعداد خطوط تولید به‌دست می‌آید.
+    const lineQuantity = lines.reduce((sum, line: any) => sum + Math.max(0, toNumber(line?.quantity)), 0);
+    const orderQty = Math.max(1, lineQuantity || toNumber(order?.quantity));
     return rows.map((row: any, rowIndex: number) => {
       const header = row?.header || {};
       const rowPieces = Array.isArray(row?.pieces) && row.pieces.length > 0 ? row.pieces : [row];
@@ -665,7 +668,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         isConfirmed: false,
       } as StageHandoverGroup);
     });
-  }, [buildPiecesFromOrderRow, normalizeHandoverDeliveryRow, recalcHandoverGroup, resolveCategoryLabel, toNumber]);
+  }, [buildPiecesFromOrderRow, lines, normalizeHandoverDeliveryRow, recalcHandoverGroup, resolveCategoryLabel, toNumber]);
 
   const buildGroupsFromPreviousStage = useCallback((groups: any[]) => {
     const sourceGroups = Array.isArray(groups) ? groups : [];
@@ -741,12 +744,19 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     return baseGroups.map((group) => {
       const savedGroup = savedMap.get(String(group.key));
       if (!savedGroup) return recalcHandoverGroup(group);
-      const savedPieces = new Map<string, any>((Array.isArray(savedGroup?.pieces) ? savedGroup.pieces : []).map((piece: any) => [String(piece?.key || ''), piece]));
-      const pieces = group.pieces.map((piece) => {
+      const savedSourcePieces = Array.isArray(savedGroup?.pieces) ? savedGroup.pieces : [];
+      const savedPieces = new Map<string, any>(savedSourcePieces.map((piece: any) => [String(piece?.key || ''), piece]));
+      const pieces = savedSourcePieces.length > 0 ? savedSourcePieces.map((savedPiece: any, pieceIndex: number) => ({
+        ...savedPiece,
+        key: String(savedPiece?.key || `${String(group.key)}_source_${pieceIndex}`),
+        sourceQty: Math.max(0, toNumber(savedPiece?.sourceQty ?? savedPiece?.source_qty ?? savedPiece?.handoverQty ?? savedPiece?.deliveredQty)),
+        handoverQty: Math.max(0, toNumber(savedPiece?.handoverQty ?? savedPiece?.sourceQty ?? savedPiece?.source_qty ?? savedPiece?.deliveredQty)),
+      })) : group.pieces.map((piece) => {
         const savedPiece = savedPieces.get(String(piece.key));
         if (!savedPiece) return piece;
         return {
           ...piece,
+          sourceQty: Math.max(0, toNumber(savedPiece?.sourceQty ?? savedPiece?.source_qty ?? piece.sourceQty)),
           handoverQty: Math.max(0, toNumber(savedPiece?.handoverQty)),
         };
       });
@@ -1297,11 +1307,30 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['mainQuantity', 'subQuantity'];
+      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'quantity', 'mainQuantity', 'subQuantity'];
       const nextValue = numericFields.includes(field)
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
-      const updatedRow = { ...currentRow, [field]: nextValue };
+      const updatedRow: StageHandoverDeliveryRow = { ...currentRow, [field]: nextValue };
+      if (['length', 'width', 'quantity'].includes(String(field))) {
+        updatedRow.mainQuantity = Math.max(0, toNumber(updatedRow.length) * toNumber(updatedRow.width) * toNumber(updatedRow.quantity));
+        const conversion = getUnitQuantityConversion('mainQuantity', {
+          availableKeys: ['mainQuantity', 'subQuantity'],
+        });
+        if (conversion) {
+          try {
+            updatedRow.subQuantity = calculateUnitQuantity({
+              mainQuantity: updatedRow.mainQuantity,
+              subQuantity: updatedRow.subQuantity,
+              main_unit: updatedRow.mainUnit,
+              sub_unit: updatedRow.subUnit,
+              widthMm: updatedRow.width,
+            }, conversion);
+          } catch {
+            // اگر واحدها هنوز قابل تبدیل نباشند، مقدار فعلی واحد فرعی حفظ می‌شود.
+          }
+        }
+      }
       deliveryRows[rowIndex] = {
         ...updatedRow,
         deliveredQty: Math.max(0, toNumber((updatedRow as any).mainQuantity ?? updatedRow.deliveredQty)),

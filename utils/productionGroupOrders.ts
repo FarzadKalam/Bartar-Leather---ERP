@@ -88,9 +88,9 @@ export const buildGroupStartMaterials = ({
         const perItemUsage = perItemUsageRaw > 0
           ? perItemUsageRaw
           : (totalUsageRaw > 0 ? totalUsageRaw / orderQty : 0);
-        const totalUsage = totalUsageRaw > 0
-          ? totalUsageRaw
-          : perItemUsage * orderQty;
+        // مقدار کل همیشه بر مبنای مجموع تعداد خطوط تولید محاسبه می‌شود.
+        // مقدار ذخیره‌شده در گرید ممکن است متعلق به تعداد قبلی سفارش باشد.
+        const totalUsage = perItemUsage * orderQty;
         const subPerItemUsageRaw = toNumber(piece?.qty_sub);
         const subUsage = subPerItemUsageRaw > 0
           ? subPerItemUsageRaw * orderQty

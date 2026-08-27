@@ -1,9 +1,10 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Button, InputNumber, Modal, Select, Table } from 'antd';
-import { CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
+import { CalculatorOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
-import { convertBetweenUnits, HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
+import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
+import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
 
 export type StartMaterialPiece = {
   key: string;
@@ -756,6 +757,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                           dataSource={group.deliveryRows || []}
                           rowKey="key"
                           className="start-production-delivery-table"
+                          tableLayout="fixed"
                           scroll={{ x: true }}
                           rowSelection={{
                             selectedRowKeys,
@@ -767,7 +769,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'بسته برداشت',
                               dataIndex: 'sourceBundleId',
                               key: 'sourceBundleId',
-                              width: isMobile ? 280 : 240,
+                              width: isMobile ? 240 : 180,
                               render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
                                 <Select
                                   value={value || undefined}
@@ -775,7 +777,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   options={sourceBundleOptions}
                                   showSearch
                                   optionFilterProp="label"
-                                  className="w-full"
+                                  className="w-full min-w-0"
                                   getPopupContainer={() => document.body}
                                   onChange={(bundleId) => onDeliveryRowSourceBundleChange(groupIndex, String(record.key), bundleId || null)}
                                 />
@@ -814,7 +816,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'مقدار واحد اصلی',
                               dataIndex: 'mainQuantity',
                               key: 'mainQuantity',
-                              width: isMobile ? 200 : 160,
+                              width: isMobile ? 220 : 180,
                               render: (value: number, record: StartMaterialDeliveryRow) => <InputNumber value={value}
                                 onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
                                 className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />,
@@ -842,13 +844,16 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'مقدار واحد فرعی',
                               dataIndex: 'subQuantity',
                               key: 'subQuantity',
-                              width: isMobile ? 200 : 160,
+                              width: isMobile ? 220 : 180,
                               render: (value: number, record: StartMaterialDeliveryRow) => (
                                 <div className="flex gap-1">
                                   <InputNumber value={value} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />
-                                  <Button type="text" size="small" title="محاسبه از مقدار واحد اصلی" icon={<SwapOutlined />} onClick={() => {
-                                    const nextValue = convertBetweenUnits(parseNumberInput(record.mainQuantity), record.mainUnit, record.subUnit, { widthMm: group.pieces?.[0]?.width });
-                                    if (Number.isFinite(nextValue)) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue);
+                                  <Button type="text" size="small" title="محاسبه مقدار واحد فرعی" icon={<CalculatorOutlined />} onClick={() => {
+                                    const conversion = getUnitQuantityConversion('mainQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
+                                    if (!conversion) return;
+                                    try {
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
+                                    } catch { /* اعتبارسنجی تبدیل هنگام ورود واحدها انجام می‌شود. */ }
                                   }} />
                                 </div>
                               ),

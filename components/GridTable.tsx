@@ -146,6 +146,7 @@ const GridTable: React.FC<GridTableProps> = ({
     value: string;
     category?: string | null;
     product_type?: string | null;
+    catalog_role?: string | null;
     stock?: number;
     main_unit?: string | null;
   }>>([]);
@@ -692,6 +693,10 @@ const GridTable: React.FC<GridTableProps> = ({
 
     try {
       const product = await fetchProductById(productId);
+      if (String(product?.catalog_role || '').toLowerCase() === 'parent') {
+        message.warning('محصول مادر قابل انتخاب در جدول قطعات نیست. یک متغیر محصول را انتخاب کنید.');
+        return;
+      }
       const productMainUnit = product?.main_unit ? String(product.main_unit) : null;
       const productSubUnit = product?.sub_unit ? String(product.sub_unit) : null;
 
@@ -737,7 +742,7 @@ const GridTable: React.FC<GridTableProps> = ({
     try {
       const { data: products } = await supabase
         .from('products')
-        .select('id, name, system_code, category, product_type, stock, main_unit')
+        .select('id, name, system_code, category, product_type, catalog_role, stock, main_unit')
         .order('created_at', { ascending: false })
         .limit(200);
       const options = (products || []).map((p: any) => ({
@@ -745,6 +750,7 @@ const GridTable: React.FC<GridTableProps> = ({
         label: p.system_code ? `${p.system_code} - ${p.name}` : p.name,
         category: p.category || null,
         product_type: p.product_type || null,
+        catalog_role: p.catalog_role || null,
         stock: p.stock ?? 0,
         main_unit: p.main_unit || null,
       }));
@@ -763,7 +769,7 @@ const GridTable: React.FC<GridTableProps> = ({
       const keyword = String(searchText || '').trim();
       let query = supabase
         .from('products')
-        .select('id, name, system_code, category')
+        .select('id, name, system_code, category, catalog_role')
         .order('name', { ascending: true })
         .limit(1000);
 
@@ -781,7 +787,9 @@ const GridTable: React.FC<GridTableProps> = ({
       const { data: products, error } = await query;
       if (error) throw error;
 
-      const options = (products || []).map((product: any) => ({
+      const options = (products || [])
+        .filter((product: any) => String(product?.catalog_role || '').toLowerCase() !== 'parent')
+        .map((product: any) => ({
         value: String(product.id),
         label: product.system_code ? `${product.system_code} - ${product.name}` : product.name,
         category: product.category || null,
@@ -915,6 +923,10 @@ const GridTable: React.FC<GridTableProps> = ({
       if (targetRowIndex < 0) {
         try {
           const product = await fetchProductById(String(transferTargetProductId));
+          if (String(product?.catalog_role || '').toLowerCase() === 'parent') {
+            message.warning('محصول مادر نمی‌تواند مقصد قطعات باشد. یک متغیر محصول را انتخاب کنید.');
+            return;
+          }
           if (!matchesCategory(product?.category, sourceCategory)) {
             message.warning('محصول جدید باید در همان دسته‌بندی جدول فعلی باشد.');
             return;
@@ -998,13 +1010,14 @@ const GridTable: React.FC<GridTableProps> = ({
       try {
         const { data: products } = await supabase
           .from('products')
-          .select('id, name, system_code, category, product_type, stock, main_unit')
+          .select('id, name, system_code, category, product_type, catalog_role, stock, main_unit')
           .in('id', missing);
         const options = (products || []).map((p: any) => ({
           value: p.id,
           label: p.system_code ? `${p.system_code} - ${p.name}` : p.name,
           category: p.category || null,
           product_type: p.product_type || null,
+          catalog_role: p.catalog_role || null,
           stock: p.stock ?? 0,
           main_unit: p.main_unit || null,
         }));
@@ -1245,6 +1258,10 @@ const GridTable: React.FC<GridTableProps> = ({
                       if (!scan.recordId || scan.moduleId !== 'products') return;
                       try {
                         const product = await fetchProductById(scan.recordId);
+                        if (String(product?.catalog_role || '').toLowerCase() === 'parent') {
+                          message.warning('محصول مادر قابل انتخاب نیست. یک متغیر محصول را اسکن کنید.');
+                          return;
+                        }
                         if (!matchesCategory(product?.category, categoryValue)) {
                           message.warning('محصول اسکن‌شده با دسته‌بندی این جدول همخوانی ندارد.');
                           return;
@@ -1333,6 +1350,7 @@ const GridTable: React.FC<GridTableProps> = ({
                         const selectedMainUnit = row?.header?.selected_product_main_unit ?? selectedFromRaw?.main_unit ?? null;
                         const filteredOptions = rawOptions
                           .filter((o: any) => {
+                            if (String(o.catalog_role || '').toLowerCase() === 'parent') return false;
                             if (o.product_type && o.product_type !== 'raw') return false;
                             if (categoryValue && o.category && o.category !== categoryValue) {
                               if (selectedId && o.value === selectedId) return true;

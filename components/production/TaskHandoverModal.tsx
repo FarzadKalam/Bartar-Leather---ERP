@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Input, InputNumber, Modal, Select, Table } from 'antd';
-import { CheckOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
+import { CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persianFa from 'react-date-object/locales/persian_fa';
@@ -8,7 +8,8 @@ import gregorian from 'react-date-object/calendars/gregorian';
 import gregorianEn from 'react-date-object/locales/gregorian_en';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import QrScanPopover from '../QrScanPopover';
-import { convertBetweenUnits, HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
+import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
+import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
 
 export type StageHandoverPiece = {
   key: string;
@@ -660,6 +661,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         dataSource={group.deliveryRows || []}
                         rowKey="key"
                         className="task-handover-delivery-table"
+                        tableLayout="fixed"
                         scroll={{ x: true }}
                         rowSelection={{
                           selectedRowKeys,
@@ -668,11 +670,25 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         }}
                         columns={[
                           {
-                            title: 'بسته برداشت',
-                            dataIndex: 'sourceBundleId',
-                            key: 'sourceBundleId',
-                            width: isMobile ? 190 : 150,
-                            render: (value: string | null | undefined) => <span className="text-xs text-gray-700">{value || '-'}</span>,
+                            title: 'نام قطعه',
+                            dataIndex: 'name',
+                            key: 'name',
+                            width: isMobile ? 180 : 140,
+                            render: (value: string, record: StageHandoverDeliveryRow) => (
+                              <Input value={value} onChange={(event) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', event.target.value)} disabled={locked} />
+                            ),
+                          },
+                          {
+                            title: 'طول', dataIndex: 'length', key: 'length', width: isMobile ? 120 : 90,
+                            render: (value: number, record: StageHandoverDeliveryRow) => <InputNumber value={value} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextValue)} disabled={locked} />,
+                          },
+                          {
+                            title: 'عرض', dataIndex: 'width', key: 'width', width: isMobile ? 120 : 90,
+                            render: (value: number, record: StageHandoverDeliveryRow) => <InputNumber value={value} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextValue)} disabled={locked} />,
+                          },
+                          {
+                            title: 'تعداد', dataIndex: 'quantity', key: 'quantity', width: isMobile ? 120 : 90,
+                            render: (value: number, record: StageHandoverDeliveryRow) => <InputNumber value={value} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextValue)} disabled={locked} />,
                           },
                           {
                             title: 'واحد اصلی',
@@ -697,10 +713,17 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             key: 'mainQuantity',
                             width: isMobile ? 200 : 160,
                             render: (value: number, record: StageHandoverDeliveryRow) => (
-                              <InputNumber value={value} className="w-full persian-number" stringMode
+                              <div className="flex gap-1"><InputNumber value={value} className="w-full persian-number" stringMode
                                 formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)}
                                 onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
                                 onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} disabled={locked} />
+                                <Button type="text" size="small" title="محاسبه مقدار واحد فرعی" icon={<CalculatorOutlined />} disabled={locked} onClick={() => {
+                                  const conversion = getUnitQuantityConversion('mainQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
+                                  if (!conversion) return;
+                                  try {
+                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
+                                  } catch { /* اعتبارسنجی تبدیل در ورود دستی واحدها انجام می‌شود. */ }
+                                }} /></div>
                             ),
                           },
                           {
@@ -728,9 +751,12 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             render: (value: number, record: StageHandoverDeliveryRow) => (
                               <div className="flex gap-1">
                                 <InputNumber value={value} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} disabled={locked} />
-                                <Button type="text" size="small" title="محاسبه از مقدار واحد اصلی" icon={<SwapOutlined />} disabled={locked} onClick={() => {
-                                  const nextValue = convertBetweenUnits(parseNumberInput(record.mainQuantity), record.mainUnit, record.subUnit, { widthMm: group.pieces?.[0]?.width });
-                                  if (Number.isFinite(nextValue)) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue);
+                                <Button type="text" size="small" title="محاسبه مقدار واحد اصلی" icon={<CalculatorOutlined />} disabled={locked} onClick={() => {
+                                  const conversion = getUnitQuantityConversion('subQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
+                                  if (!conversion) return;
+                                  try {
+                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
+                                  } catch { /* اعتبارسنجی تبدیل در ورود دستی واحدها انجام می‌شود. */ }
                                 }} />
                               </div>
                             ),
