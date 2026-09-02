@@ -1,13 +1,12 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Input, InputNumber, Modal, Select, Table } from 'antd';
-import { CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
+import { ArrowDownOutlined, ArrowUpOutlined, CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persianFa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorianEn from 'react-date-object/locales/gregorian_en';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
-import QrScanPopover from '../QrScanPopover';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
 
@@ -79,6 +78,13 @@ export type StageHandoverTaskOption = {
   shelfLabel?: string | null;
 };
 
+export type StageHandoverBundleOption = {
+  value: string;
+  label: string;
+  shelfId?: string | null;
+  stock?: number;
+};
+
 interface TaskHandoverModalProps {
   open: boolean;
   loading: boolean;
@@ -91,20 +97,22 @@ interface TaskHandoverModalProps {
   trafficType: StageHandoverTrafficType;
   trafficTypeEditable: boolean;
   sourceStageValue: string | null; // "__central__" for central warehouse
-  sourceShelfId: string | null;
   destinationStageId: string | null;
   stageOptions: StageHandoverTaskOption[];
-  centralSourceShelfOptions: { label: string; value: string }[];
+  bundleOptionsByProduct?: Record<string, StageHandoverBundleOption[]>;
+  /** Legacy shelf props are accepted for callers with persisted/read-only forms;
+   * shelf selection is no longer rendered and package rows determine source shelf. */
+  sourceShelfId?: string | null;
+  centralSourceShelfOptions?: StageHandoverTaskOption[];
+  shelfOptions?: StageHandoverTaskOption[];
+  targetShelfId?: string | null;
   groups: StageHandoverGroup[];
-  shelfOptions: { label: string; value: string }[];
-  targetShelfId: string | null;
   giverConfirmation: StageHandoverConfirm;
   receiverConfirmation: StageHandoverConfirm;
   onCancel: () => void;
   onSave: () => void;
   onTrafficTypeChange: (nextType: StageHandoverTrafficType) => void;
   onSourceStageChange: (value: string | null) => void;
-  onSourceShelfChange: (shelfId: string | null) => void;
   onDestinationStageChange: (taskId: string | null) => void;
   onToggleGroup: (groupIndex: number, collapsed: boolean) => void;
   onConfirmGroup: (groupIndex: number) => void;
@@ -122,8 +130,9 @@ interface TaskHandoverModalProps {
     field: keyof Omit<StageHandoverDeliveryRow, 'key'>,
     value: any
   ) => void;
-  onTargetShelfChange: (shelfId: string | null) => void;
-  onTargetShelfScan: (shelfId: string) => void;
+  onSourceShelfChange?: (shelfId: string | null) => void;
+  onTargetShelfChange?: (shelfId: string | null) => void;
+  onTargetShelfScan?: (shelfId: string) => void;
   onConfirmGiver: () => void;
   onConfirmReceiver: () => void;
 }
@@ -214,20 +223,16 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   trafficType,
   trafficTypeEditable,
   sourceStageValue,
-  sourceShelfId,
   destinationStageId,
   stageOptions,
-  centralSourceShelfOptions,
+  bundleOptionsByProduct = {},
   groups,
-  shelfOptions,
-  targetShelfId,
   giverConfirmation,
   receiverConfirmation,
   onCancel,
   onSave,
   onTrafficTypeChange,
   onSourceStageChange,
-  onSourceShelfChange,
   onDestinationStageChange,
   onToggleGroup,
   onConfirmGroup,
@@ -235,8 +240,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   onDeliveryRowsDelete,
   onDeliveryRowsTransfer,
   onDeliveryRowFieldChange,
-  onTargetShelfChange,
-  onTargetShelfScan,
   onConfirmGiver,
   onConfirmReceiver,
 }) => {
@@ -279,11 +282,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
     });
     return map;
   }, [stageOptions]);
-
-  const sourceStageOption = useMemo(() => {
-    if (!sourceStageValue || sourceStageValue === '__central__') return null;
-    return stageOptionMap.get(String(sourceStageValue)) || null;
-  }, [sourceStageValue, stageOptionMap]);
 
   const destinationStageOption = useMemo(() => {
     if (!destinationStageId) return null;
@@ -392,20 +390,40 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
     >
       <div className="space-y-4">
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <div className="text-xs text-gray-500 mb-1">نوع تردد کالا</div>
-              <Select
-                value={trafficType}
-                onChange={(value) => onTrafficTypeChange(value as StageHandoverTrafficType)}
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => onTrafficTypeChange('incoming')}
                 disabled={!trafficTypeEditable || locked}
-                options={[
-                  { value: 'incoming', label: `ورود به مرحله "${taskName}"` },
-                  { value: 'outgoing', label: `خروج از مرحله "${taskName}"` },
-                ]}
-                className="w-full"
-                getPopupContainer={() => document.body}
-              />
+                className={`rounded-xl border-2 p-3 text-right transition-all ${trafficType === 'incoming' ? 'border-green-500 bg-green-50 shadow-sm' : 'border-gray-200 bg-white hover:border-green-300'} disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-700">
+                    <ArrowDownOutlined className="text-xl" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-bold text-gray-800">ورود به مرحله</span>
+                    <span className="block text-xs text-gray-500">{taskName}</span>
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => onTrafficTypeChange('outgoing')}
+                disabled={!trafficTypeEditable || locked}
+                className={`rounded-xl border-2 p-3 text-right transition-all ${trafficType === 'outgoing' ? 'border-red-500 bg-red-50 shadow-sm' : 'border-gray-200 bg-white hover:border-red-300'} disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 text-red-700">
+                    <ArrowUpOutlined className="text-xl" />
+                  </span>
+                  <span>
+                    <span className="block text-sm font-bold text-gray-800">خروج از مرحله</span>
+                    <span className="block text-xs text-gray-500">{taskName}</span>
+                  </span>
+                </div>
+              </button>
             </div>
 
             {trafficType === 'incoming' ? (
@@ -426,27 +444,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                     optionFilterProp="label"
                   />
                 </div>
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">قفسه برداشت</div>
-                  {sourceStageValue && sourceStageValue !== '__central__' ? (
-                    <Input
-                      value={sourceStageOption?.shelfLabel || 'قفسه تعیین نشده'}
-                      readOnly
-                    />
-                  ) : (
-                    <Select
-                      value={sourceShelfId}
-                      onChange={(value) => onSourceShelfChange(value || null)}
-                      options={centralSourceShelfOptions}
-                      className="w-full"
-                      getPopupContainer={() => document.body}
-                      showSearch
-                      optionFilterProp="label"
-                      placeholder="انتخاب قفسه از انبار مرکزی"
-                      disabled={!trafficTypeEditable || locked}
-                    />
-                  )}
-                </div>
               </>
             ) : (
               <>
@@ -464,13 +461,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                     placeholder="انتخاب مرحله مقصد"
                   />
                 </div>
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">قفسه تحویل مقصد</div>
-                  <Input
-                    value={destinationStageOption?.shelfLabel || 'قفسه مقصد تعیین نشده (قابل ثبت توسط تحویل‌گیرنده)'}
-                    readOnly
-                  />
-                </div>
               </>
             )}
           </div>
@@ -483,6 +473,9 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
         ) : (
           groups.map((group, groupIndex) => {
             const selectedRowKeys = getSelectedRowKeys(group.key);
+            const bundleOptions = group.selectedProductId
+              ? (bundleOptionsByProduct[String(group.selectedProductId)] || [])
+              : [];
             const consumptionUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.mainUnit));
             const previousDeliveryRows = Array.isArray(group.previousDeliveryRows) ? group.previousDeliveryRows : [];
             const previousDeliveredQty = Math.max(
@@ -491,19 +484,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             );
             const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalHandoverQty));
             const totalDeliveredWithHistory = previousDeliveredQty + currentDeliveredQty;
-            const currentSubQuantity = (group.deliveryRows || []).reduce(
-              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
-              0
-            );
-            const previousSubQuantity = previousDeliveryRows.reduce(
-              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
-              0
-            );
-            const totalSubQuantity = previousSubQuantity + currentSubQuantity;
-            const subUnitLabel = getUnitSummaryLabel([
-              ...(group.deliveryRows || []).map((row) => row.subUnit),
-              ...previousDeliveryRows.map((row) => row.subUnit),
-            ]);
             const deliveryUnitLabel = getUnitSummaryLabel([
               ...(group.deliveryRows || []).map((row) => row.mainUnit),
               ...previousDeliveryRows.map((row) => row.mainUnit),
@@ -683,6 +663,25 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         }}
                         columns={[
                           {
+                            title: 'بسته محصول',
+                            dataIndex: 'sourceBundleId',
+                            key: 'sourceBundleId',
+                            width: isMobile ? 220 : 180,
+                            render: (value: string | null | undefined, record: StageHandoverDeliveryRow) => (
+                              <Select
+                                value={value || undefined}
+                                placeholder="انتخاب بسته"
+                                options={bundleOptions}
+                                showSearch
+                                optionFilterProp="label"
+                                className="w-full"
+                                getPopupContainer={() => document.body}
+                                onChange={(bundleId) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'sourceBundleId', bundleId || null)}
+                                disabled={locked}
+                              />
+                            ),
+                          },
+                          {
                             title: 'نام قطعه',
                             dataIndex: 'name',
                             key: 'name',
@@ -828,12 +827,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               تحویل شده کل: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
                               {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                             </span>
-                            {subUnitLabel ? (
-                              <span>
-                                جمع مقدار فرعی: <span className="font-semibold">{toQty(totalSubQuantity)}</span>
-                                <span className="font-semibold mr-1">{subUnitLabel}</span>
-                              </span>
-                            ) : null}
                             <span className={diffClass}>
                               اختلاف مقدار تحویل شده با مقدار دریافتی: {toQty(diff)}
                               {deliveryUnitLabel ? <span className="mr-1">{deliveryUnitLabel}</span> : null}
@@ -848,32 +841,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             );
           })
         )}
-
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
-          <div className="text-xs text-gray-500">
-            قفسه مرحله <span className="font-black text-[#1f4534]">"{taskName}"</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Select
-              value={targetShelfId}
-              onChange={(value) => onTargetShelfChange(value || null)}
-              options={shelfOptions}
-              showSearch
-              optionFilterProp="label"
-              placeholder="انتخاب قفسه مرحله"
-              className="w-full"
-              getPopupContainer={() => document.body}
-              disabled={locked}
-            />
-            <QrScanPopover
-              label=""
-              buttonProps={{ type: 'default', shape: 'circle', disabled: locked }}
-              onScan={({ moduleId, recordId }) => {
-                if (moduleId === 'shelves' && recordId) onTargetShelfScan(recordId);
-              }}
-            />
-          </div>
-        </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-3">
           <div className="text-xs text-gray-700">

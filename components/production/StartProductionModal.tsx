@@ -15,6 +15,7 @@ export type StartMaterialPiece = {
   totalQuantity: number;
   mainUnit: string;
   subUnit: string;
+  subPerItemUsage: number;
   subUsage: number;
   perItemUsage: number;
   totalUsage: number;
@@ -157,6 +158,32 @@ const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
   const quantity = parseNumberInput((row as any)?.quantity);
   return Math.max(0, length * width * quantity);
 };
+
+const calcSubPerItemUsage = (piece?: Partial<StartMaterialPiece> | null) => {
+  const explicitValue = (piece as any)?.subPerItemUsage ?? (piece as any)?.sub_per_item_usage;
+  if (explicitValue !== undefined && explicitValue !== null && explicitValue !== '') {
+    return Math.max(0, parseNumberInput(explicitValue));
+  }
+
+  // سازگاری با فرم‌های قدیمی که فقط مقدار فرعی کل را ذخیره کرده‌اند.
+  const totalSubUsage = Math.max(0, parseNumberInput(piece?.subUsage));
+  const quantity = Math.max(0, parseNumberInput(piece?.quantity));
+  const totalQuantity = Math.max(0, parseNumberInput(piece?.totalQuantity));
+  const productionCount = quantity > 0 ? totalQuantity / quantity : 0;
+  return productionCount > 0 ? totalSubUsage / productionCount : totalSubUsage;
+};
+
+const sumSubPerItemUsage = (pieces?: StartMaterialPiece[] | null) =>
+  (Array.isArray(pieces) ? pieces : []).reduce(
+    (sum, piece) => sum + calcSubPerItemUsage(piece),
+    0
+  );
+
+const sumSubUsage = (pieces?: StartMaterialPiece[] | null) =>
+  (Array.isArray(pieces) ? pieces : []).reduce(
+    (sum, piece) => sum + Math.max(0, parseNumberInput(piece?.subUsage)),
+    0
+  );
 
 const getUnitSummaryLabel = (units: Array<string | null | undefined>) => {
   const unique = Array.from(
@@ -333,6 +360,9 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
               : [];
             const selectedRowKeys = getSelectedRowKeys(group.key);
             const consumptionUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.mainUnit));
+            const consumptionSubUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.subUnit));
+            const totalRequiredSubQuantity = sumSubUsage(group.pieces);
+            const totalRequiredPerItemSubQuantity = sumSubPerItemUsage(group.pieces);
             const deliveryUnitLabel = getUnitSummaryLabel((group.deliveryRows || []).map((row) => row.mainUnit)) || consumptionUnitLabel;
             const hasDeliveryRows = Array.isArray(group.deliveryRows) && group.deliveryRows.length > 0;
             const previousDeliveryRows = Array.isArray(group.previousDeliveryRows) ? group.previousDeliveryRows : [];
@@ -354,7 +384,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
             const subUnitLabel = getUnitSummaryLabel([
               ...(group.deliveryRows || []).map((row) => row.subUnit),
               ...previousDeliveryRows.map((row) => row.subUnit),
-            ]);
+            ]) || consumptionSubUnitLabel;
 
             const headerToneClass = isFullyDelivered
               ? 'bg-[#1f4534] text-white shadow-sm'
@@ -379,9 +409,23 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                     <div className={`text-[11px] mt-0.5 ${headerMetaClass}`}>
                       مورد نیاز کل: <span className="font-semibold">{formatQty(group.totalUsage || 0)}</span>
                       {consumptionUnitLabel ? <span className="font-semibold mr-1">{consumptionUnitLabel}</span> : null}
+                      {consumptionSubUnitLabel ? (
+                        <>
+                          <span className="mx-1">/</span>
+                          <span className="font-semibold">{formatQty(totalRequiredSubQuantity)}</span>
+                          <span className="font-semibold mr-1">{consumptionSubUnitLabel}</span>
+                        </>
+                      ) : null}
                       <span className="mx-1">|</span>
                       تحویل شده کل: <span className="font-semibold">{formatQty(totalDeliveredWithHistory)}</span>
                       {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                      {subUnitLabel ? (
+                        <>
+                          <span className="mx-1">/</span>
+                          <span className="font-semibold">{formatQty(totalSubQuantity)}</span>
+                          <span className="font-semibold mr-1">{subUnitLabel}</span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -414,6 +458,9 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                       <div className="mb-4 space-y-3">
                         {group.orderRequirements.map((requirement, reqIndex) => {
                           const reqUnitLabel = getUnitSummaryLabel((requirement.pieces || []).map((piece) => piece.mainUnit));
+                          const reqSubUnitLabel = getUnitSummaryLabel((requirement.pieces || []).map((piece) => piece.subUnit));
+                          const reqTotalSubPerItemUsage = sumSubPerItemUsage(requirement.pieces);
+                          const reqTotalSubUsage = sumSubUsage(requirement.pieces);
                           const requirementSectionKey = `${group.key}_requirement_${reqIndex}`;
                           const requirementExpanded = isRequirementSectionExpanded(requirementSectionKey);
                           return (
@@ -515,10 +562,24 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                     <span>
                                       جمع مصرف هر تولید: <span className="font-medium">{formatQty(requirement.totalPerItemUsage || 0)}</span>
                                       {reqUnitLabel ? <span className="font-medium mr-1">{reqUnitLabel}</span> : null}
+                                      {reqSubUnitLabel ? (
+                                        <>
+                                          <span className="mx-1">/</span>
+                                          <span className="font-medium">{formatQty(reqTotalSubPerItemUsage)}</span>
+                                          <span className="font-medium mr-1">{reqSubUnitLabel}</span>
+                                        </>
+                                      ) : null}
                                     </span>
                                     <span>
                                       جمع مصرف کل: <span className="font-medium">{formatQty(requirement.totalUsage || 0)}</span>
                                       {reqUnitLabel ? <span className="font-medium mr-1">{reqUnitLabel}</span> : null}
+                                      {reqSubUnitLabel ? (
+                                        <>
+                                          <span className="mx-1">/</span>
+                                          <span className="font-medium">{formatQty(reqTotalSubUsage)}</span>
+                                          <span className="font-medium mr-1">{reqSubUnitLabel}</span>
+                                        </>
+                                      ) : null}
                                     </span>
                                   </div>
                                 </>
@@ -632,10 +693,24 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                     <span>
                                       جمع مصرف مورد نیاز هر تولید: <span className="font-medium">{formatQty(group.totalPerItemUsage || 0)}</span>
                                       {consumptionUnitLabel ? <span className="font-medium mr-1">{consumptionUnitLabel}</span> : null}
+                                      {consumptionSubUnitLabel ? (
+                                        <>
+                                          <span className="mx-1">/</span>
+                                          <span className="font-medium">{formatQty(totalRequiredPerItemSubQuantity)}</span>
+                                          <span className="font-medium mr-1">{consumptionSubUnitLabel}</span>
+                                        </>
+                                      ) : null}
                                     </span>
                                     <span>
                                       جمع مصرف مورد نیاز کل: <span className="font-semibold">{formatQty(group.totalUsage || 0)}</span>
                                       {consumptionUnitLabel ? <span className="font-semibold mr-1">{consumptionUnitLabel}</span> : null}
+                                      {consumptionSubUnitLabel ? (
+                                        <>
+                                          <span className="mx-1">/</span>
+                                          <span className="font-semibold">{formatQty(totalRequiredSubQuantity)}</span>
+                                          <span className="font-semibold mr-1">{consumptionSubUnitLabel}</span>
+                                        </>
+                                      ) : null}
                                     </span>
                                   </div>
                                 </>
@@ -653,10 +728,24 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                         <span>
                           جمع مصرف مورد نیاز هر تولید: <span className="font-medium">{formatQty(group.totalPerItemUsage)}</span>
                           {consumptionUnitLabel ? <span className="font-medium mr-1">{consumptionUnitLabel}</span> : null}
+                          {consumptionSubUnitLabel ? (
+                            <>
+                              <span className="mx-1">/</span>
+                              <span className="font-medium">{formatQty(totalRequiredPerItemSubQuantity)}</span>
+                              <span className="font-medium mr-1">{consumptionSubUnitLabel}</span>
+                            </>
+                          ) : null}
                         </span>
                         <span className="text-[#1f4534] font-semibold">
                           جمع مصرف مورد نیاز کل: <span className="font-bold">{formatQty(group.totalUsage)}</span>
                           {consumptionUnitLabel ? <span className="font-bold mr-1">{consumptionUnitLabel}</span> : null}
+                          {consumptionSubUnitLabel ? (
+                            <>
+                              <span className="mx-1">/</span>
+                              <span className="font-bold">{formatQty(totalRequiredSubQuantity)}</span>
+                              <span className="font-bold mr-1">{consumptionSubUnitLabel}</span>
+                            </>
+                          ) : null}
                         </span>
                       </div>
 
@@ -720,6 +809,13 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   render: (value: string) => <span className="text-gray-700">{value || '-'}</span>,
                                 },
                                 {
+                                  title: 'مقدار واحد فرعی',
+                                  dataIndex: 'subQuantity',
+                                  key: 'subQuantity',
+                                  width: 140,
+                                  render: (value: number) => <span className="font-semibold text-[#17372a]">{formatQty(value)}</span>,
+                                },
+                                {
                                   title: 'مقدار تحویل شده',
                                   dataIndex: 'deliveredQty',
                                   key: 'deliveredQty',
@@ -733,6 +829,13 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                             <div className="mt-2 text-[11px] text-blue-900">
                               جمع مقادیر تحویل شده قبلی: <span className="font-semibold">{formatQty(previousDeliveredQty)}</span>
                               {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                              {subUnitLabel ? (
+                                <>
+                                  <span className="mx-1">/</span>
+                                  <span className="font-semibold">{formatQty(previousSubQuantity)}</span>
+                                  <span className="font-semibold mr-1">{subUnitLabel}</span>
+                                </>
+                              ) : null}
                             </div>
                           </div>
                         ) : null}
@@ -796,16 +899,6 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   onChange={(bundleId) => onDeliveryRowSourceBundleChange(groupIndex, String(record.key), bundleId || null)}
                                 />
                               ),
-                            },
-                            {
-                              title: 'قفسه برداشت',
-                              dataIndex: 'sourceShelfId',
-                              key: 'sourceShelfId',
-                              width: isMobile ? 220 : 170,
-                              render: (_value: string | null | undefined, record: StartMaterialDeliveryRow) => {
-                                const bundle = sourceBundleOptions.find((item) => String(item.value) === String(record.sourceBundleId || ''));
-                                return <span className="block whitespace-normal break-words leading-5 text-xs text-gray-700">{bundle?.shelfLabel || '-'}</span>;
-                              },
                             },
                             {
                               title: 'واحد اصلی',
@@ -916,21 +1009,36 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               <span>
                                 جمع مقدار تحویل جدید: <span className="font-semibold">{formatQty(currentDeliveredQty)}</span>
                                 {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                                {subUnitLabel ? (
+                                  <>
+                                    <span className="mx-1">/</span>
+                                    <span className="font-semibold">{formatQty(currentSubQuantity)}</span>
+                                    <span className="font-semibold mr-1">{subUnitLabel}</span>
+                                  </>
+                                ) : null}
                               </span>
                               <span>
                                 جمع مقادیر تحویل شده قبلی: <span className="font-semibold">{formatQty(previousDeliveredQty)}</span>
                                 {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                                {subUnitLabel ? (
+                                  <>
+                                    <span className="mx-1">/</span>
+                                    <span className="font-semibold">{formatQty(previousSubQuantity)}</span>
+                                    <span className="font-semibold mr-1">{subUnitLabel}</span>
+                                  </>
+                                ) : null}
                               </span>
                               <span>
                                 تحویل شده کل: <span className="font-semibold">{formatQty(totalDeliveredWithHistory)}</span>
                                 {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                                {subUnitLabel ? (
+                                  <>
+                                    <span className="mx-1">/</span>
+                                    <span className="font-semibold">{formatQty(totalSubQuantity)}</span>
+                                    <span className="font-semibold mr-1">{subUnitLabel}</span>
+                                  </>
+                                ) : null}
                               </span>
-                              {subUnitLabel ? (
-                                <span>
-                                  جمع مقدار فرعی: <span className="font-semibold">{formatQty(totalSubQuantity)}</span>
-                                  <span className="font-semibold mr-1">{subUnitLabel}</span>
-                                </span>
-                              ) : null}
                               <span className={diffClass}>
                                 اختلاف مقدار تحویل شده با مقدار مورد نیاز: {formatQty(diff)}
                                 {deliveryUnitLabel ? <span className="mr-1">{deliveryUnitLabel}</span> : null}
@@ -943,7 +1051,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                       <div className={`grid grid-cols-1 ${hideSourceShelfSelector ? 'md:grid-cols-1' : 'md:grid-cols-2'} gap-3`}>
                         {!hideSourceShelfSelector ? (
                           <div className="space-y-2">
-                            <div className="text-xs text-gray-500">بسته و قفسهٔ برداشت را در هر ردیف تحویل انتخاب کنید.</div>
+                            <div className="text-xs text-gray-500">بسته برداشت را در هر ردیف تحویل انتخاب کنید.</div>
                           </div>
                         ) : null}
                         <div className="space-y-2">

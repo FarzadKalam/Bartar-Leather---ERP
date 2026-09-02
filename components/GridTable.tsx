@@ -65,6 +65,7 @@ const createEmptyRow = () => ({
     selected_product_id: null,
     selected_product_name: null,
     selected_product_stock: null,
+    selected_product_sub_stock: null,
     selected_product_main_unit: null,
     selected_product_sub_unit: null,
   },
@@ -148,7 +149,9 @@ const GridTable: React.FC<GridTableProps> = ({
     product_type?: string | null;
     catalog_role?: string | null;
     stock?: number;
+    sub_stock?: number;
     main_unit?: string | null;
+    sub_unit?: string | null;
   }>>([]);
   const [productOptionsLoading, setProductOptionsLoading] = useState(false);
   const [localDynamicOptions, setLocalDynamicOptions] = useState<Record<string, any[]>>({});
@@ -681,6 +684,7 @@ const GridTable: React.FC<GridTableProps> = ({
         selected_product_id: null,
         selected_product_name: null,
         selected_product_stock: null,
+        selected_product_sub_stock: null,
         selected_product_main_unit: null,
         selected_product_sub_unit: null,
       };
@@ -705,6 +709,7 @@ const GridTable: React.FC<GridTableProps> = ({
         selected_product_id: product?.id || productId,
         selected_product_name: product?.name || '',
         selected_product_stock: product?.stock ?? 0,
+        selected_product_sub_stock: product?.sub_stock ?? 0,
         selected_product_main_unit: product?.main_unit || null,
         selected_product_sub_unit: product?.sub_unit || null,
       };
@@ -742,7 +747,7 @@ const GridTable: React.FC<GridTableProps> = ({
     try {
       const { data: products } = await supabase
         .from('products')
-        .select('id, name, system_code, category, product_type, catalog_role, stock, main_unit')
+        .select('id, name, system_code, category, product_type, catalog_role, stock, sub_stock, main_unit, sub_unit')
         .order('created_at', { ascending: false })
         .limit(200);
       const options = (products || []).map((p: any) => ({
@@ -752,7 +757,9 @@ const GridTable: React.FC<GridTableProps> = ({
         product_type: p.product_type || null,
         catalog_role: p.catalog_role || null,
         stock: p.stock ?? 0,
+        sub_stock: p.sub_stock ?? 0,
         main_unit: p.main_unit || null,
+        sub_unit: p.sub_unit || null,
       }));
       setProductOptions(options);
     } catch (err) {
@@ -945,7 +952,9 @@ const GridTable: React.FC<GridTableProps> = ({
               selected_product_id: product?.id || transferTargetProductId,
               selected_product_name: product?.name || '',
               selected_product_stock: product?.stock ?? 0,
+              selected_product_sub_stock: product?.sub_stock ?? 0,
               selected_product_main_unit: product?.main_unit || null,
+              selected_product_sub_unit: product?.sub_unit || null,
             },
             specs,
             specs_locked: true,
@@ -1010,7 +1019,7 @@ const GridTable: React.FC<GridTableProps> = ({
       try {
         const { data: products } = await supabase
           .from('products')
-          .select('id, name, system_code, category, product_type, catalog_role, stock, main_unit')
+          .select('id, name, system_code, category, product_type, catalog_role, stock, sub_stock, main_unit, sub_unit')
           .in('id', missing);
         const options = (products || []).map((p: any) => ({
           value: p.id,
@@ -1019,7 +1028,9 @@ const GridTable: React.FC<GridTableProps> = ({
           product_type: p.product_type || null,
           catalog_role: p.catalog_role || null,
           stock: p.stock ?? 0,
+          sub_stock: p.sub_stock ?? 0,
           main_unit: p.main_unit || null,
+          sub_unit: p.sub_unit || null,
         }));
         if (options.length) {
           setProductOptions((prev) => {
@@ -1347,7 +1358,9 @@ const GridTable: React.FC<GridTableProps> = ({
                           : null;
                         const selectedLabel = selectedFromRaw?.label || selectedName || '-';
                         const selectedStock = row?.header?.selected_product_stock ?? selectedFromRaw?.stock ?? null;
+                        const selectedSubStock = row?.header?.selected_product_sub_stock ?? selectedFromRaw?.sub_stock ?? null;
                         const selectedMainUnit = row?.header?.selected_product_main_unit ?? selectedFromRaw?.main_unit ?? null;
+                        const selectedSubUnit = row?.header?.selected_product_sub_unit ?? selectedFromRaw?.sub_unit ?? null;
                         const filteredOptions = rawOptions
                           .filter((o: any) => {
                             if (String(o.catalog_role || '').toLowerCase() === 'parent') return false;
@@ -1362,7 +1375,9 @@ const GridTable: React.FC<GridTableProps> = ({
                             label: o.label,
                             value: o.value,
                             stock: o?.stock ?? null,
+                            sub_stock: o?.sub_stock ?? null,
                             main_unit: o?.main_unit ?? null,
+                            sub_unit: o?.sub_unit ?? null,
                           }));
                         const hasSelected = selectedId && filteredOptions.some((o: any) => o.value === selectedId);
                         if (selectedId && !hasSelected) {
@@ -1370,7 +1385,9 @@ const GridTable: React.FC<GridTableProps> = ({
                             value: selectedId,
                             label: selectedName || selectedFromRaw?.label || String(selectedId),
                             stock: selectedFromRaw?.stock ?? row?.header?.selected_product_stock ?? null,
+                            sub_stock: selectedFromRaw?.sub_stock ?? row?.header?.selected_product_sub_stock ?? null,
                             main_unit: selectedFromRaw?.main_unit ?? row?.header?.selected_product_main_unit ?? null,
+                            sub_unit: selectedFromRaw?.sub_unit ?? row?.header?.selected_product_sub_unit ?? null,
                           });
                         }
                         if (!rowCanEdit) {
@@ -1380,6 +1397,7 @@ const GridTable: React.FC<GridTableProps> = ({
                               {selectedId ? (
                                 <span className="text-[11px] text-white/90 font-medium">
                                   موجودی: {formatStockLabel(selectedStock)} {selectedMainUnit || ''}
+                                  {selectedSubUnit ? <span className="mr-1">/ {formatStockLabel(selectedSubStock)} {selectedSubUnit}</span> : null}
                                 </span>
                               ) : null}
                             </div>
@@ -1406,6 +1424,7 @@ const GridTable: React.FC<GridTableProps> = ({
                             {selectedId ? (
                               <span className="text-[11px] text-white/90 font-medium leading-none">
                                 موجودی: {formatStockLabel(selectedStock)} {selectedMainUnit || ''}
+                                {selectedSubUnit ? <span className="mr-1">/ {formatStockLabel(selectedSubStock)} {selectedSubUnit}</span> : null}
                               </span>
                             ) : null}
                           </div>

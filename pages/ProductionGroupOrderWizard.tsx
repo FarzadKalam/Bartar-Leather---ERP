@@ -619,7 +619,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
       // تحویل اولیه می‌تواند مستقیماً به هر مرحلهٔ همان سفارش/خط ارسال شود،
       // نه فقط نخستین مرحلهٔ خط تولید.
-      const stageOptions: StartStageTaskOption[] = taskRows
+      const stageOptions: StartStageTaskOption[] = allTasks
         .map((task: any) => {
           const taskId = String(task?.id || '');
           if (!taskId) return null;
@@ -1019,7 +1019,12 @@ const ProductionGroupOrderWizard: React.FC = () => {
             .single();
           if (error) throw error;
           const groupRow = group as GroupOrderRecord;
-          const ids = normalizeIds(groupRow?.production_order_ids);
+          // اگر از سفارش تولید تکی وارد شده باشیم، آن سفارش را حتی در صورت
+          // قدیمی‌بودن production_order_ids سفارش گروهی نیز در تب اول نگه می‌داریم.
+          const ids = Array.from(new Set([
+            ...normalizeIds(groupRow?.production_order_ids),
+            ...normalizeIds(locationState?.selectedOrderIds),
+          ]));
           if (!mounted) return;
           setGroupId(groupRow.id);
           setGroupName(String(groupRow.name || ''));
@@ -1691,6 +1696,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
           quantity: toNumber(row?.quantity),
           mainUnit: String(row?.mainUnit || row?.main_unit || ''),
           subUnit: String(row?.subUnit || row?.sub_unit || ''),
+          subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
           deliveredQty: calcDeliveredQty(row),
           __readonly: true as const,
         }));

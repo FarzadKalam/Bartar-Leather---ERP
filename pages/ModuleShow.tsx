@@ -331,6 +331,7 @@ const ModuleShow: React.FC = () => {
               totalQuantity: toNumber(piece?.quantity) * normalizedOrderQty,
               mainUnit: String(piece?.main_unit || row?.header?.main_unit || ''),
               subUnit: String(piece?.sub_unit || ''),
+              subPerItemUsage: subPerItemUsageRaw,
               subUsage,
               perItemUsage,
               totalUsage,

@@ -1,12 +1,13 @@
 ﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined } from '@ant-design/icons';
+import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, DownOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import PersianDatePicker from './PersianDatePicker';
 import TaskHandoverModal, {
   type StageHandoverConfirm,
+  type StageHandoverBundleOption,
   type StageHandoverGroup,
   type StageHandoverDeliveryRow,
   type StageHandoverTaskOption,
@@ -120,6 +121,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [nextStageTotalsByProduct, setNextStageTotalsByProduct] = useState<Record<string, number>>({});
   const [nextStageSubTotalsByProduct, setNextStageSubTotalsByProduct] = useState<Record<string, number>>({});
   const [handoverStageInventoryRows, setHandoverStageInventoryRows] = useState<StageHandoverInventoryRow[]>([]);
+  const [handoverBundleOptionsByProduct, setHandoverBundleOptionsByProduct] = useState<Record<string, StageHandoverBundleOption[]>>({});
   const [handoverNextTask, setHandoverNextTask] = useState<any | null>(null);
   const [activeHandoverFormId, setActiveHandoverFormId] = useState<string | null>(null);
   const [handoverFormsModalOpen, setHandoverFormsModalOpen] = useState(false);
@@ -133,6 +135,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [handoverSourceShelfId, setHandoverSourceShelfId] = useState<string | null>(null);
   const [handoverDestinationStageId, setHandoverDestinationStageId] = useState<string | null>(null);
   const [openTaskPopoverId, setOpenTaskPopoverId] = useState<string | null>(null);
+  const [expandedStageBars, setExpandedStageBars] = useState<Record<string, boolean>>({});
   const [lineQuantityDrafts, setLineQuantityDrafts] = useState<Record<string, number>>({});
   const [savingLineQuantityId, setSavingLineQuantityId] = useState<string | null>(null);
   const hasFetchedLinesRef = useRef(false);
@@ -428,13 +431,22 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   }, [lines, tasks]);
 
   const getLineTaskChain = useCallback((lineId: string | null | undefined, sourceTasks?: any[]) => {
-    if (!lineId) return [] as any[];
-    const scoped = (sourceTasks || tasks)
-      .filter((item: any) => String(item?.production_line_id || '') === String(lineId))
+    const availableTasks = sourceTasks || tasks;
+    const scoped = lineId
+      ? availableTasks.filter((item: any) => String(item?.production_line_id || '') === String(lineId))
+      : [];
+    // برخی سفارش‌های قدیمی task را بدون production_line_id ذخیره کرده‌اند.
+    // در این حالت، مراحل همین سفارش را به‌عنوان زنجیرهٔ fallback برمی‌گردانیم
+    // تا فهرست «مرحله مقصد» خالی نمایش داده نشود.
+    const chain = scoped.length > 0
+      ? scoped
+      : availableTasks.filter((item: any) => (
+          !recordId || String(item?.related_production_order || '') === String(recordId)
+        ));
+    return chain
       .slice()
       .sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0));
-    return scoped;
-  }, [tasks]);
+  }, [recordId, tasks]);
 
   const toGroupTotals = useCallback((groups: StageHandoverGroup[]) => {
     const totals: Record<string, number> = {};
@@ -470,7 +482,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   // موجودی فیزیکی با کلید کالا + بسته جابه‌جا می‌شود؛ جمع‌زدن صرفاً بر اساس کالا
   // در حالتی که یک کالا از چند بسته آمده باشد، رهگیری را از بین می‌برد.
   const toGroupBundleTotals = useCallback((groups: StageHandoverGroup[]) => {
-    const totals = new Map<string, { productId: string; bundleId: string | null; quantity: number; unit: string | null }>();
+    const totals = new Map<string, { productId: string; bundleId: string | null; shelfId: string | null; quantity: number; unit: string | null }>();
     groups.forEach((group: any) => {
       const pickedPiece = (Array.isArray(group?.pieces) ? group.pieces : []).find(
         (piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id
@@ -486,6 +498,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           0
         ),
         sourceBundleId: group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id || null,
+        sourceShelfId: group?.sourceShelfId || group?.source_shelf_id || null,
         mainUnit: pickedPiece?.mainUnit || pickedPiece?.main_unit || null,
       }];
       sourceRows.forEach((row: any) => {
@@ -498,6 +511,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         totals.set(key, {
           productId,
           bundleId: normalizedBundleId,
+          shelfId: row?.sourceShelfId || row?.source_shelf_id || group?.sourceShelfId || group?.source_shelf_id || null,
           quantity: (current?.quantity || 0) + quantity,
           unit: current?.unit || String(row?.mainUnit || row?.main_unit || pickedPiece?.mainUnit || pickedPiece?.main_unit || '').trim() || null,
         });
@@ -751,7 +765,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         key: String(savedPiece?.key || `${String(group.key)}_source_${pieceIndex}`),
         sourceQty: Math.max(0, toNumber(savedPiece?.sourceQty ?? savedPiece?.source_qty ?? savedPiece?.handoverQty ?? savedPiece?.deliveredQty)),
         handoverQty: Math.max(0, toNumber(savedPiece?.handoverQty ?? savedPiece?.sourceQty ?? savedPiece?.source_qty ?? savedPiece?.deliveredQty)),
-      })) : group.pieces.map((piece) => {
+      })) : group.pieces.map((piece: any) => {
         const savedPiece = savedPieces.get(String(piece.key));
         if (!savedPiece) return piece;
         return {
@@ -765,7 +779,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ? savedGroup.deliveryRows.map((row: any) => normalizeHandoverDeliveryRow(group, row))
         : [];
       if (!deliveryRows.length) {
-        deliveryRows = pieces.map((piece) => {
+        deliveryRows = pieces.map((piece: any) => {
           const savedPiece = savedPieces.get(String(piece.key));
           return normalizeHandoverDeliveryRow(group, {
             pieceKey: piece.key,
@@ -797,10 +811,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     targetShelfId: string | null,
     groups: StageHandoverGroup[]
   ) => {
-    if (!targetShelfId) {
-      setHandoverStageInventoryRows([]);
-      return;
-    }
     const productIds = Array.from(
       new Set(
         (Array.isArray(groups) ? groups : [])
@@ -808,6 +818,44 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           .filter(Boolean)
       )
     );
+
+    // بسته‌ها مستقل از قفسهٔ مرحله انتخاب می‌شوند؛ قفسهٔ واقعی هر بسته فقط
+    // برای ثبت گردش موجودی از روی همین ردیف‌ها استفاده خواهد شد.
+    const bundleOptions: Record<string, StageHandoverBundleOption[]> = {};
+    if (productIds.length > 0) {
+      const { data: bundleRows } = await supabase
+        .from('product_inventory')
+        .select('product_id, shelf_id, stock, bundle_id, product_bundles:bundle_id(bundle_number)')
+        .in('product_id', productIds)
+        .gt('stock', 0);
+      (bundleRows || []).forEach((row: any) => {
+        const productId = String(row?.product_id || '').trim();
+        const bundleId = String(row?.bundle_id || '').trim();
+        if (!productId || !bundleId) return;
+        const shelfId = row?.shelf_id ? String(row.shelf_id) : null;
+        const shelfLabel = shelfId
+          ? (allShelfOptions.find((item) => String(item.value) === shelfId)?.label || shelfId)
+          : 'قفسه تعیین نشده';
+        const bundleNumber = String(row?.product_bundles?.bundle_number || bundleId);
+        const option: StageHandoverBundleOption = {
+          value: bundleId,
+          label: `${bundleNumber} — ${shelfLabel} (موجودی: ${toNumber(row?.stock).toLocaleString('en-US')})`,
+          shelfId,
+          stock: toNumber(row?.stock),
+        };
+        const current = bundleOptions[productId] || [];
+        if (!current.some((item) => String(item.value) === bundleId && String(item.shelfId || '') === String(shelfId || ''))) {
+          current.push(option);
+          bundleOptions[productId] = current;
+        }
+      });
+    }
+    setHandoverBundleOptionsByProduct(bundleOptions);
+
+    if (!targetShelfId) {
+      setHandoverStageInventoryRows([]);
+      return;
+    }
     if (!productIds.length) {
       setHandoverStageInventoryRows([]);
       return;
@@ -896,7 +944,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
 
     setHandoverStageInventoryRows(inventoryRows);
-  }, [toNumber]);
+  }, [allShelfOptions, toNumber]);
 
   const openTaskHandoverModal = useCallback(async (task: any, providedTasks?: any[]) => {
     if (!task?.id || !recordId || isBom) return;
@@ -1312,6 +1360,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
       const updatedRow: StageHandoverDeliveryRow = { ...currentRow, [field]: nextValue };
+      if (field === 'sourceBundleId') {
+        const productId = String(group?.selectedProductId || '').trim();
+        const bundleOption = (handoverBundleOptionsByProduct[productId] || [])
+          .find((option) => String(option.value) === String(nextValue || ''));
+        updatedRow.sourceShelfId = bundleOption?.shelfId || null;
+      }
       if (['length', 'width', 'quantity'].includes(String(field))) {
         updatedRow.mainQuantity = Math.max(0, toNumber(updatedRow.length) * toNumber(updatedRow.width) * toNumber(updatedRow.quantity));
         const conversion = getUnitQuantityConversion('mainQuantity', {
@@ -1338,7 +1392,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
     });
-  }, [recalcHandoverGroup, toNumber]);
+  }, [handoverBundleOptionsByProduct, recalcHandoverGroup, toNumber]);
 
   const confirmHandoverGroup = useCallback((groupIndex: number) => {
     const group = handoverGroups[groupIndex];
@@ -1360,26 +1414,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
     message.success('این محصول ثبت شد.');
   }, [handoverContext?.targetShelfId, handoverGroups]);
-
-  const setHandoverTargetShelf = useCallback((shelfId: string | null) => {
-    setHandoverContext((prev) => (prev ? { ...prev, targetShelfId: shelfId } : prev));
-    setHandoverGroups((prev) =>
-      prev.map((group) => ({
-        ...group,
-        targetShelfId: shelfId,
-        isConfirmed: false,
-      }))
-    );
-  }, []);
-
-  const handleHandoverShelfScan = useCallback((shelfId: string) => {
-    const allowed = productionShelfOptions.some((option) => String(option.value) === String(shelfId));
-    if (!allowed) {
-      message.error('قفسه اسکن‌شده در لیست قفسه‌های تولید نیست.');
-      return;
-    }
-    setHandoverTargetShelf(shelfId);
-  }, [productionShelfOptions, setHandoverTargetShelf]);
 
   const saveHandover = useCallback(async (confirmSide?: StageHandoverSide) => {
     if (!handoverContext || !handoverTask) return false;
@@ -1583,7 +1617,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const nextQty = toNumber(next?.quantity);
         const delta = nextQty - prevQty;
         if (!delta) return;
-        const sourceShelfId = String(effectiveSourceShelfId || '');
+        const sourceShelfId = String(next?.shelfId || previous?.shelfId || effectiveSourceShelfId || '');
         const targetShelfId = String(effectiveTargetShelfId);
         if (!sourceShelfId || !targetShelfId || sourceShelfId === targetShelfId) return;
         const mainUnit = next?.unit || previous?.unit || productUnitById.get(productId) || null;
@@ -2346,17 +2380,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     return option?.label || String(shelfId);
   }, [productionShelfOptions]);
 
-  const centralSourceShelfOptions = useMemo(
-    () =>
-      allShelfOptions
-        .filter((item) => {
-          const warehouseName = String(item.warehouseName || '');
-          return !(warehouseName.includes('تولید') || /production/i.test(warehouseName));
-        })
-        .map(({ label, value }) => ({ label, value })),
-    [allShelfOptions]
-  );
-
   const renderDate = (dateVal: any) => {
     if (!dateVal) return null;
     try {
@@ -2760,12 +2783,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             {task.assignee_type === 'role' ? <TeamOutlined className="text-leather-700" /> : <UserOutlined className="text-leather-700" />}
             <span>مسئول: {getAssigneeLabel(task)}</span>
           </div>
-          {task.production_shelf_id && (
-            <div className="flex items-center gap-2">
-              <span className="text-leather-700">قفسه:</span>
-              <span>{getShelfLabel(task.production_shelf_id)}</span>
-            </div>
-          )}
           {task.wage !== undefined && task.wage !== null && (
             <div className="flex items-center gap-2">
               <span className="text-leather-700">💰</span>
@@ -2801,6 +2818,26 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       </div>
     </div>
   );
+
+  const renderStageDetails = (stage: any, lineQuantity = 0) => {
+    const wage = Math.max(0, toNumber(stage?.wage));
+    const lineWage = wage * Math.max(0, toNumber(lineQuantity));
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-2 text-[11px] text-gray-600 space-y-1">
+        <div className="font-bold text-gray-800 truncate">{stage?.title || stage?.name || stage?.label || 'مرحله'}</div>
+        <div>وضعیت: {stage?.type === 'draft' ? 'پیش‌نویس' : getStatusLabel(stage?.status)}</div>
+        {stage?.type !== 'draft' ? <div>مسئول: {getAssigneeLabel(stage)}</div> : null}
+        {stage?.type !== 'draft' ? <div>مقدار تولیدشده: {toPersianNumber(toNumber(stage?.produced_qty).toLocaleString('en-US'))}</div> : null}
+        <div>دستمزد تکی: {toPersianNumber(wage.toLocaleString('en-US'))} تومان</div>
+        <div>دستمزد کل این خط: {toPersianNumber(lineWage.toLocaleString('en-US'))} تومان</div>
+        {stage?.due_date ? <div>موعد: {renderDate(stage.due_date)}</div> : null}
+      </div>
+    );
+  };
+
+  const toggleStageBar = (barKey: string) => {
+    setExpandedStageBars((prev) => ({ ...prev, [barKey]: !prev[barKey] }));
+  };
 
   const draftList = Array.isArray(draftLocal) ? draftLocal : [];
   const totalWage = lines.reduce((sum, line) => {
@@ -2960,6 +2997,43 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     }
   };
 
+  const handleDeleteLine = (line: any) => {
+    if (!recordId || !line?.id) return;
+    if (isLineCreationLocked) {
+      message.warning('در وضعیت در حال تولید امکان حذف خط وجود ندارد.');
+      return;
+    }
+    Modal.confirm({
+      title: 'حذف خط تولید',
+      content: `آیا از حذف خط ${toPersianNumber(line.line_no || '')} و تمام مراحل آن مطمئن هستید؟`,
+      okText: 'حذف',
+      okType: 'danger',
+      cancelText: 'انصراف',
+      onOk: async () => {
+        try {
+          setLoading(true);
+          const { error: taskError } = await supabase
+            .from('tasks')
+            .delete()
+            .eq('production_line_id', line.id);
+          if (taskError) throw taskError;
+          const { error: lineError } = await supabase
+            .from('production_lines')
+            .delete()
+            .eq('id', line.id);
+          if (lineError) throw lineError;
+          message.success('خط تولید حذف شد.');
+          await fetchLines();
+          await fetchTasks();
+        } catch (error: any) {
+          message.error(`خطا در حذف خط: ${error?.message || 'خطای نامشخص'}`);
+        } finally {
+          setLoading(false);
+        }
+      },
+    });
+  };
+
   if (!isReadyToLoad && readOnly && compact && !isBom) {
     return (
       <div ref={containerRef} className="w-full select-none" dir="rtl">
@@ -3027,6 +3101,22 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               </Tooltip>
             </div>
           )}
+
+          <div className="flex justify-center">
+            <Button
+              type="text"
+              size="small"
+              aria-label={expandedStageBars.draft ? 'بستن اطلاعات مراحل پیش‌نویس' : 'نمایش اطلاعات مراحل پیش‌نویس'}
+              icon={<DownOutlined className={`transition-transform ${expandedStageBars.draft ? 'rotate-180' : ''}`} />}
+              onClick={() => toggleStageBar('draft')}
+              className="!text-gray-500 hover:!text-leather-700"
+            />
+          </div>
+          {expandedStageBars.draft && draftSegments.length > 0 ? (
+            <div className={`grid gap-2 ${draftSegments.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              {draftSegments.map((stage: any) => <div key={`draft-detail-${stage.id}`}>{renderStageDetails(stage)}</div>)}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -3088,16 +3178,29 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                   </div>
                 )}
                 {!readOnly && (
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => handleCopyLine(line)}
-                    className="text-leather-700 hover:!text-leather-600"
-                    disabled={isLineCreationLocked}
-                  >
-                    کپی خط
-                  </Button>
+                  <>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<CopyOutlined />}
+                      onClick={() => handleCopyLine(line)}
+                      className="text-leather-700 hover:!text-leather-600"
+                      disabled={isLineCreationLocked}
+                    >
+                      کپی خط
+                    </Button>
+                    <Tooltip title="حذف خط">
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleDeleteLine(line)}
+                        disabled={isLineCreationLocked}
+                        aria-label="حذف خط تولید"
+                      />
+                    </Tooltip>
+                  </>
                 )}
               </div>
 
@@ -3207,6 +3310,23 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 )}
               </div>
             </div>
+            <div className="flex justify-center">
+              <Button
+                type="text"
+                size="small"
+                aria-label={expandedStageBars[lineId] ? `بستن اطلاعات خط ${line.line_no}` : `نمایش اطلاعات خط ${line.line_no}`}
+                icon={<DownOutlined className={`transition-transform ${expandedStageBars[lineId] ? 'rotate-180' : ''}`} />}
+                onClick={() => toggleStageBar(lineId)}
+                className="!text-gray-500 hover:!text-leather-700"
+              />
+            </div>
+            {expandedStageBars[lineId] && lineSegments.length > 0 ? (
+              <div className={`grid gap-2 ${lineSegments.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                {lineSegments.map((stage: any, index: number) => (
+                  <div key={`stage-detail-${lineId}-${stage.id || index}`}>{renderStageDetails(stage, currentQty)}</div>
+                ))}
+              </div>
+            ) : null}
             {showWageSummary && (
               <div className="text-xs text-gray-500">
                 دستمزد این خط: {toPersianNumber(((lineTasks.reduce((acc, t) => acc + (parseFloat(t.wage) || 0), 0)) * (parseFloat(line.quantity) || 0)).toLocaleString('en-US'))} تومان
@@ -3426,13 +3546,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         trafficType={handoverTrafficType}
         trafficTypeEditable={handoverTrafficTypeEditable}
         sourceStageValue={handoverSourceStageValue}
-        sourceShelfId={handoverSourceShelfId}
         destinationStageId={handoverDestinationStageId}
         stageOptions={handoverStageOptions}
-        centralSourceShelfOptions={centralSourceShelfOptions}
+        bundleOptionsByProduct={handoverBundleOptionsByProduct}
         groups={handoverEditorGroups}
-        shelfOptions={productionShelfOptions}
-        targetShelfId={handoverContext?.targetShelfId || null}
         giverConfirmation={handoverContext?.giverConfirmation || { confirmed: false }}
         receiverConfirmation={handoverContext?.receiverConfirmation || { confirmed: false }}
         onCancel={closeHandoverEditor}
@@ -3456,7 +3573,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             setHandoverSourceShelfId(null);
           }
         }}
-        onSourceShelfChange={(shelfId) => setHandoverSourceShelfId(shelfId)}
         onDestinationStageChange={(taskId) => setHandoverDestinationStageId(taskId)}
         onToggleGroup={setHandoverGroupCollapsed}
         onConfirmGroup={confirmHandoverGroup}
@@ -3464,8 +3580,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         onDeliveryRowsDelete={deleteHandoverDeliveryRows}
         onDeliveryRowsTransfer={transferHandoverDeliveryRows}
         onDeliveryRowFieldChange={updateHandoverDeliveryRowField}
-        onTargetShelfChange={setHandoverTargetShelf}
-        onTargetShelfScan={handleHandoverShelfScan}
         onConfirmGiver={() => { void handleConfirmGiver(); }}
         onConfirmReceiver={() => { void handleConfirmReceiver(); }}
       />
