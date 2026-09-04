@@ -484,6 +484,24 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             );
             const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalHandoverQty));
             const totalDeliveredWithHistory = previousDeliveredQty + currentDeliveredQty;
+            const currentSubQuantity = (group.deliveryRows || []).reduce(
+              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
+              0
+            );
+            const previousSubQuantity = previousDeliveryRows.reduce(
+              (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
+              0
+            );
+            const totalSubQuantity = previousSubQuantity + currentSubQuantity;
+            const requiredSubQuantity = (group.pieces || []).reduce(
+              (sum, piece) => sum + Math.max(0, parseNumberInput((piece as any)?.subUsage ?? (piece as any)?.sub_usage)),
+              0
+            );
+            const subUnitLabel = getUnitSummaryLabel([
+              ...(group.deliveryRows || []).map((row) => row.subUnit),
+              ...previousDeliveryRows.map((row) => row.subUnit),
+              ...(group.pieces || []).map((piece) => piece.subUnit),
+            ]);
             const deliveryUnitLabel = getUnitSummaryLabel([
               ...(group.deliveryRows || []).map((row) => row.mainUnit),
               ...previousDeliveryRows.map((row) => row.mainUnit),
@@ -515,6 +533,13 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                       <span className="mx-1">|</span>
                       تحویل شده کل: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
                       {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
+                      {subUnitLabel ? (
+                        <>
+                          <span className="mx-1">/</span>
+                          <span className="font-semibold">{toQty(totalSubQuantity)}</span>
+                          <span className="font-semibold mr-1">{subUnitLabel}</span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -811,6 +836,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                       />
                       {(() => {
                         const diff = totalDeliveredWithHistory - Math.max(0, parseNumberInput(group.totalSourceQty));
+                        const subDiff = totalSubQuantity - requiredSubQuantity;
                         const diffClass =
                           diff > 0 ? 'text-green-700 font-semibold' : diff < 0 ? 'text-red-700 font-semibold' : 'text-gray-700 font-medium';
                         return (
@@ -831,6 +857,12 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               اختلاف مقدار تحویل شده با مقدار دریافتی: {toQty(diff)}
                               {deliveryUnitLabel ? <span className="mr-1">{deliveryUnitLabel}</span> : null}
                             </span>
+                            {subUnitLabel ? (
+                              <span className={subDiff > 0 ? 'text-green-700 font-semibold' : subDiff < 0 ? 'text-red-700 font-semibold' : 'text-gray-700 font-medium'}>
+                                اختلاف مقدار تحویل شده با مقدار دریافتی (واحد فرعی): {toQty(subDiff)}
+                                <span className="mr-1">{subUnitLabel}</span>
+                              </span>
+                            ) : null}
                           </div>
                         );
                       })()}

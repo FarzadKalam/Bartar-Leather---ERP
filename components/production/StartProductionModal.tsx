@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Button, InputNumber, Modal, Select, Table } from 'antd';
+import { Button, Drawer, InputNumber, Modal, Select, Table } from 'antd';
 import { CalculatorOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
@@ -35,6 +35,7 @@ export type StartMaterialDeliveryRow = {
   mainQuantity: number;
   subQuantity: number;
   deliveredQty: number;
+  targetStageTaskId?: string | null;
 };
 
 export type StartMaterialOrderRequirement = {
@@ -88,7 +89,6 @@ interface StartProductionModalProps {
   productionShelfOptions: { label: string; value: string }[];
   productionStageOptions?: { label: string; value: string; orderId?: string; shelfId?: string | null }[];
   productionTargetType?: 'shelf' | 'stage';
-  hideSourceShelfSelector?: boolean;
   readonlyUnitFields?: boolean;
   onCancel: () => void;
   onStart: () => void;
@@ -109,7 +109,7 @@ interface StartProductionModalProps {
   ) => void;
   onDeliveryRowSourceBundleChange: (groupIndex: number, rowKey: string, bundleId: string | null) => void;
   onProductionShelfChange: (groupIndex: number, shelfId: string | null) => void;
-  onProductionStageChange?: (groupIndex: number, stageTaskId: string | null) => void;
+  onProductionStageChange?: (groupIndex: number, rowKey: string, stageTaskId: string | null) => void;
   onConfirmGroup: (groupIndex: number) => void;
 }
 
@@ -208,7 +208,6 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
   productionShelfOptions,
   productionStageOptions = [],
   productionTargetType = 'shelf',
-  hideSourceShelfSelector = false,
   readonlyUnitFields = false,
   onCancel,
   onStart,
@@ -230,6 +229,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
   } | null>(null);
   const [transferTargetGroupIndex, setTransferTargetGroupIndex] = useState<number | null>(null);
   const [requirementSectionsExpanded, setRequirementSectionsExpanded] = useState<Record<string, boolean>>({});
+  const [requirementsDrawerGroupKey, setRequirementsDrawerGroupKey] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.innerWidth < 768 : false
   );
@@ -255,7 +255,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const isRequirementSectionExpanded = (sectionKey: string) => requirementSectionsExpanded[sectionKey] !== false;
+  const isRequirementSectionExpanded = (sectionKey: string) => requirementSectionsExpanded[sectionKey] === true;
 
   const setRequirementSectionExpanded = (sectionKey: string, expanded: boolean) => {
     setRequirementSectionsExpanded((prev) => ({ ...prev, [sectionKey]: expanded }));
@@ -385,6 +385,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
               ...(group.deliveryRows || []).map((row) => row.subUnit),
               ...previousDeliveryRows.map((row) => row.subUnit),
             ]) || consumptionSubUnitLabel;
+            const isRequirementsDrawerOpen = requirementsDrawerGroupKey === group.key;
 
             const headerToneClass = isFullyDelivered
               ? 'bg-[#1f4534] text-white shadow-sm'
@@ -451,7 +452,25 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
 
                 {!group.collapsed && (
                   <div className="p-3">
+                    {Array.isArray(group.orderRequirements) && group.orderRequirements.length > 0 ? (
+                      <Button
+                        size="small"
+                        className="mb-3"
+                        icon={<RightOutlined />}
+                        onClick={() => setRequirementsDrawerGroupKey(group.key)}
+                      >
+                        قطعات سفارش تولید
+                      </Button>
+                    ) : null}
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                      <Drawer
+                        title="قطعات سفارش تولید"
+                        placement="right"
+                        open={isRequirementsDrawerOpen}
+                        onClose={() => setRequirementsDrawerGroupKey(null)}
+                        width={isMobile ? '100%' : 680}
+                        styles={{ body: { padding: 16 } }}
+                      >
                       <div className="space-y-3">
                     <div className="text-xs font-semibold text-[#17372a]">قطعات سفارش تولید:</div>
                     {Array.isArray(group.orderRequirements) && group.orderRequirements.length > 0 && (
@@ -721,6 +740,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                       </div>
                     ) : null}
                       </div>
+                      </Drawer>
 
                     <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
                       <div className="text-xs font-semibold text-[#17372a]">قطعات تحویل شده</div>
@@ -924,9 +944,20 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               dataIndex: 'mainQuantity',
                               key: 'mainQuantity',
                               width: isMobile ? 220 : 180,
-                              render: (value: number, record: StartMaterialDeliveryRow) => <InputNumber value={value}
-                                onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
-                                className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />,
+                              render: (value: number, record: StartMaterialDeliveryRow) => (
+                                <div className="flex gap-1">
+                                  <InputNumber value={value}
+                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
+                                    className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />
+                                  <Button type="text" size="small" title="محاسبه مقدار واحد فرعی" icon={<CalculatorOutlined />} onClick={() => {
+                                    const conversion = getUnitQuantityConversion('mainQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
+                                    if (!conversion) return;
+                                    try {
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
+                                    } catch { /* تبدیل فقط وقتی واحدها و مقدار مبدا معتبر باشند انجام می‌شود. */ }
+                                  }} />
+                                </div>
+                              ),
                             },
                             {
                               title: 'واحد فرعی',
@@ -955,16 +986,34 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               render: (value: number, record: StartMaterialDeliveryRow) => (
                                 <div className="flex gap-1">
                                   <InputNumber value={value} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />
-                                  <Button type="text" size="small" title="محاسبه مقدار واحد فرعی" icon={<CalculatorOutlined />} onClick={() => {
-                                    const conversion = getUnitQuantityConversion('mainQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
+                                  <Button type="text" size="small" title="محاسبه مقدار واحد اصلی" icon={<CalculatorOutlined />} onClick={() => {
+                                    const conversion = getUnitQuantityConversion('subQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
                                     if (!conversion) return;
                                     try {
-                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
                                     } catch { /* اعتبارسنجی تبدیل هنگام ورود واحدها انجام می‌شود. */ }
                                   }} />
                                 </div>
                               ),
                             },
+                            ...(productionTargetType === 'stage' ? [{
+                              title: 'مرحله مقصد',
+                              dataIndex: 'targetStageTaskId',
+                              key: 'targetStageTaskId',
+                              width: isMobile ? 240 : 180,
+                              render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
+                                <Select
+                                  value={value || undefined}
+                                  placeholder="انتخاب مرحله"
+                                  options={productionStageOptions}
+                                  showSearch
+                                  optionFilterProp="label"
+                                  className="w-full"
+                                  getPopupContainer={() => document.body}
+                                  onChange={(stageTaskId) => onProductionStageChange?.(groupIndex, String(record.key), stageTaskId || null)}
+                                />
+                              ),
+                            }] : []),
                             {
                               title: '',
                               key: 'actions',
@@ -1002,6 +1051,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                         {(() => {
                           const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalDeliveredQty));
                           const diff = totalDeliveredWithHistory - Math.max(0, parseNumberInput(group.totalUsage));
+                          const subDiff = totalSubQuantity - Math.max(0, parseNumberInput(totalRequiredSubQuantity));
                           const diffClass =
                             diff > 0 ? 'text-green-700 font-semibold' : diff < 0 ? 'text-red-700 font-semibold' : 'text-gray-700 font-medium';
                           return (
@@ -1043,34 +1093,20 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 اختلاف مقدار تحویل شده با مقدار مورد نیاز: {formatQty(diff)}
                                 {deliveryUnitLabel ? <span className="mr-1">{deliveryUnitLabel}</span> : null}
                               </span>
+                              {subUnitLabel ? (
+                                <span className={subDiff > 0 ? 'text-green-700 font-semibold' : subDiff < 0 ? 'text-red-700 font-semibold' : 'text-gray-700 font-medium'}>
+                                  اختلاف مقدار تحویل شده با مقدار مورد نیاز (واحد فرعی): {formatQty(subDiff)}
+                                  <span className="mr-1">{subUnitLabel}</span>
+                                </span>
+                              ) : null}
                             </div>
                           );
                         })()}
                       </div>
 
-                      <div className={`grid grid-cols-1 ${hideSourceShelfSelector ? 'md:grid-cols-1' : 'md:grid-cols-2'} gap-3`}>
-                        {!hideSourceShelfSelector ? (
-                          <div className="space-y-2">
-                            <div className="text-xs text-gray-500">بسته برداشت را در هر ردیف تحویل انتخاب کنید.</div>
-                          </div>
-                        ) : null}
+                      {productionTargetType !== 'stage' ? (
                         <div className="space-y-2">
-                          <div className="text-xs text-gray-500">
-                            {productionTargetType === 'stage' ? 'انتخاب مرحله تولید مقصد' : 'انتخاب قفسه تولید'}
-                          </div>
-                          {productionTargetType === 'stage' ? (
-                            <Select
-                              placeholder="انتخاب مرحله تولید"
-                              value={group.targetStageTaskId || undefined}
-                              onChange={(val) => onProductionStageChange?.(groupIndex, val || null)}
-                              options={productionStageOptions}
-                              showSearch
-                              optionFilterProp="label"
-                              className="w-full"
-                              getPopupContainer={() => document.body}
-                              onKeyDown={(e) => handleDeliveryRowKeyDown(e, groupIndex)}
-                            />
-                          ) : (
+                          <div className="text-xs text-gray-500">انتخاب قفسه تولید</div>
                             <div className="flex items-center gap-2">
                               <Select
                                 placeholder="انتخاب قفسه تولید"
@@ -1091,9 +1127,8 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 }}
                               />
                             </div>
-                          )}
                         </div>
-                      </div>
+                      ) : null}
                     </div>
                     </div>
                   </div>

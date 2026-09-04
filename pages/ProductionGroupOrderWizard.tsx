@@ -28,6 +28,7 @@ import {
   type GroupStartMaterial,
   splitDeliveredAcrossRequirements,
 } from '../utils/productionGroupOrders';
+import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils/durableDraft';
 
 type GroupOrderRecord = {
   id: string;
@@ -329,6 +330,16 @@ const ProductionGroupOrderWizard: React.FC = () => {
     return map;
   }, [startStageTaskOptions]);
 
+  const startDeliveryDraftKey = useMemo(
+    () => groupId ? `production-group-start-delivery:${groupId}` : null,
+    [groupId]
+  );
+
+  useEffect(() => {
+    if (startFormMode !== 'create' || !startDeliveryDraftKey || !startMaterials.length) return;
+    writeDurableDraft(startDeliveryDraftKey, startMaterials);
+  }, [startDeliveryDraftKey, startFormMode, startMaterials]);
+
   const stageShelfOptions = useMemo(
     () =>
       ((relationOptions?.shelves || []) as any[])
@@ -580,7 +591,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const [taskResult, lineResult] = await Promise.all([
         supabase
           .from('tasks')
-          .select('id, related_production_order, production_line_id, sort_order, name, assignee_id, assignee_type, production_shelf_id, recurrence_info')
+          .select('id, related_production_order, production_line_id, sort_order, name, assignee_id, assignee_role_id, assignee_type, production_shelf_id, recurrence_info, assignee:profiles!tasks_assignee_id_fkey(full_name), assigned_role:org_roles(title)')
           .in('related_production_order', ids)
           .order('sort_order', { ascending: true }),
         supabase
@@ -610,13 +621,6 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
       const firstTasks = Array.from(byOrderLine.values());
 
-      const lineNoMap = new Map<string, number>();
-      (lineResult.data || []).forEach((line: any) => {
-        const lineId = String(line?.id || '');
-        if (!lineId) return;
-        lineNoMap.set(lineId, Number(line?.line_no ?? 0));
-      });
-
       // تحویل اولیه می‌تواند مستقیماً به هر مرحلهٔ همان سفارش/خط ارسال شود،
       // نه فقط نخستین مرحلهٔ خط تولید.
       const stageOptions: StartStageTaskOption[] = allTasks
@@ -624,17 +628,15 @@ const ProductionGroupOrderWizard: React.FC = () => {
           const taskId = String(task?.id || '');
           if (!taskId) return null;
           const orderId = String(task?.related_production_order || '');
-          const order = selectedOrderMap.get(orderId);
           const lineId = task?.production_line_id ? String(task.production_line_id) : null;
-          const lineNo = lineId ? lineNoMap.get(lineId) : null;
-          const orderName = String(order?.name || '-');
-          const orderCode = String(order?.system_code || '');
           const stageName = String(task?.name || 'مرحله');
-          const lineLabel = lineNo && lineNo > 0 ? `خط ${toPersianNumber(lineNo)}` : 'خط';
-          const orderTitle = `${orderName}${orderCode ? ` (${orderCode})` : ''}`;
+          const assigneeLabel = task?.assignee_type === 'role'
+            ? String(task?.assigned_role?.title || '')
+            : String(task?.assignee?.full_name || '');
           return {
             value: taskId,
-            label: `${orderTitle} - ${lineLabel} - ${stageName}`,
+            // نام سفارش تکراری و طولانی است؛ نام مسئول/نقش او برای انتخاب سریع‌تر است.
+            label: assigneeLabel ? `${assigneeLabel} — ${stageName}` : stageName,
             orderId,
             orderName,
             orderCode,
@@ -1321,6 +1323,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         width: rawRow?.width ?? firstPiece?.width ?? 0,
         quantity: rawRow?.quantity ?? firstPiece?.quantity ?? 1,
       }),
+      targetStageTaskId: rawRow?.targetStageTaskId || rawRow?.target_stage_task_id || group.targetStageTaskId || null,
     };
   }, []);
 
@@ -1459,21 +1462,26 @@ const ProductionGroupOrderWizard: React.FC = () => {
     });
   }, [recalcStartGroup, sourceBundleOptionsByProduct]);
 
-  const setTargetStageTask = useCallback((groupIndex: number, taskId: string | null) => {
+  const setTargetStageTask = useCallback((groupIndex: number, rowKey: string, taskId: string | null) => {
     setStartMaterials((prev) => {
       const next = [...prev];
       const group = next[groupIndex];
       if (!group) return prev;
       const option = taskId ? startStageOptionMap.get(String(taskId)) : null;
-      next[groupIndex] = {
+      const deliveryRows = (group.deliveryRows || []).map((row) => String(row.key) === String(rowKey)
+        ? { ...row, targetStageTaskId: taskId }
+        : row);
+      next[groupIndex] = recalcStartGroup({
         ...group,
-        targetStageTaskId: taskId,
-        productionShelfId: option?.shelfId || null,
+        // برای سازگاری با فرم‌های قدیمی نگه می‌داریم؛ اعتبار و مقصد از این پس در سطح ردیف است.
+        targetStageTaskId: taskId || group.targetStageTaskId || null,
+        productionShelfId: option?.shelfId || group.productionShelfId || null,
+        deliveryRows,
         isConfirmed: false,
-      };
+      });
       return next;
     });
-  }, [startStageOptionMap]);
+  }, [recalcStartGroup, startStageOptionMap]);
 
   const onConfirmGroup = useCallback((groupIndex: number) => {
     const group = startMaterials[groupIndex];
@@ -1487,13 +1495,12 @@ const ProductionGroupOrderWizard: React.FC = () => {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را انتخاب کنید.');
       return;
     }
-    if (!group.targetStageTaskId) {
-      msg.error('برای این محصول، مرحله تولید مقصد انتخاب نشده است.');
+    if (rowsWithQty.some((row) => !row.targetStageTaskId)) {
+      msg.error('برای هر ردیف تحویل، مرحله تولید مقصد را انتخاب کنید.');
       return;
     }
-    const stageOption = startStageOptionMap.get(String(group.targetStageTaskId));
-    if (!stageOption?.shelfId) {
-      msg.error('برای مرحله انتخاب‌شده قفسه تولید مشخص نشده است.');
+    if (rowsWithQty.some((row) => !startStageOptionMap.get(String(row.targetStageTaskId))?.shelfId)) {
+      msg.error('برای یکی از مراحل انتخاب‌شده قفسه تولید مشخص نشده است.');
       return;
     }
     if (!group.totalDeliveredQty || group.totalDeliveredQty <= 0) {
@@ -1753,10 +1760,14 @@ const ProductionGroupOrderWizard: React.FC = () => {
         targetStageTaskId: targetTaskId || null,
         previousDeliveryRows: previousRows,
         previousDeliveredQty: previousRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0),
-        deliveryRows: Array.isArray(group.deliveryRows) ? group.deliveryRows : [],
+        deliveryRows: (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
+          ...row,
+          targetStageTaskId: row?.targetStageTaskId || targetTaskId || null,
+        })),
       };
     });
-    setStartMaterials(normalizedGroups);
+    const draft = readDurableDraft<StartMaterialGroup[]>(startDeliveryDraftKey || '');
+    setStartMaterials(Array.isArray(draft) && draft.length ? draft : normalizedGroups);
   }, [
     buildPreviousRowsByGroup,
     categoryLabelMap,
@@ -1768,6 +1779,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
     resolveDefaultSourceShelfForGroup,
     resolveDefaultTargetTaskForGroup,
     selectedOrderRows,
+    startDeliveryDraftKey,
     startStageOptionMap,
   ]);
 
@@ -1837,21 +1849,21 @@ const ProductionGroupOrderWizard: React.FC = () => {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را مشخص کنید.');
       return;
     }
-    const missingStage = confirmed.some((group) => !group.targetStageTaskId);
+    const missingStage = deliveryRows.some(({ row }) => !row.targetStageTaskId);
     if (missingStage) {
       msg.error('برای همه محصولات تایید شده باید مرحله تولید مقصد انتخاب شود.');
       return;
     }
-    const missingStageShelf = confirmed.some((group) => {
-      const option = group.targetStageTaskId ? startStageOptionMap.get(String(group.targetStageTaskId)) : null;
+    const missingStageShelf = deliveryRows.some(({ row }) => {
+      const option = row.targetStageTaskId ? startStageOptionMap.get(String(row.targetStageTaskId)) : null;
       return !option?.shelfId;
     });
     if (missingStageShelf) {
       msg.error('برای برخی مراحل انتخاب‌شده، قفسه تولید ثبت نشده است.');
       return;
     }
-    const hasInvalidTargetOrder = confirmed.some((group) => {
-      const option = group.targetStageTaskId ? startStageOptionMap.get(String(group.targetStageTaskId)) : null;
+    const hasInvalidTargetOrder = deliveryRows.some(({ group, row }) => {
+      const option = row.targetStageTaskId ? startStageOptionMap.get(String(row.targetStageTaskId)) : null;
       const targetOrderId = String(option?.orderId || '').trim();
       if (!targetOrderId) return false;
       const requirements = Array.isArray((group as any)?.orderRequirements) ? (group as any).orderRequirements : [];
@@ -1864,8 +1876,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
     const destinationTaskIds = Array.from(
       new Set(
-        confirmed
-          .map((group) => String(group.targetStageTaskId || ''))
+        deliveryRows
+          .map(({ row }) => String(row.targetStageTaskId || ''))
           .filter(Boolean)
       )
     );
@@ -1881,8 +1893,23 @@ const ProductionGroupOrderWizard: React.FC = () => {
       (freshTasks || []).map((task: any) => [String(task?.id || ''), task])
     );
 
+    const deliveryGroups = Array.from(new Set(deliveryRows.map(({ group }) => group))).flatMap((group) => {
+      const rowsByTarget = new Map<string, StartMaterialDeliveryRow[]>();
+      (group.deliveryRows || []).forEach((row) => {
+        if (calcDeliveredQty(row) <= 0 || !row.targetStageTaskId) return;
+        const key = String(row.targetStageTaskId);
+        rowsByTarget.set(key, [...(rowsByTarget.get(key) || []), row]);
+      });
+      return Array.from(rowsByTarget.entries()).map(([targetStageTaskId, rows]) => recalcStartGroup({
+        ...group,
+        targetStageTaskId,
+        productionShelfId: startStageOptionMap.get(targetStageTaskId)?.shelfId || null,
+        deliveryRows: rows,
+      }));
+    });
+
     const moves = deliveryRows.map(({ group, row, quantity }) => {
-      const option = group.targetStageTaskId ? startStageOptionMap.get(String(group.targetStageTaskId)) : null;
+      const option = row.targetStageTaskId ? startStageOptionMap.get(String(row.targetStageTaskId)) : null;
       return {
         product_id: String(group.selectedProductId),
         from_shelf_id: String(row.sourceShelfId),
@@ -1905,7 +1932,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const orderMovesMap: Record<string, any[]> = {};
       const groupsByDestinationTask: Record<string, StartMaterialGroup[]> = {};
 
-      confirmed.forEach((group) => {
+      deliveryGroups.forEach((group) => {
         const targetStageTaskId = String(group.targetStageTaskId || '');
         const stageOption = targetStageTaskId ? startStageOptionMap.get(targetStageTaskId) : null;
         if (targetStageTaskId) {
@@ -2181,6 +2208,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       await loadSelectedOrders(selectedOrderIds, true);
       await loadStartStageContext();
       setStartFormMode('list');
+      if (startDeliveryDraftKey) clearDurableDraft(startDeliveryDraftKey);
       msg.success('فرم تحویل مواد اولیه ثبت شد.');
     } catch (err: any) {
       msg.error(err?.message || 'خطا در شروع تولید گروهی');
@@ -2200,7 +2228,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
     selectedOrderIds,
     selectedOrderMap,
     startStageOptionMap,
+    startDeliveryDraftKey,
     startMaterials,
+    recalcStartGroup,
   ]);
 
   const columns = useMemo<ColumnsType<ProductionOrderRecord>>(

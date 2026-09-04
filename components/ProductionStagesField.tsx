@@ -27,6 +27,7 @@ import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/invent
 import { MODULES } from '../moduleRegistry';
 import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
+import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils/durableDraft';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -139,6 +140,43 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [lineQuantityDrafts, setLineQuantityDrafts] = useState<Record<string, number>>({});
   const [savingLineQuantityId, setSavingLineQuantityId] = useState<string | null>(null);
   const hasFetchedLinesRef = useRef(false);
+
+  const handoverDraftKey = useMemo(() => {
+    if (!recordId || !handoverTask?.id || !activeHandoverFormId) return null;
+    return `production-stage-handover:${recordId}:${String(handoverTask.id)}:${activeHandoverFormId}`;
+  }, [activeHandoverFormId, handoverTask?.id, recordId]);
+
+  // تغییرات ردیف‌ها همان لحظه در دستگاه کاربر نوشته می‌شوند تا قطع اینترنت یا refresh
+  // باعث از بین رفتن مقادیر ثبت‌نشده نشود.
+  useEffect(() => {
+    if (!handoverEditorOpen || !handoverDraftKey) return;
+    writeDurableDraft(handoverDraftKey, {
+      groups: handoverGroups,
+      trafficType: handoverTrafficType,
+      sourceStageValue: handoverSourceStageValue,
+      sourceShelfId: handoverSourceShelfId,
+      destinationStageId: handoverDestinationStageId,
+    });
+  }, [handoverDestinationStageId, handoverDraftKey, handoverEditorOpen, handoverGroups, handoverSourceShelfId, handoverSourceStageValue, handoverTrafficType]);
+
+  useEffect(() => {
+    if (!handoverEditorOpen || !handoverDraftKey) return;
+    const draft = readDurableDraft<{
+      groups?: StageHandoverGroup[];
+      trafficType?: StageHandoverTrafficType;
+      sourceStageValue?: string | null;
+      sourceShelfId?: string | null;
+      destinationStageId?: string | null;
+    }>(handoverDraftKey);
+    if (!draft?.groups?.length) return;
+    setHandoverGroups(draft.groups);
+    if (draft.trafficType) setHandoverTrafficType(draft.trafficType);
+    setHandoverSourceStageValue(draft.sourceStageValue || null);
+    setHandoverSourceShelfId(draft.sourceShelfId || null);
+    setHandoverDestinationStageId(draft.destinationStageId || null);
+  // فقط هنگام بازشدن فرم/تغییر شناسه بازیابی شود، نه بعد از هر ویرایش.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handoverDraftKey, handoverEditorOpen]);
 
   const onQuantityChangeRef = useRef<((qty: number) => void) | undefined>();
 
@@ -1825,6 +1863,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         };
       });
       message.success(confirmSide ? 'تایید ثبت شد' : 'فرم تحویل ذخیره شد');
+      if (handoverDraftKey) clearDurableDraft(handoverDraftKey);
       return true;
     } catch (error: any) {
       message.error(error?.message || 'خطا در ثبت فرم تحویل');
@@ -1844,6 +1883,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     handoverSourceStageValue,
     handoverTask,
     handoverTrafficType,
+    handoverDraftKey,
     getLineTaskChain,
     parseRecurrenceInfo,
     tasks,
@@ -3321,9 +3361,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               />
             </div>
             {expandedStageBars[lineId] && lineSegments.length > 0 ? (
-              <div className={`grid gap-2 ${lineSegments.length > 1 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              <div className="space-y-2">
                 {lineSegments.map((stage: any, index: number) => (
-                  <div key={`stage-detail-${lineId}-${stage.id || index}`}>{renderStageDetails(stage, currentQty)}</div>
+                  <div key={`stage-detail-${lineId}-${stage.id || index}`} className="relative pr-3 before:absolute before:right-0 before:top-0 before:h-full before:w-0.5 before:bg-leather-300">
+                    {renderStageDetails(stage, currentQty)}
+                  </div>
                 ))}
               </div>
             ) : null}
