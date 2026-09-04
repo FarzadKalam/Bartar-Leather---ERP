@@ -158,7 +158,38 @@ Notes:
 
 ## Supabase URL on HTTPS sites
 
-If your app is served over `https://...`, the browser will block `http://...` API calls (mixed-content). Ensure `VITE_SUPABASE_URL` is an `https://` URL in GitHub Secrets, typically by putting your Supabase API behind Nginx + Certbot on a subdomain (for example `https://api.erp.bartarleather.com`).
+The browser blocks an `http://` Supabase request when the ERP itself is loaded with `https://`. The production app must therefore use the HTTPS gateway below; it must **not** use `http://212.23.201.161:8000`.
+
+1. Create this DNS record (the project’s local environment already uses this address):
+
+   ```text
+   api-mehrbanoo.tazesystem.ir.  A  212.23.201.161
+   ```
+
+2. On the server, copy [deploy/nginx/api-mehrbanoo.tazesystem.ir.conf](deploy/nginx/api-mehrbanoo.tazesystem.ir.conf) to `/etc/nginx/sites-available/api-mehrbanoo.tazesystem.ir`, enable it, and validate Nginx. This initial HTTP-only config lets Certbot complete its domain validation:
+
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/api-mehrbanoo.tazesystem.ir /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+   Once Certbot enables HTTPS, this config proxies the public Supabase requests to the self-hosted gateway on `127.0.0.1:8000`; do not expose port 8000 publicly.
+
+3. After DNS has propagated, obtain the certificate (and make HTTP redirect to HTTPS) and reload Nginx:
+
+   ```bash
+   sudo certbot --nginx --redirect -d api-mehrbanoo.tazesystem.ir
+   sudo nginx -t && sudo systemctl reload nginx
+   curl -fsSI https://api-mehrbanoo.tazesystem.ir/auth/v1/health
+   ```
+
+4. In GitHub Actions → repository **Secrets**, set `VITE_SUPABASE_URL` to exactly:
+
+   ```text
+   https://api-mehrbanoo.tazesystem.ir
+   ```
+
+   Then redeploy from `main`. The build now refuses an HTTP `VITE_SUPABASE_URL`, so this configuration error cannot be released again.
 
 ### 4) Let deploy user reload nginx without password (recommended)
 

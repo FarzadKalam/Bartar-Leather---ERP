@@ -1374,6 +1374,13 @@ interface QuickCreateProps {
   onOk: () => void;
 }
 
+// پاپ‌آپ‌های فیلدهای فرم (انتخاب‌گرها و تاریخ/زمان) در body رندر می‌شوند.
+// بنابراین باید صریحاً بالاتر از خود مودال افزودن سریع قرار بگیرند؛ در غیر این
+// صورت در مودال‌های تو در تو، مقدار پیش‌فرض Ant Design می‌تواند آن‌ها را زیر
+// لایهٔ مودال نشان دهد.
+const QUICK_CREATE_MODAL_MIN_Z_INDEX = 15000;
+const QUICK_CREATE_POPUP_Z_INDEX_OFFSET = 100;
+
 export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   open,
   label,
@@ -1389,8 +1396,11 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
 }) => {
   const { message: inlineMsg } = App.useApp();
   const watchedValues = Form.useWatch([], form);
-  const resolvedPopupZIndex = popupZIndex ?? 13020;
-  const resolvedModalZIndex = resolvedPopupZIndex - 20;
+  const resolvedPopupZIndex = Math.max(
+    popupZIndex ?? 0,
+    QUICK_CREATE_MODAL_MIN_Z_INDEX + QUICK_CREATE_POPUP_Z_INDEX_OFFSET,
+  );
+  const resolvedModalZIndex = resolvedPopupZIndex - QUICK_CREATE_POPUP_Z_INDEX_OFFSET;
   const quickCreatePopupContainer = typeof document !== 'undefined' ? document.body : null;
 
   return (
