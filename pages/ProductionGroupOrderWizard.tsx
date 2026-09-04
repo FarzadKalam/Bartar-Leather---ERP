@@ -628,7 +628,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
           const taskId = String(task?.id || '');
           if (!taskId) return null;
           const orderId = String(task?.related_production_order || '');
+          const order = selectedOrderMap.get(orderId);
           const lineId = task?.production_line_id ? String(task.production_line_id) : null;
+          const orderName = String(order?.name || '-');
+          const orderCode = String(order?.system_code || '');
           const stageName = String(task?.name || 'مرحله');
           const assigneeLabel = task?.assignee_type === 'role'
             ? String(task?.assigned_role?.title || '')
