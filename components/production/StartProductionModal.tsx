@@ -462,13 +462,15 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                         قطعات سفارش تولید
                       </Button>
                     ) : null}
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <div className="w-full min-w-0">
                       <Drawer
                         title="قطعات سفارش تولید"
-                        placement="right"
+                        placement="left"
                         open={isRequirementsDrawerOpen}
                         onClose={() => setRequirementsDrawerGroupKey(null)}
                         width={isMobile ? '100%' : 680}
+                        zIndex={12000}
+                        rootStyle={{ zIndex: 12000 }}
                         styles={{ body: { padding: 16 } }}
                       >
                       <div className="space-y-3">
@@ -742,7 +744,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                       </div>
                       </Drawer>
 
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+                    <div className="w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
                       <div className="text-xs font-semibold text-[#17372a]">قطعات تحویل شده</div>
                       <div className="text-xs text-gray-600 flex flex-col sm:flex-row gap-4">
                         <span>
@@ -769,7 +771,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                         </span>
                       </div>
 
-                      <div className={`rounded-lg p-3 space-y-3 ${hasDeliveryRows ? 'border border-[#c9b29a] bg-[#f7f1ea]' : 'border border-dashed border-[#8bb49a] bg-white'}`}>
+                      <div className={`w-full min-w-0 rounded-lg p-3 space-y-3 ${hasDeliveryRows ? 'border border-[#c9b29a] bg-[#f7f1ea]' : 'border border-dashed border-[#8bb49a] bg-white'}`}>
                         <div className="text-xs font-medium text-[#17372a]">
                           از محصول "{group.selectedProductName || '-'}" برای سفارش تولید "{orderName || '-'}" چه مقدار تحویل می دهید؟
                         </div>
@@ -893,9 +895,9 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                           pagination={false}
                           dataSource={group.deliveryRows || []}
                           rowKey="key"
-                          className="start-production-delivery-table"
+                          className="start-production-delivery-table w-full"
                           tableLayout="fixed"
-                          scroll={{ x: true }}
+                          scroll={{ x: 'max-content' }}
                           rowSelection={{
                             selectedRowKeys,
                             columnWidth: isMobile ? 40 : 34,
@@ -906,7 +908,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'بسته برداشت',
                               dataIndex: 'sourceBundleId',
                               key: 'sourceBundleId',
-                              width: isMobile ? 240 : 180,
+                              width: isMobile ? 260 : 240,
                               render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
                                 <Select
                                   value={value || undefined}
@@ -924,7 +926,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'واحد اصلی',
                               dataIndex: 'mainUnit',
                               key: 'mainUnit',
-                              width: isMobile ? 190 : 110,
+                              width: isMobile ? 200 : 140,
                               render: (value: string, record: StartMaterialDeliveryRow) => (
                                 readonlyUnitFields ? (
                                   <span className="font-semibold text-[#17372a]">{value || '-'}</span>
@@ -943,7 +945,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'مقدار واحد اصلی',
                               dataIndex: 'mainQuantity',
                               key: 'mainQuantity',
-                              width: isMobile ? 220 : 180,
+                              width: isMobile ? 240 : 220,
                               render: (value: number, record: StartMaterialDeliveryRow) => (
                                 <div className="flex gap-1">
                                   <InputNumber value={value}
@@ -963,7 +965,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'واحد فرعی',
                               dataIndex: 'subUnit',
                               key: 'subUnit',
-                              width: isMobile ? 190 : 110,
+                              width: isMobile ? 200 : 140,
                               render: (value: string, record: StartMaterialDeliveryRow) => (
                                 readonlyUnitFields ? (
                                   <span className="font-semibold text-[#17372a]">{value || '-'}</span>
@@ -982,7 +984,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'مقدار واحد فرعی',
                               dataIndex: 'subQuantity',
                               key: 'subQuantity',
-                              width: isMobile ? 220 : 180,
+                              width: isMobile ? 240 : 220,
                               render: (value: number, record: StartMaterialDeliveryRow) => (
                                 <div className="flex gap-1">
                                   <InputNumber value={value} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />
@@ -1000,7 +1002,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'مرحله مقصد',
                               dataIndex: 'targetStageTaskId',
                               key: 'targetStageTaskId',
-                              width: isMobile ? 240 : 180,
+                              width: isMobile ? 260 : 220,
                               render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
                                 <Select
                                   value={value || undefined}
@@ -1139,15 +1141,23 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
         )}
       </div>
       <style>{`
+        .start-production-delivery-table,
+        .start-production-delivery-table .ant-spin-nested-loading,
+        .start-production-delivery-table .ant-spin-container,
+        .start-production-delivery-table .ant-table,
+        .start-production-delivery-table .ant-table-container {
+          width: 100% !important;
+          min-width: 0 !important;
+        }
         .start-production-delivery-table .ant-input,
         .start-production-delivery-table .ant-input-number,
         .start-production-delivery-table .ant-select,
         .start-production-delivery-table .ant-select-selector {
-          min-height: 36px !important;
-          font-size: 13px !important;
+          min-height: 44px !important;
+          font-size: 14px !important;
         }
         .start-production-delivery-table .ant-input-number-input {
-          height: 34px !important;
+          height: 42px !important;
         }
         .start-production-delivery-table .ant-select-selection-item {
           min-width: 0 !important;
@@ -1157,6 +1167,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
         }
         .start-production-delivery-table .ant-table-cell {
           overflow: hidden;
+          padding: 12px 10px !important;
         }
         .start-production-row-actions .ant-btn .anticon {
           font-size: 12px;
