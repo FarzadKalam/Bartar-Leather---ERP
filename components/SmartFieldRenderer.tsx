@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button } from 'antd';
+import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button, Alert } from 'antd';
 import { CalculatorOutlined, UploadOutlined, LoadingOutlined, QrcodeOutlined, PlusOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
@@ -1402,6 +1402,62 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   );
   const resolvedModalZIndex = resolvedPopupZIndex - QUICK_CREATE_POPUP_Z_INDEX_OFFSET;
   const quickCreatePopupContainer = typeof document !== 'undefined' ? document.body : null;
+  const voucherType = String((watchedValues as any)?.voucher_type || '');
+  const bundleId = String((watchedValues as any)?.bundle_id || '').trim();
+  const fromShelfField = fields.find((field) => field.key === 'from_shelf_id');
+  const toShelfField = fields.find((field) => field.key === 'to_shelf_id');
+  const hasEditableFromShelf = !!fromShelfField && !(fromShelfField as any).readonly;
+  const hasEditableToShelf = !!toShelfField && !(toShelfField as any).readonly;
+  const supportsBundleShelfLocation = fields.some((field) => field.key === 'bundle_id')
+    && fields.some((field) => field.key === 'voucher_type')
+    && (!!fromShelfField || !!toShelfField);
+  const [activeBundleShelfIds, setActiveBundleShelfIds] = useState<string[]>([]);
+  const selectedFromShelfId = String((watchedValues as any)?.from_shelf_id || '').trim();
+
+  useEffect(() => {
+    let active = true;
+    const requiresLocation = ['incoming', 'outgoing', 'transfer'].includes(voucherType);
+    if (!open || !supportsBundleShelfLocation || !requiresLocation || !bundleId) {
+      setActiveBundleShelfIds([]);
+      return () => { active = false; };
+    }
+
+    void supabase
+      .from('product_inventory')
+      .select('shelf_id')
+      .eq('bundle_id', bundleId)
+      .gt('stock', 0)
+      .then(({ data, error }) => {
+        if (!active || error) return;
+        const shelfIds = Array.from(new Set(
+          (data || []).map((row: any) => String(row?.shelf_id || '')).filter(Boolean)
+        ));
+        setActiveBundleShelfIds(shelfIds);
+        if (shelfIds.length !== 1) return;
+
+        const activeShelfId = shelfIds[0];
+        if (voucherType === 'incoming' && hasEditableToShelf
+          && String(form.getFieldValue('to_shelf_id') || '') !== activeShelfId) {
+          form.setFieldValue('to_shelf_id', activeShelfId);
+        }
+        if ((voucherType === 'outgoing' || voucherType === 'transfer') && hasEditableFromShelf
+          && String(form.getFieldValue('from_shelf_id') || '') !== activeShelfId) {
+          form.setFieldValue('from_shelf_id', activeShelfId);
+        }
+        if (voucherType === 'transfer' && hasEditableFromShelf
+          && String(form.getFieldValue('to_shelf_id') || '') === activeShelfId) {
+          form.setFieldValue('to_shelf_id', null);
+        }
+      });
+
+    return () => { active = false; };
+  }, [bundleId, form, hasEditableFromShelf, hasEditableToShelf, open, supportsBundleShelfLocation, voucherType]);
+
+  const activeBundleShelfLabels = activeBundleShelfIds.map((shelfId) => {
+    const option = [...(relationOptions.from_shelf_id || []), ...(relationOptions.to_shelf_id || [])]
+      .find((item: any) => String(item?.value) === shelfId);
+    return String(option?.label || shelfId);
+  });
 
   return (
     <Modal
@@ -1448,13 +1504,41 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
                           field={field}
                           value={(currentValues as any)?.[field.key]}
                           onChange={(val) => form.setFieldsValue({ [field.key]: val })}
-                          options={
-                            field.type === FieldType.RELATION
+                          options={(() => {
+                            const options = field.type === FieldType.RELATION
                               ? (relationOptions[field.key] || [])
                               : field.dynamicOptionsCategory
                                 ? (dynamicOptions[field.dynamicOptionsCategory] || [])
-                                : (field.options || [])
-                          }
+                                : (field.options || []);
+                            const isActiveBundleShelf = (option: any) => (
+                              activeBundleShelfIds.includes(String(option?.value || ''))
+                            );
+                            const restrictIncomingTarget = field.key === 'to_shelf_id'
+                              && voucherType === 'incoming'
+                              && hasEditableToShelf
+                              && activeBundleShelfIds.length > 0;
+                            const restrictSource = field.key === 'from_shelf_id'
+                              && (voucherType === 'outgoing' || voucherType === 'transfer')
+                              && hasEditableFromShelf
+                              && activeBundleShelfIds.length > 0;
+                            const excludeTransferSourceFromTarget = field.key === 'to_shelf_id'
+                              && voucherType === 'transfer'
+                              && !!selectedFromShelfId;
+
+                            if (!restrictIncomingTarget && !restrictSource && !excludeTransferSourceFromTarget) {
+                              return options;
+                            }
+
+                            return options.map((option: any) => ({
+                              ...option,
+                              disabled: (
+                                (restrictIncomingTarget && !isActiveBundleShelf(option))
+                                || (restrictSource && !isActiveBundleShelf(option))
+                                || (excludeTransferSourceFromTarget
+                                  && String(option?.value || '') === selectedFromShelfId)
+                              ),
+                            }));
+                          })()}
                           forceEditMode={true}
                           compactMode={true}
                           allValues={currentValues}
@@ -1490,6 +1574,46 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
           );
         })}
       </Form>
+      {activeBundleShelfLabels.length > 0 && voucherType === 'incoming' ? (
+        <Alert
+          className="mt-3"
+          type={activeBundleShelfLabels.length === 1 ? 'info' : 'warning'}
+          showIcon
+          message={activeBundleShelfLabels.length === 1
+            ? hasEditableToShelf
+              ? `این بسته در قفسه «${activeBundleShelfLabels[0]}» موجود است؛ قفسه ورود روی همان قفسه تنظیم شد.`
+              : `این بسته در قفسه «${activeBundleShelfLabels[0]}» موجود است.`
+            : `این بسته در چند قفسه موجودی دارد: ${activeBundleShelfLabels.join('، ')}.`}
+          description={hasEditableToShelf
+            ? 'برای انتقال بسته به قفسه دیگر، نوع حواله را «جابجایی» انتخاب کنید.'
+            : 'برای ورود به قفسه جاری، بسته نباید در قفسه دیگری موجود باشد؛ در صورت نیاز «جابجایی» ثبت کنید.'}
+        />
+      ) : null}
+      {activeBundleShelfLabels.length > 0 && voucherType === 'transfer' ? (
+        <Alert
+          className="mt-3"
+          type={activeBundleShelfLabels.length === 1 ? 'info' : 'warning'}
+          showIcon
+          message={!hasEditableFromShelf
+            ? 'مبدأ این حواله قفسه جاری است؛ قفسه مقصد را انتخاب کنید.'
+            : activeBundleShelfLabels.length === 1
+            ? `مبدأ این بسته قفسه «${activeBundleShelfLabels[0]}» است؛ قفسه مقصد را انتخاب کنید.`
+            : `این بسته در چند قفسه موجودی دارد: ${activeBundleShelfLabels.join('، ')}. قفسه مبدأ را انتخاب کنید.`}
+          description="برای جابجایی، مبدأ و مقصد باید متفاوت باشند."
+        />
+      ) : null}
+      {activeBundleShelfLabels.length > 0 && voucherType === 'outgoing' ? (
+        <Alert
+          className="mt-3"
+          type={activeBundleShelfLabels.length === 1 ? 'info' : 'warning'}
+          showIcon
+          message={!hasEditableFromShelf
+            ? 'برداشت این حواله از قفسه جاری انجام می‌شود.'
+            : activeBundleShelfLabels.length === 1
+            ? `برداشت این بسته از قفسه «${activeBundleShelfLabels[0]}» انجام می‌شود.`
+            : `این بسته در چند قفسه موجودی دارد: ${activeBundleShelfLabels.join('، ')}. قفسه برداشت را انتخاب کنید.`}
+        />
+      ) : null}
       <div className="text-xs text-gray-400 mt-1">
         فیلدهای کلیدی، هدر، الزامی و ستون‌های لیست برای ثبت سریع نمایش داده شده‌اند.
       </div>

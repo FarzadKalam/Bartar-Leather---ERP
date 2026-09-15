@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Button, Dropdown, Statistic, Table, Timeline, Empty, Tag } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Avatar, Card, Row, Col, Button, Dropdown, Statistic, Table, Timeline, Empty, Select, Switch, Tag } from 'antd';
 import {
   MoreOutlined,
   FileTextOutlined,
@@ -9,6 +9,7 @@ import {
   ArrowUpOutlined,
   CalendarOutlined,
   ClockCircleOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
@@ -37,6 +38,23 @@ interface DashboardStats {
   totalProductionOrders?: number;
 }
 
+type ProductionWorkflowStage = {
+  id: string;
+  name: string;
+  status: string;
+  dueDate?: string | null;
+  assigneeName: string;
+  assigneeAvatar?: string | null;
+  assigneeIsRole?: boolean;
+};
+
+type ProductionWorkflowGroup = {
+  id: string;
+  name: string;
+  status: string;
+  orders: Array<{ id: string; name: string; status: string; stages: ProductionWorkflowStage[] }>;
+};
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -54,6 +72,11 @@ const Dashboard: React.FC = () => {
     totalProductionOrders: 0,
   });
   const [widgetPermissions, setWidgetPermissions] = useState<Record<string, boolean>>({});
+  const [canViewAllProductionLines, setCanViewAllProductionLines] = useState(false);
+  const [showAllProductionLines, setShowAllProductionLines] = useState(false);
+  const [productionStatusFilter, setProductionStatusFilter] = useState<string[]>([]);
+  const [productionWorkflowLoading, setProductionWorkflowLoading] = useState(false);
+  const [productionWorkflowGroups, setProductionWorkflowGroups] = useState<ProductionWorkflowGroup[]>([]);
 
   // Get today's Persian date
   const getTodayPersianDate = () => {
@@ -123,7 +146,7 @@ const Dashboard: React.FC = () => {
 
       const { data: role } = await supabase
         .from('org_roles')
-        .select('permissions')
+        .select('permissions, title')
         .eq('id', profile.role_id)
         .maybeSingle();
 
@@ -134,9 +157,65 @@ const Dashboard: React.FC = () => {
         return;
       }
 
-      setWidgetPermissions(dashboardPerms.fields || {});
+      const fields = dashboardPerms.fields || {};
+      // نقش‌های مدیریتی موجود، بدون نیاز به تنظیم دستیِ دوباره، از ابتدا نمای همه را می‌بینند.
+      const isManagerRole = /مدیر|management|manager|admin|administrator|مالک/i.test(String(role?.title || ''));
+      const canViewAll = fields.production_lines_all === true || isManagerRole;
+      setCanViewAllProductionLines(canViewAll);
+      setShowAllProductionLines(canViewAll);
+      setWidgetPermissions(fields);
     } catch {
       setWidgetPermissions({});
+      setCanViewAllProductionLines(false);
+      setShowAllProductionLines(false);
+    }
+  };
+
+  const fetchProductionWorkflowWidget = async () => {
+    setProductionWorkflowLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('get_dashboard_production_workflow', {
+        p_include_all: showAllProductionLines,
+        p_statuses: productionStatusFilter.length ? productionStatusFilter : null,
+      });
+      if (error) throw error;
+      const grouped = new Map<string, ProductionWorkflowGroup>();
+      (data || []).forEach((row: any) => {
+        const groupId = String(row?.group_id || '__ungrouped__');
+        const current = grouped.get(groupId) || {
+          id: groupId,
+          name: String(row?.group_name || 'سفارش‌های بدون گروه'),
+          status: String(row?.group_status || ''),
+          orders: [],
+        };
+        const orderId = String(row?.production_order_id || '');
+        let order = current.orders.find((item) => item.id === orderId);
+        if (!order) {
+          order = {
+            id: orderId,
+            name: String(row?.production_order_name || 'سفارش تولید'),
+            status: String(row?.production_order_status || 'draft'),
+            stages: [],
+          };
+          current.orders.push(order);
+        }
+        order.stages.push({
+          id: String(row?.stage_id || ''),
+          name: String(row?.stage_name || 'مرحله'),
+          status: String(row?.stage_status || 'todo'),
+          dueDate: row?.due_date || null,
+          assigneeName: String(row?.assignee_name || 'مسئول تعیین‌نشده'),
+          assigneeAvatar: row?.assignee_avatar_url || null,
+          assigneeIsRole: !!row?.assignee_is_role,
+        });
+        grouped.set(groupId, current);
+      });
+      setProductionWorkflowGroups(Array.from(grouped.values()));
+    } catch (error) {
+      console.error('Error fetching production workflow dashboard widget', error);
+      setProductionWorkflowGroups([]);
+    } finally {
+      setProductionWorkflowLoading(false);
     }
   };
 
@@ -288,12 +367,19 @@ const Dashboard: React.FC = () => {
     fetchDashboardData();
   }, []);
 
+  useEffect(() => {
+    if (!canShowWidget('production_lines')) return;
+    void fetchProductionWorkflowWidget();
+  }, [showAllProductionLines, canViewAllProductionLines, productionStatusFilter, widgetPermissions.production_lines]);
+
   // Helper functions
   const getStatusLabel = (status: string): string => {
     const labels: Record<string, string> = {
       draft: 'پیش‌نویس',
       pending: 'در انتظار',
       in_progress: 'در حال تولید',
+      in_production: 'در حال تولید',
+      todo: 'انجام نشده',
       completed: 'تکمیل شده',
       cancelled: 'لغو شده',
       on_hold: 'معلق',
@@ -306,6 +392,8 @@ const Dashboard: React.FC = () => {
       draft: 'default',
       pending: 'orange',
       in_production: 'blue',
+      in_progress: 'blue',
+      todo: 'red',
       completed: 'green',
       cancelled: 'red',
       on_hold: 'purple',
@@ -455,6 +543,25 @@ const Dashboard: React.FC = () => {
       ),
     },
   ];
+
+  const productionStatusOptions = [
+    { value: 'draft', label: 'پیش‌نویس' },
+    { value: 'pending', label: 'در انتظار' },
+    { value: 'in_production', label: 'در حال تولید' },
+    { value: 'in_progress', label: 'در حال تولید' },
+    { value: 'completed', label: 'تکمیل شده' },
+    { value: 'cancelled', label: 'لغو شده' },
+    { value: 'on_hold', label: 'معلق' },
+  ];
+
+  const visibleProductionWorkflowGroups = useMemo(() => productionWorkflowGroups
+    .map((group) => ({
+      ...group,
+      orders: group.orders.filter((order) => (
+        productionStatusFilter.length === 0 || productionStatusFilter.includes(order.status)
+      )),
+    }))
+    .filter((group) => group.orders.length > 0), [productionStatusFilter, productionWorkflowGroups]);
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#f6faf7_0%,#eef5f0_100%)] dark:bg-dark-bg p-4 md:p-6">
@@ -660,6 +767,93 @@ const Dashboard: React.FC = () => {
         </Col>
         )}
       </Row>
+      )}
+
+      {canShowWidget('production_lines') && (
+        <div className="mb-6">
+          <Card
+            className="shadow-sm"
+            title={<span className="text-lg font-bold">نوارهای تولید</span>}
+            extra={(
+              <div className="flex items-center gap-3 flex-wrap">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  value={productionStatusFilter}
+                  onChange={setProductionStatusFilter}
+                  options={productionStatusOptions}
+                  placeholder="فیلتر وضعیت"
+                  className="min-w-48"
+                  maxTagCount="responsive"
+                />
+                {canViewAllProductionLines ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <span>همه سفارش‌ها</span>
+                    <Switch checked={showAllProductionLines} onChange={setShowAllProductionLines} size="small" />
+                  </div>
+                ) : (
+                  <span className="text-xs text-gray-500">فقط مراحل من</span>
+                )}
+              </div>
+            )}
+          >
+            {productionWorkflowLoading ? (
+              <div className="py-10 text-center text-gray-500">در حال بارگیری نوارهای تولید…</div>
+            ) : visibleProductionWorkflowGroups.length === 0 ? (
+              <Empty description={showAllProductionLines ? 'مرحله‌ای برای نمایش وجود ندارد' : 'در هیچ مرحلهٔ تولیدی مسئول نیستید'} />
+            ) : (
+              <div className="space-y-4">
+                {visibleProductionWorkflowGroups.map((group) => (
+                  <div key={group.id} className="rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="bg-leather-50 px-4 py-2 flex items-center justify-between gap-3">
+                      <span className="font-bold text-leather-800">{group.name}</span>
+                      {group.status ? <Tag color={getStatusColor(group.status)}>{getStatusLabel(group.status)}</Tag> : null}
+                    </div>
+                    <div className="p-3 space-y-3">
+                      {group.orders.map((order) => (
+                        <button
+                          type="button"
+                          key={order.id}
+                          className="w-full text-right rounded-lg border border-gray-100 p-3 hover:border-leather-300 hover:bg-leather-50/40 transition-colors"
+                          onClick={() => navigate(`/production_orders/${order.id}`)}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-3">
+                            <span className="font-semibold text-gray-800">{order.name}</span>
+                            <Tag color={getStatusColor(order.status)}>{getStatusLabel(order.status)}</Tag>
+                          </div>
+                          <div className="flex min-h-20 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
+                            {order.stages.map((stage, index) => (
+                              <div
+                                key={stage.id}
+                                className={`relative flex-1 min-w-28 px-8 py-2 text-center text-white ${index ? 'border-r border-white/30' : ''}`}
+                                style={{ backgroundColor: getStatusColor(stage.status) === 'green' ? '#10b981' : getStatusColor(stage.status) === 'blue' ? '#3b82f6' : getStatusColor(stage.status) === 'orange' ? '#f97316' : getStatusColor(stage.status) === 'red' ? '#ef4444' : '#9ca3af' }}
+                              >
+                                <Avatar
+                                  size={26}
+                                  src={stage.assigneeAvatar || undefined}
+                                  icon={stage.assigneeIsRole ? <TeamOutlined /> : <UserOutlined />}
+                                  className="!absolute right-2 top-2 !bg-white/90 !text-leather-700"
+                                />
+                                <Avatar size={26} className="!absolute left-2 top-2 !bg-black/20 !text-white">
+                                  {stage.name.slice(0, 1)}
+                                </Avatar>
+                                <div className="font-bold text-xs truncate mt-7">{stage.name}</div>
+                                <div className="text-[10px] truncate opacity-95">{stage.assigneeName}</div>
+                                <div className="text-[9px] truncate opacity-90 mt-0.5">
+                                  {getStatusLabel(stage.status)}{stage.dueDate ? ` · ${formatPersianDate(stage.dueDate, 'YYYY/MM/DD HH:mm')}` : ''}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
       )}
 
       {/* Charts Row */}

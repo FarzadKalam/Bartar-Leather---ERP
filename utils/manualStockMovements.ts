@@ -1,4 +1,5 @@
 import { buildStockTransferPayload } from './stockTransferHelpers';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const STOCK_ADJUSTMENT_TYPE = 'stock_adjustment';
 
@@ -22,6 +23,11 @@ export interface ManualStockMovement {
   bundleId?: string | null;
 }
 
+export type BundleShelfLocation = {
+  shelfId: string;
+  stock: number;
+};
+
 const toTrimmedString = (value: unknown) => {
   if (value === null || value === undefined) return '';
   return String(value).trim();
@@ -33,6 +39,74 @@ const toNullableString = (value: unknown) => {
 };
 
 const toPositiveNumber = (value: unknown) => Math.abs(parseFloat(String(value ?? '')) || 0);
+
+/** قفسه‌هایی که یک بسته با موجودی مثبت در آن‌ها نگهداری می‌شود. */
+export const getActiveBundleShelfLocations = async (
+  supabase: SupabaseClient,
+  bundleId: string | null | undefined
+): Promise<BundleShelfLocation[]> => {
+  const normalizedBundleId = toNullableString(bundleId);
+  if (!normalizedBundleId) return [];
+
+  const { data, error } = await supabase
+    .from('product_inventory')
+    .select('shelf_id, stock')
+    .eq('bundle_id', normalizedBundleId)
+    .gt('stock', 0);
+  if (error) throw error;
+
+  return Array.from(new Map(
+    (data || [])
+      .filter((row: any) => row?.shelf_id)
+      .map((row: any) => [String(row.shelf_id), {
+        shelfId: String(row.shelf_id),
+        stock: toPositiveNumber(row.stock),
+      }])
+  ).values());
+};
+
+/**
+ * هر بسته یک محل نگهداری فعال دارد. ورود مجددِ همان بسته فقط باید به همان
+ * قفسه ثبت شود؛ برای تغییر محل، کاربر باید حواله «جابجایی» ثبت کند.
+ */
+export const assertIncomingBundleShelf = async (
+  supabase: SupabaseClient,
+  movement: Pick<ManualStockMovement, 'voucherType' | 'bundleId' | 'toShelfId'>
+) => {
+  if (movement.voucherType !== 'incoming' || !movement.bundleId || !movement.toShelfId) return;
+
+  const locations = await getActiveBundleShelfLocations(supabase, movement.bundleId);
+  if (locations.length === 0) return;
+
+  const targetShelfId = String(movement.toShelfId);
+  if (locations.some((location) => location.shelfId === targetShelfId)) return;
+
+  throw new Error(
+    'این بسته هم‌اکنون در قفسه دیگری موجود است. برای تغییر محل بسته، حواله «جابجایی» ثبت کنید.'
+  );
+};
+
+/** اعتبارسنجی دسته‌ای برای جدول‌های ورود/خروج که چند حواله را هم‌زمان ثبت می‌کنند. */
+export const assertIncomingBundleShelves = async (
+  supabase: SupabaseClient,
+  movements: Array<Pick<ManualStockMovement, 'voucherType' | 'bundleId' | 'toShelfId'>>
+) => {
+  const targetsByBundle = new Map<string, Set<string>>();
+  movements.forEach((movement) => {
+    if (movement.voucherType !== 'incoming' || !movement.bundleId || !movement.toShelfId) return;
+    const bundleId = String(movement.bundleId);
+    if (!targetsByBundle.has(bundleId)) targetsByBundle.set(bundleId, new Set());
+    targetsByBundle.get(bundleId)!.add(String(movement.toShelfId));
+  });
+
+  if (Array.from(targetsByBundle.values()).some((targets) => targets.size > 1)) {
+    throw new Error('یک بسته نمی‌تواند در یک ثبت هم‌زمان به چند قفسه ورود بخورد. برای تغییر محل، حواله «جابجایی» ثبت کنید.');
+  }
+
+  for (const movement of movements) {
+    await assertIncomingBundleShelf(supabase, movement);
+  }
+};
 
 export const normalizeManualStockMovement = (
   input: Partial<ManualStockMovement>,

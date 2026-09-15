@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, DownOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined } from '@ant-design/icons';
+import { Avatar, Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
+import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, DownOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined, WarningOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
@@ -39,7 +39,8 @@ interface ProductionStagesFieldProps {
   onQuantityChange?: (qty: number) => void;
   orderStatus?: string | null;
   draftStages?: any[];
-  onDraftStagesChange?: (stages: any[]) => void;
+  onDraftStagesChange?: (stages: any[]) => void | Promise<void>;
+  draftStagesPersistedByParent?: boolean;
   showWageSummary?: boolean;
 }
 
@@ -95,7 +96,7 @@ type OpenHandoverOptions = {
   sourceOverrideTask?: any | null;
 };
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, showWageSummary = false }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -273,6 +274,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       deliveredQty: Math.max(0, toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? (length * width * quantity))),
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || rawRow?.bundle_id || firstDeliveryRow?.sourceBundleId || (firstDeliveryRow as any)?.source_bundle_id || (firstDeliveryRow as any)?.bundle_id || group?.sourceBundleId || (group as any)?.source_bundle_id || (group as any)?.bundle_id || null,
       sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || firstDeliveryRow?.sourceShelfId || (firstDeliveryRow as any)?.source_shelf_id || group?.sourceShelfId || (group as any)?.source_shelf_id || null,
+      giverNote: String(rawRow?.giverNote ?? rawRow?.giver_note ?? ''),
     };
   }, [buildHandoverRowKey, toNumber]);
 
@@ -2370,6 +2372,23 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     }
   }, []);
 
+  const getTaskHandoverIssue = useCallback((task: any): string | null => {
+    if (!task || task?.type === 'draft') return null;
+    const handover = getHandoverFromTask(task);
+    const forms = Array.isArray(handover?.forms)
+      ? handover.forms
+      : (Array.isArray(handover?.groups) ? [handover] : []);
+    if (forms.some((form: any) => !form?.giverConfirmation?.confirmed || !form?.receiverConfirmation?.confirmed)) {
+      return 'فرم تحویل این مرحله هنوز توسط هر دو طرف امضا نشده است.';
+    }
+    const status = String(task?.status || '').toLowerCase();
+    if (['done', 'completed'].includes(status) && forms.length === 0) {
+      return 'مرحله تکمیل شده، اما فرم تحویل ثبت نشده است.';
+    }
+    if (status === 'review') return 'این مرحله نیاز به بازبینی دارد.';
+    return null;
+  }, [getHandoverFromTask]);
+
   const taskStatusActions = useMemo(() => ([
     {
       value: 'todo',
@@ -2862,9 +2881,13 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const renderStageDetails = (stage: any, lineQuantity = 0) => {
     const wage = Math.max(0, toNumber(stage?.wage));
     const lineWage = wage * Math.max(0, toNumber(lineQuantity));
+    const handoverIssue = getTaskHandoverIssue(stage);
     return (
       <div className="rounded-lg border border-gray-200 bg-white p-2 text-[11px] text-gray-600 space-y-1">
-        <div className="font-bold text-gray-800 truncate">{stage?.title || stage?.name || stage?.label || 'مرحله'}</div>
+        <div className="font-bold text-gray-800 truncate flex items-center gap-1">
+          {handoverIssue ? <WarningOutlined className="text-amber-500" title={handoverIssue} /> : null}
+          {stage?.title || stage?.name || stage?.label || 'مرحله'}
+        </div>
         <div>وضعیت: {stage?.type === 'draft' ? 'پیش‌نویس' : getStatusLabel(stage?.status)}</div>
         {stage?.type !== 'draft' ? <div>مسئول: {getAssigneeLabel(stage)}</div> : null}
         {stage?.type !== 'draft' ? <div>مقدار تولیدشده: {toPersianNumber(toNumber(stage?.produced_qty).toLocaleString('en-US'))}</div> : null}
@@ -2892,10 +2915,26 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   }, [lines, onlyLineId]);
 
   const saveDraftStages = async (nextStages: any[]) => {
+    const previousStages = draftLocal;
     setDraftLocal(nextStages);
-    if (onDraftStagesChange) onDraftStagesChange(nextStages);
-    if (moduleId === 'production_boms' && recordId) {
-      await supabase.from('production_boms').update({ production_stages_draft: nextStages }).eq('id', recordId);
+    try {
+      if (onDraftStagesChange) await onDraftStagesChange(nextStages);
+      const draftStagesTable = moduleId === 'production_boms'
+        ? 'production_boms'
+        : moduleId === 'production_orders'
+          ? 'production_orders'
+          : null;
+      if (draftStagesTable && recordId && !draftStagesPersistedByParent) {
+        const { error } = await supabase
+          .from(draftStagesTable)
+          .update({ production_stages_draft: nextStages })
+          .eq('id', recordId);
+        if (error) throw error;
+      }
+    } catch (error: any) {
+      setDraftLocal(previousStages);
+      message.error(error?.message || 'ذخیره مراحل پیش‌نویس ناموفق بود.');
+      throw error;
     }
   };
 
@@ -3260,13 +3299,16 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 </Tooltip>
               )}
 
-              <div className={`relative flex-1 flex bg-gray-100 rounded-lg overflow-visible border border-gray-200 ${compact ? 'h-5' : 'h-9'}`}>
+              <div className={`relative flex-1 flex bg-gray-100 rounded-lg overflow-visible border border-gray-200 ${compact ? 'min-h-16' : 'min-h-24'}`}>
                 {lineSegments.map((segment: any, index: number) => (
                   segment.type === 'task' ? (
                     (() => {
                       const isAssignedToCurrent = isTaskAssignedToCurrentUser(segment);
                       const isHighlightedTask = isAssignedToCurrent;
                       const segmentColor = getStatusColor(segment.status);
+                      const handoverIssue = getTaskHandoverIssue(segment);
+                      const assigneeName = getAssigneeLabel(segment);
+                      const activityInitial = String(segment.title || segment.name || 'م').trim().slice(0, 1);
                       return (
                     <Popover
                       key={segment.id}
@@ -3290,15 +3332,35 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                             : undefined,
                         }}
                       >
-                        <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
-                          <span className={`text-white font-medium truncate w-full text-center drop-shadow-md ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
+                        <div className="relative flex flex-col items-center justify-center w-full h-full px-8 overflow-hidden">
+                          <Avatar
+                            size={compact ? 22 : 28}
+                            src={segment?.assignee?.avatar_url || undefined}
+                            icon={segment.assignee_type === 'role' ? <TeamOutlined /> : <UserOutlined />}
+                            className="!absolute right-1.5 top-1.5 !bg-white/90 !text-leather-700 shadow-sm"
+                          />
+                          <Avatar
+                            size={compact ? 22 : 28}
+                            className="!absolute left-1.5 top-1.5 !bg-black/20 !text-white"
+                          >
+                            {activityInitial}
+                          </Avatar>
+                          {handoverIssue ? (
+                            <Tooltip title={handoverIssue}>
+                              <WarningOutlined className="absolute left-1.5 bottom-1.5 text-amber-300 drop-shadow" />
+                            </Tooltip>
+                          ) : null}
+                          <span className={`text-white font-bold truncate w-full text-center drop-shadow-md ${compact ? 'text-[10px]' : 'text-xs'}`}>
                             {segment.title || segment.name}
                           </span>
-                          {!compact && segment.sort_order && (
-                            <span className="text-[8px] text-white/90 absolute bottom-0.5 right-1 bg-black/10 px-1 rounded-sm">
-                              {toPersianNumber(segment.sort_order)}
+                          <span className={`mt-0.5 text-white/95 truncate w-full text-center ${compact ? 'text-[8px]' : 'text-[10px]'}`}>
+                            {assigneeName}
+                          </span>
+                          {!compact ? (
+                            <span className="mt-0.5 text-[9px] text-white/90 truncate w-full text-center">
+                              {getStatusLabel(segment.status)}{segment.due_date ? ` · ${renderDate(segment.due_date)}` : ''}
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                     </Popover>
@@ -3334,9 +3396,23 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                         className={`relative flex items-center justify-center cursor-pointer transition-all group ${index !== 0 ? 'border-r border-white/30' : ''} ${index === 0 ? 'rounded-r-lg' : ''} ${index === lineSegments.length - 1 ? 'rounded-l-lg' : ''}`}
                         style={{ flex: 1, border: '1px dashed #d1d5db', backgroundColor: 'transparent' }}
                       >
-                        <div className="flex flex-col items-center justify-center w-full px-1 overflow-hidden">
-                          <span className={`text-gray-600 font-medium truncate w-full text-center ${compact ? 'text-[9px]' : 'text-[11px]'}`}>
+                        <div className="relative flex flex-col items-center justify-center w-full h-full px-8 overflow-hidden">
+                          <Avatar
+                            size={compact ? 22 : 28}
+                            icon={<UserOutlined />}
+                            className="!absolute right-1.5 top-1.5 !bg-gray-100 !text-gray-400"
+                          />
+                          <Avatar
+                            size={compact ? 22 : 28}
+                            className="!absolute left-1.5 top-1.5 !bg-leather-100 !text-leather-700"
+                          >
+                            {String(segment.label || 'م').trim().slice(0, 1)}
+                          </Avatar>
+                          <span className={`text-gray-700 font-bold truncate w-full text-center ${compact ? 'text-[10px]' : 'text-xs'}`}>
                             {segment.label}
+                          </span>
+                          <span className={`mt-0.5 text-gray-500 truncate w-full text-center ${compact ? 'text-[8px]' : 'text-[10px]'}`}>
+                            پیش‌نویس · مسئول تعیین نشده
                           </span>
                         </div>
                       </div>
@@ -3594,6 +3670,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         groups={handoverEditorGroups}
         giverConfirmation={handoverContext?.giverConfirmation || { confirmed: false }}
         receiverConfirmation={handoverContext?.receiverConfirmation || { confirmed: false }}
+        canEditGiverNotes={Boolean(
+          handoverContext
+          && !handoverContext.giverConfirmation?.confirmed
+          && ((handoverContext.giver.type === 'user' && handoverContext.giver.id === currentUser.id)
+            || (handoverContext.giver.type === 'role' && handoverContext.giver.id === currentUser.roleId))
+        )}
         onCancel={closeHandoverEditor}
         onSave={() => { void saveHandover(); }}
         onTrafficTypeChange={(nextType) => {

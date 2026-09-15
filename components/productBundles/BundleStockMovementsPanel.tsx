@@ -12,6 +12,7 @@ import {
   STOCK_ADJUSTMENT_TYPE,
   buildInventoryDeltasFromMovement,
   buildStockTransferPayloadFromMovement,
+  assertIncomingBundleShelf,
   normalizeManualStockMovement,
   type ManualStockMovement,
 } from '../../utils/manualStockMovements';
@@ -539,6 +540,7 @@ const BundleStockMovementsPanel: React.FC<BundleStockMovementsPanelProps> = ({
     try {
       const values = await quickCreateForm.validateFields();
       const normalized = normalizeFormMovement(values);
+      await assertIncomingBundleShelf(supabase as any, normalized);
 
       const rollbackDeltas = editingRow
           ? await buildMovementDeltas(normalizeManualStockMovement({

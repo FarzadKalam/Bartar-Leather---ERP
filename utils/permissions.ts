@@ -34,6 +34,8 @@ export const DASHBOARD_WIDGET_PERMISSIONS = [
   { key: 'chart_monthly_sales', label: 'نمودار فروش ماهانه' },
   { key: 'table_latest_invoices', label: 'جدول آخرین فاکتورها' },
   { key: 'table_latest_production_orders', label: 'جدول آخرین سفارشات تولید' },
+  { key: 'production_lines', label: 'نوارهای تولید من' },
+  { key: 'production_lines_all', label: 'نوارهای تولید همه سفارش‌ها' },
   { key: 'timeline_recent_activity', label: 'تایم لاین تغییرات اخیر' },
   { key: 'top_selling_products', label: 'بخش پرفروش ترین محصولات' },
 ];
@@ -149,7 +151,11 @@ export const buildDefaultPermissions = (modules: Record<string, ModuleDefinition
     view: true,
     edit: true,
     delete: true,
-    fields: createFieldsMap(DASHBOARD_WIDGET_PERMISSIONS),
+    fields: {
+      ...createFieldsMap(DASHBOARD_WIDGET_PERMISSIONS),
+      // نمایش همهٔ خطوط تولید یک سطح دسترسی داده‌ای است، نه صرفاً یک ویجت.
+      production_lines_all: false,
+    },
   };
 
   defaults[WORKFLOWS_PERMISSION_KEY] = {

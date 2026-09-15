@@ -77,6 +77,8 @@ type StartStageTaskOption = {
 
 type StartStageFormRow = {
   id: string;
+  /** یک ثبت واحدِ شروع تولید که ممکن است برای چند مقصد فرم مستقل بسازد. */
+  batchId?: string | null;
   ownerTaskId: string;
   orderId: string;
   orderTitle: string;
@@ -687,6 +689,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
           const groups = Array.isArray(rawForm?.groups) ? rawForm.groups : [];
           forms.push({
             id: String(rawForm?.id || `handover_form_${ownerTaskId}_${index}`),
+            batchId: rawForm?.batchId ? String(rawForm.batchId) : null,
             ownerTaskId,
             orderId,
             orderTitle,
@@ -1287,10 +1290,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
       for (const orderId of selectedOrderIds) {
         const qty = toNumber(orderQuantityMap[orderId]);
         const payload: Record<string, any> = {
+          quantity: qty,
           updated_by: currentUserId,
           updated_at: new Date().toISOString(),
         };
-        if (qty > 0) payload.quantity = qty;
         const { error } = await supabase.from('production_orders').update(payload).eq('id', orderId);
         if (error) throw error;
       }
@@ -1302,6 +1305,39 @@ const ProductionGroupOrderWizard: React.FC = () => {
       setIsSavingQuantities(false);
     }
   }, [canEditGroup, currentUserId, loadSelectedOrders, msg, orderQuantityMap, selectedOrderIds]);
+
+  const syncGroupOrderQuantityState = useCallback((orderId: string, quantity: number) => {
+    const nextQuantity = Math.max(0, toNumber(quantity));
+    setOrderQuantityMap((previous) => ({ ...previous, [orderId]: nextQuantity }));
+    setSelectedOrders((previous) => previous.map((order) => (
+      String(order.id) === String(orderId)
+        ? { ...order, quantity: nextQuantity }
+        : order
+    )));
+  }, []);
+
+  const saveOrderDraftStages = useCallback(async (orderId: string, stages: any[]) => {
+    if (!canEditGroup || groupStatus === 'completed') {
+      throw new Error('این سفارش گروهی امکان ویرایش مراحل را ندارد.');
+    }
+
+    const { error } = await supabase
+      .from('production_orders')
+      .update({
+        production_stages_draft: stages,
+        updated_by: currentUserId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', orderId);
+
+    if (error) throw error;
+
+    setSelectedOrders((previous) => previous.map((item) => (
+      String(item.id) === String(orderId)
+        ? { ...item, production_stages_draft: stages }
+        : item
+    )));
+  }, [canEditGroup, currentUserId, groupStatus]);
 
   const buildDeliveryRowKey = () => `delivery_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -1327,6 +1363,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         quantity: rawRow?.quantity ?? firstPiece?.quantity ?? 1,
       }),
       targetStageTaskId: rawRow?.targetStageTaskId || rawRow?.target_stage_task_id || group.targetStageTaskId || null,
+      giverNote: String(rawRow?.giverNote ?? rawRow?.giver_note ?? ''),
     };
   }, []);
 
@@ -1706,8 +1743,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
           quantity: toNumber(row?.quantity),
           mainUnit: String(row?.mainUnit || row?.main_unit || ''),
           subUnit: String(row?.subUnit || row?.sub_unit || ''),
-          subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
-          deliveredQty: calcDeliveredQty(row),
+        subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
+        deliveredQty: calcDeliveredQty(row),
+        giverNote: String(row?.giverNote ?? row?.giver_note ?? ''),
           __readonly: true as const,
         }));
         if (!normalizedRows.length) return;
@@ -1931,6 +1969,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
       await Promise.all(Array.from(new Set(moves.map((move) => move.product_id))).map((productId) => syncProductStock(productId)));
 
       const nowIso = new Date().toISOString();
+      // هر مقصد فرم مستقل خود را نگه می‌دارد؛ این شناسه آن‌ها را برای ثبت‌کننده
+      // به یک ارسال واحد متصل می‌کند.
+      const startDeliveryBatchId = `start_delivery_batch_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
       const nextRowsByOrder: Record<string, any[]> = { ...orderRowsMap };
       const orderMovesMap: Record<string, any[]> = {};
       const groupsByDestinationTask: Record<string, StartMaterialGroup[]> = {};
@@ -2091,6 +2132,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         const formId = buildStartStageFormId();
         const nextForm = {
           id: formId,
+          batchId: startDeliveryBatchId,
           direction: 'incoming',
           sourceTaskId: null,
           destinationTaskId: null,
@@ -2508,21 +2550,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
                   compact
                   readOnly={!canEditGroup || groupStatus === 'completed'}
                   draftStages={Array.isArray((order as any).production_stages_draft) ? (order as any).production_stages_draft : []}
-                  onDraftStagesChange={(stages) => {
-                    setSelectedOrders((previous) => previous.map((item) =>
-                      String(item.id) === String(order.id) ? { ...item, production_stages_draft: stages } : item
-                    ));
-                    void supabase
-                      .from('production_orders')
-                      .update({ production_stages_draft: stages })
-                      .eq('id', order.id)
-                      .then(({ error }) => {
-                        if (error) msg.error(`ذخیره پیش‌نویس مراحل ناموفق بود: ${error.message}`);
-                      });
-                  }}
+                  onDraftStagesChange={(stages) => saveOrderDraftStages(order.id, stages)}
+                  draftStagesPersistedByParent
                   onQuantityChange={(qty) => {
-                    const parsed = toNumber(qty);
-                    setOrderQuantityMap((prev) => ({ ...prev, [order.id]: parsed }));
+                    syncGroupOrderQuantityState(order.id, qty);
                   }}
                 />
               </div>
@@ -2534,15 +2565,39 @@ const ProductionGroupOrderWizard: React.FC = () => {
   );
 
   const startFormsListRows = useMemo(() => {
-    return (startStageForms || []).map((form) => {
-      const totals = form?.totalsByProduct || {};
-      const productCount = Object.keys(totals).length;
-      const totalQty = Object.values(totals).reduce((sum, qty) => sum + toNumber(qty), 0);
+    const batches = new Map<string, StartStageFormRow[]>();
+    (startStageForms || []).forEach((form) => {
+      // فرم‌های قدیمی که شناسهٔ گروهی ندارند، مستقل باقی می‌مانند.
+      const batchId = String(form?.batchId || form?.id || '');
+      batches.set(batchId, [...(batches.get(batchId) || []), form]);
+    });
+
+    return Array.from(batches.entries()).map(([batchId, forms]) => {
+      const first = forms[0];
+      const totals = forms.reduce<Record<string, number>>((acc, form) => {
+        Object.entries(form?.totalsByProduct || {}).forEach(([productId, qty]) => {
+          acc[productId] = (acc[productId] || 0) + toNumber(qty);
+        });
+        return acc;
+      }, {});
+      const latest = forms.reduce<string | null>((result, form) => {
+        const candidate = form.updatedAt || form.createdAt || null;
+        if (!candidate) return result;
+        return !result || new Date(candidate).getTime() > new Date(result).getTime() ? candidate : result;
+      }, null);
       return {
-        ...form,
-        key: form.id,
-        productCount,
-        totalQty,
+        ...first,
+        id: batchId,
+        key: batchId,
+        members: forms,
+        destinationCount: forms.length,
+        stageName: forms.map((form) => form.stageName).filter(Boolean).join('، '),
+        giverConfirmed: forms.every((form) => form.giverConfirmed),
+        receiverConfirmed: forms.every((form) => form.receiverConfirmed),
+        updatedAt: latest,
+        totalsByProduct: totals,
+        productCount: Object.keys(totals).length,
+        totalQty: Object.values(totals).reduce((sum, qty) => sum + toNumber(qty), 0),
       };
     });
   }, [startStageForms]);
@@ -2594,13 +2649,12 @@ const ProductionGroupOrderWizard: React.FC = () => {
         key: 'confirmation',
         width: 180,
         render: (_: any, record: any) => (
-          <div className="flex items-center gap-1">
-            <Tag color={record?.giverConfirmed ? 'green' : 'orange'}>
-              تحویل‌دهنده: {record?.giverConfirmed ? 'تایید' : 'در انتظار'}
-            </Tag>
-            <Tag color={record?.receiverConfirmed ? 'green' : 'blue'}>
-              تحویل‌گیرنده: {record?.receiverConfirmed ? 'تایید' : 'در انتظار'}
-            </Tag>
+          <div className="flex items-center gap-1 flex-wrap">
+            {(record?.members || [record]).map((member: any) => (
+              <Tag key={member.id} color={member?.giverConfirmed && member?.receiverConfirmed ? 'green' : 'orange'}>
+                {member?.stageName || 'مرحله'}: {member?.giverConfirmed && member?.receiverConfirmed ? 'تکمیل' : 'در انتظار امضا'}
+              </Tag>
+            ))}
           </div>
         ),
       },
@@ -2653,10 +2707,11 @@ const ProductionGroupOrderWizard: React.FC = () => {
               pagination={{ pageSize: 8, showSizeChanger: false }}
               locale={{ emptyText: 'هنوز فرم تحویل شروع تولید ثبت نشده است.' }}
               scroll={{ x: true }}
-              rowClassName="cursor-pointer"
+              rowClassName={(record: any) => Array.isArray(record?.members) && record.members.length > 1 ? '' : 'cursor-pointer'}
               onRow={(record: any) => ({
                 onClick: () => {
-                  void openStartFormEditor(record as StartStageFormRow);
+                  const members = Array.isArray(record?.members) ? record.members : [record];
+                  if (members.length === 1) void openStartFormEditor(members[0] as StartStageFormRow);
                 },
               })}
             />

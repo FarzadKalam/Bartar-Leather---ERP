@@ -13,18 +13,6 @@ const isNetworkAuthError = (error: unknown): boolean => {
   );
 };
 
-const clearSupabaseStoredSession = () => {
-  if (typeof window === "undefined") return;
-  try {
-    const keys = Object.keys(window.localStorage);
-    keys
-      .filter((key) => key.startsWith("sb-") && key.endsWith("-auth-token"))
-      .forEach((key) => window.localStorage.removeItem(key));
-  } catch {
-    // ignore localStorage access issues
-  }
-};
-
 export const authProvider: AuthBindings = {
   login: async ({ email, password }) => {
     const { error } = await supabase.auth.signInWithPassword({
@@ -76,12 +64,15 @@ export const authProvider: AuthBindings = {
         };
       }
 
+      // A transient gateway/network failure must not erase a valid local session
+      // or redirect the user to login. Supabase will refresh it on the next
+      // successful connection; an actual SIGNED_OUT event still redirects them.
       if (error && isNetworkAuthError(error)) {
-        clearSupabaseStoredSession();
+        return { authenticated: true };
       }
     } catch (error) {
       if (isNetworkAuthError(error)) {
-        clearSupabaseStoredSession();
+        return { authenticated: true };
       }
     }
 

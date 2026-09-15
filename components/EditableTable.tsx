@@ -25,6 +25,7 @@ import { formatRelationOptionLabel } from '../utils/relationOptionLabels';
 import {
   buildInventoryDeltasFromMovement,
   buildStockTransferPayloadFromMovement,
+  assertIncomingBundleShelves,
   normalizeManualStockMovement,
 } from '../utils/manualStockMovements';
 import { mapStockTransferRowToEditorRow } from '../utils/stockTransferHelpers';
@@ -1003,6 +1004,11 @@ const EditableTable: React.FC<EditableTableProps> = ({
             if (String(row?.from_shelf_id) === String(row?.to_shelf_id)) throw new Error('قفسه برداشت و قفسه ورود نباید یکسان باشند.');
           }
         });
+
+        await assertIncomingBundleShelves(
+          supabase as any,
+          editableRows.map((row: any) => normalizeManualRow(row))
+        );
 
         const reversePrevious = buildDeltas(previousManualRows, -1);
         const nextDeltas = buildDeltas(editableRows, 1);

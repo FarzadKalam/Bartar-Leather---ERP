@@ -187,7 +187,7 @@ const Login = () => {
           </div>
         </Card>
 
-        <div className="mt-4 text-center text-[11px] text-gray-400">نسخه {import.meta.env.VITE_APP_VERSION || '1.0.2'}</div>
+        <div className="mt-4 text-center text-[11px] text-gray-400">نسخه {import.meta.env.VITE_APP_VERSION || '2.3.0'}</div>
       </div>
     </div>
   );

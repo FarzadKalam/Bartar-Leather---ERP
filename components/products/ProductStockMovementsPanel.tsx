@@ -12,6 +12,7 @@ import {
   STOCK_ADJUSTMENT_TYPE,
   buildInventoryDeltasFromMovement,
   buildStockTransferPayloadFromMovement,
+  assertIncomingBundleShelf,
   normalizeManualStockMovement,
   type ManualStockMovement,
 } from '../../utils/manualStockMovements';
@@ -524,6 +525,7 @@ const ProductStockMovementsPanel: React.FC<ProductStockMovementsPanelProps> = ({
       if (!productUnits.mainUnit) throw new Error('واحد اصلی محصول مشخص نشده است.');
 
       const normalized = normalizeFormMovement(values);
+      await assertIncomingBundleShelf(supabase as any, normalized);
       const nextDeltas = await buildMovementDeltas(normalized, 1);
       const rollbackDeltas = editingRow ? await buildMovementDeltas(normalizeManualStockMovement({
         productId: recordId,

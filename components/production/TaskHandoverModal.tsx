@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, InputNumber, Modal, Select, Table } from 'antd';
-import { ArrowDownOutlined, ArrowUpOutlined, CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
+import { Button, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { ArrowDownOutlined, ArrowUpOutlined, CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persianFa from 'react-date-object/locales/persian_fa';
@@ -38,6 +38,8 @@ export type StageHandoverDeliveryRow = {
   deliveredQty: number;
   sourceBundleId?: string | null;
   sourceShelfId?: string | null;
+  /** توضیح تحویل‌دهنده برای همین ردیف. */
+  giverNote?: string;
 };
 
 export type StageHandoverGroup = {
@@ -109,6 +111,7 @@ interface TaskHandoverModalProps {
   groups: StageHandoverGroup[];
   giverConfirmation: StageHandoverConfirm;
   receiverConfirmation: StageHandoverConfirm;
+  canEditGiverNotes?: boolean;
   onCancel: () => void;
   onSave: () => void;
   onTrafficTypeChange: (nextType: StageHandoverTrafficType) => void;
@@ -229,6 +232,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   groups,
   giverConfirmation,
   receiverConfirmation,
+  canEditGiverNotes = false,
   onCancel,
   onSave,
   onTrafficTypeChange,
@@ -295,6 +299,12 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
     })),
     [groups]
   );
+
+  const giverNotes = useMemo(() => Array.from(new Set(
+    groups.flatMap((group) => (group.deliveryRows || [])
+      .map((row) => String(row?.giverNote || '').trim())
+      .filter(Boolean))
+  )), [groups]);
 
   const getSelectedRowKeys = (groupKey: string) => selectedRowKeysByGroup[groupKey] || [];
 
@@ -804,6 +814,28 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             width: isMobile ? 96 : 78,
                             render: (_value: any, record: StageHandoverDeliveryRow) => (
                               <div className="flex items-center gap-0.5 task-handover-row-actions">
+                                <Popover
+                                  title="توضیحات تحویل‌دهنده"
+                                  trigger="click"
+                                  content={(
+                                    <Input.TextArea
+                                      value={record.giverNote || ''}
+                                      placeholder="توضیحات این ردیف (اختیاری)"
+                                      autoSize={{ minRows: 3, maxRows: 6 }}
+                                      className="w-64"
+                                      readOnly={!canEditGiverNotes || locked}
+                                      onChange={(event) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'giverNote', event.target.value)}
+                                    />
+                                  )}
+                                >
+                                  <Button
+                                    type="text"
+                                    size="small"
+                                    className={`!w-6 !h-6 !p-0 ${record.giverNote ? '!text-leather-700' : ''}`}
+                                    title={canEditGiverNotes && !locked ? 'ویرایش توضیحات تحویل‌دهنده' : 'مشاهده توضیحات تحویل‌دهنده'}
+                                    icon={<FileTextOutlined />}
+                                  />
+                                </Popover>
                                 <Button
                                   type="text"
                                   size="small"
@@ -878,6 +910,12 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
           <div className="text-xs text-gray-700">
             تحویل‌دهنده: <span className="font-medium">{giverName || '-'}</span>
           </div>
+          {giverNotes.length > 0 ? (
+            <div className="rounded-md border border-amber-100 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+              <span className="font-medium">توضیحات تحویل‌دهنده:</span>{' '}
+              {giverNotes.join(' — ')}
+            </div>
+          ) : null}
           <div className="text-xs text-gray-700">
             تحویل‌گیرنده: <span className="font-medium">{receiverName || '-'}</span>
           </div>

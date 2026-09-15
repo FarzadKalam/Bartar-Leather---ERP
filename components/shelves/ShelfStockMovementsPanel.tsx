@@ -11,6 +11,7 @@ import {
   ALLOWED_MANUAL_STOCK_SOURCES,
   buildInventoryDeltasFromMovement,
   buildStockTransferPayloadFromMovement,
+  assertIncomingBundleShelf,
   normalizeManualStockMovement,
   type ManualStockMovement,
 } from '../../utils/manualStockMovements';
@@ -432,8 +433,14 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
           || field.key === 'from_shelf_id'
           || (field.key === 'to_shelf_id' && currentType === 'incoming')
         );
+        const label = field.key === 'from_shelf_id' && shouldShowFromShelf
+          ? 'قفسه مبدأ (قفسه جاری)'
+          : field.key === 'to_shelf_id' && currentType === 'transfer'
+            ? 'قفسه مقصد'
+            : field.labels?.fa || field.key;
         return {
           ...field,
+          labels: { ...(field.labels || {}), fa: label },
           readonly,
           validation: required ? { required: true } : undefined,
         } as ModuleField;
@@ -546,6 +553,7 @@ const ShelfStockMovementsPanel: React.FC<ShelfStockMovementsPanelProps> = ({
     try {
       const values = await quickCreateForm.validateFields();
       const normalized = normalizeFormMovement(values);
+      await assertIncomingBundleShelf(supabase as any, normalized);
 
       const rollbackDeltas = editingRow
         ? buildInventoryDeltasFromMovement(normalizeManualStockMovement({

@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, InputNumber, Modal, Select, Table } from 'antd';
-import { CalculatorOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
+import { Button, Drawer, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { CalculatorOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
@@ -36,6 +36,8 @@ export type StartMaterialDeliveryRow = {
   subQuantity: number;
   deliveredQty: number;
   targetStageTaskId?: string | null;
+  /** توضیح ثبت‌کننده برای همین ردیف تحویل. */
+  giverNote?: string;
 };
 
 export type StartMaterialOrderRequirement = {
@@ -1022,6 +1024,27 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               width: isMobile ? 96 : 78,
                               render: (_value: any, record: StartMaterialDeliveryRow) => (
                                 <div className="flex items-center gap-0.5 start-production-row-actions">
+                                  <Popover
+                                    title="توضیحات تحویل‌دهنده"
+                                    trigger="click"
+                                    content={(
+                                      <Input.TextArea
+                                        value={record.giverNote || ''}
+                                        placeholder="توضیحات این ردیف (اختیاری)"
+                                        autoSize={{ minRows: 3, maxRows: 6 }}
+                                        className="w-64"
+                                        onChange={(event) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'giverNote', event.target.value)}
+                                      />
+                                    )}
+                                  >
+                                    <Button
+                                      type="text"
+                                      size="small"
+                                      className={`!w-6 !h-6 !p-0 ${record.giverNote ? '!text-leather-700' : ''}`}
+                                      title="توضیحات تحویل‌دهنده"
+                                      icon={<FileTextOutlined />}
+                                    />
+                                  </Popover>
                                   <Button
                                     type="text"
                                     size="small"

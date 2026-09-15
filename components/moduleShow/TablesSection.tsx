@@ -103,6 +103,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               compact={true}
               onQuantityChange={(qty) => onDataUpdate?.({ quantity: qty })}
               draftStages={data?.production_stages_draft || []}
+              onDraftStagesChange={(stages) => onDataUpdate?.({ production_stages_draft: stages })}
               showWageSummary={module.id === 'production_orders'}
             />
         </div>

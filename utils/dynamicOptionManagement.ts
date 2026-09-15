@@ -1,13 +1,14 @@
 import { MODULES } from '../moduleRegistry';
 import { supabase } from '../supabaseClient';
-import { BlockType, FieldType } from '../types';
+import { BlockType, FieldType, ModuleNature } from '../types';
 
 type DynamicOptionFieldReference = {
   moduleId: string;
   table: string;
   fieldKey: string;
   fieldType: string;
-  blockId?: string;
+  storage: 'column' | 'block_row' | 'grid_spec';
+  containerKey?: string;
 };
 
 type DynamicOptionMigrationParams = {
@@ -105,6 +106,10 @@ const remapStoredValue = (
   };
 };
 
+const isSupportedDynamicField = (field: any, category: string) =>
+  normalizeComparableValue(field?.dynamicOptionsCategory) === category
+  && SUPPORTED_DYNAMIC_FIELD_TYPES.has(String(field?.type));
+
 const collectDynamicOptionReferences = (category: string): DynamicOptionFieldReference[] => {
   const normalizedCategory = normalizeComparableValue(category);
   if (!normalizedCategory) return [];
@@ -112,17 +117,31 @@ const collectDynamicOptionReferences = (category: string): DynamicOptionFieldRef
   const references: DynamicOptionFieldReference[] = [];
 
   Object.entries(MODULES).forEach(([moduleId, moduleDef]) => {
+    const gridBlocks = moduleDef.blocks.filter((block) => block.type === BlockType.GRID_TABLE);
+    const gridSpecBlockIds = new Set(
+      gridBlocks.flatMap((block: any) =>
+        (block.gridConfig?.categories || [])
+          .map((item: any) => String(item?.specBlockId || '').trim())
+          .filter(Boolean)
+      )
+    );
+
     moduleDef.fields.forEach((field) => {
-      if (normalizeComparableValue(field.dynamicOptionsCategory) !== normalizedCategory) return;
-      if (!SUPPORTED_DYNAMIC_FIELD_TYPES.has(String(field.type))) return;
-      // شناسهٔ FIELD_GROUP فقط برای چیدمان فرم است؛ مقدار فیلد در ستون خودش
-      // در جدول ماژول نگهداری می‌شود، نه در ستونی هم‌نام با blockId.
-      references.push({
-        moduleId,
-        table: moduleDef.table,
-        fieldKey: field.key,
-        fieldType: String(field.type),
-      });
+      if (!isSupportedDynamicField(field, normalizedCategory)) return;
+
+      const isGridSpec = !!field.blockId && gridSpecBlockIds.has(String(field.blockId));
+
+      // در ماژول‌های تولید، فیلدهای مشخصات فقط تعریف نمایشی برای GridTable هستند؛
+      // مقدارشان در grid_materials[].specs ذخیره می‌شود و ستون مستقل ندارند.
+      if (!isGridSpec || moduleDef.nature !== ModuleNature.PRODUCTION) {
+        references.push({
+          moduleId,
+          table: moduleDef.table,
+          fieldKey: field.key,
+          fieldType: String(field.type),
+          storage: 'column',
+        });
+      }
     });
 
     moduleDef.blocks.forEach((block) => {
@@ -137,16 +156,68 @@ const collectDynamicOptionReferences = (category: string): DynamicOptionFieldRef
           table: moduleDef.table,
           fieldKey: String(column.key),
           fieldType: String(column.type),
-          blockId: String(block.id),
+          storage: 'block_row',
+          containerKey: String(block.id),
+        });
+      });
+    });
+
+    gridBlocks.forEach((block: any) => {
+      const specBlockIds = new Set(
+        (block.gridConfig?.categories || [])
+          .map((item: any) => String(item?.specBlockId || '').trim())
+          .filter(Boolean)
+      );
+      if (!specBlockIds.size) return;
+
+      // BOMها فیلد مشخصات مستقل ندارند و GridTable مشخصات را از ماژول محصولات
+      // می‌گیرد؛ برای این مورد از همان تعریف به‌عنوان منبع استفاده می‌کنیم.
+      const ownSpecFields = moduleDef.fields.filter((field) =>
+        field.blockId && specBlockIds.has(String(field.blockId))
+      );
+      const sourceFields = ownSpecFields.length > 0
+        ? ownSpecFields
+        : (MODULES.products?.fields || []).filter((field) =>
+            field.blockId && specBlockIds.has(String(field.blockId))
+          );
+
+      sourceFields.forEach((field) => {
+        if (!isSupportedDynamicField(field, normalizedCategory)) return;
+        references.push({
+          moduleId,
+          table: moduleDef.table,
+          fieldKey: String(field.key),
+          fieldType: String(field.type),
+          storage: 'grid_spec',
+          containerKey: String(block.id),
         });
       });
     });
   });
 
-  return references;
+  return Array.from(new Map(
+    references.map((reference) => [
+      [reference.table, reference.fieldKey, reference.storage, reference.containerKey || ''].join(':'),
+      reference,
+    ])
+  ).values());
 };
 
-const fetchAllRows = async (table: string, selectClause: string) => {
+const findMissingColumn = (error: any) => {
+  const text = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(' ');
+  const postgresMatch = text.match(/column\s+([^\s]+)\s+does not exist/i);
+  if (postgresMatch?.[1]) {
+    return postgresMatch[1].split('.').pop()?.replace(/"/g, '') || null;
+  }
+  const schemaCacheMatch = text.match(/(?:column|field)\s+['"]([\w]+)['"]/i);
+  return schemaCacheMatch?.[1] || null;
+};
+
+const fetchAllRows = async (table: string, requestedColumns: string[]) => {
+  const unavailableColumns = new Set<string>();
+  let columns = Array.from(new Set(requestedColumns.filter(Boolean)));
   const rows: any[] = [];
   let pageIndex = 0;
 
@@ -155,10 +226,20 @@ const fetchAllRows = async (table: string, selectClause: string) => {
     const to = from + PAGE_SIZE - 1;
     const { data, error } = await supabase
       .from(table)
-      .select(selectClause)
+      .select(columns.join(', '))
       .range(from, to);
 
-    if (error) throw error;
+    if (error) {
+      const missingColumn = findMissingColumn(error);
+      if (missingColumn && columns.includes(missingColumn)) {
+        unavailableColumns.add(missingColumn);
+        columns = columns.filter((column) => column !== missingColumn);
+        pageIndex = 0;
+        rows.length = 0;
+        continue;
+      }
+      throw error;
+    }
 
     const pageRows = Array.isArray(data) ? data : [];
     rows.push(...pageRows);
@@ -167,7 +248,7 @@ const fetchAllRows = async (table: string, selectClause: string) => {
     pageIndex += 1;
   }
 
-  return rows;
+  return { rows, unavailableColumns };
 };
 
 export const migrateDynamicOptionUsage = async ({
@@ -193,12 +274,16 @@ export const migrateDynamicOptionUsage = async ({
   for (const [table, tableReferences] of referencesByTable.entries()) {
     const selectColumns = Array.from(new Set([
       'id',
-      ...tableReferences
-        .map((reference) => reference.blockId || reference.fieldKey)
-        .filter(Boolean),
-    ]));
+      ...tableReferences.map((reference) =>
+        reference.storage === 'column' ? reference.fieldKey : reference.containerKey
+      ).filter(Boolean),
+    ])) as string[];
 
-    const rows = await fetchAllRows(table, selectColumns.join(', '));
+    const { rows, unavailableColumns } = await fetchAllRows(table, selectColumns);
+    const availableReferences = tableReferences.filter((reference) => {
+      const column = reference.storage === 'column' ? reference.fieldKey : reference.containerKey;
+      return !column || !unavailableColumns.has(column);
+    });
 
     for (const row of rows) {
       if (!row?.id) continue;
@@ -206,8 +291,8 @@ export const migrateDynamicOptionUsage = async ({
       const patch: Record<string, any> = {};
       let recordChanged = false;
 
-      tableReferences
-        .filter((reference) => !reference.blockId)
+      availableReferences
+        .filter((reference) => reference.storage === 'column')
         .forEach((reference) => {
           const remapped = remapStoredValue(row?.[reference.fieldKey], reference.fieldType, fromValue, toValue);
           if (!remapped.changed) return;
@@ -216,38 +301,50 @@ export const migrateDynamicOptionUsage = async ({
           recordChanged = true;
         });
 
-      const blockIds = Array.from(new Set(
-        tableReferences
-          .map((reference) => reference.blockId)
+      const containerKeys = Array.from(new Set(
+        availableReferences
+          .filter((reference) => reference.storage !== 'column')
+          .map((reference) => reference.containerKey)
           .filter(Boolean)
       )) as string[];
 
-      blockIds.forEach((blockId) => {
-        const blockReferences = tableReferences.filter((reference) => reference.blockId === blockId);
-        const currentRows = Array.isArray(row?.[blockId]) ? row[blockId] : null;
+      containerKeys.forEach((containerKey) => {
+        const containerReferences = availableReferences.filter(
+          (reference) => reference.containerKey === containerKey
+        );
+        const currentRows = Array.isArray(row?.[containerKey])
+          ? row[containerKey]
+          : tryParseArrayValue(row?.[containerKey]);
         if (!currentRows) return;
 
-        let blockChanged = false;
+        let containerChanged = false;
         const nextRows = currentRows.map((item: any) => {
           if (!item || typeof item !== 'object') return item;
           let nextItem = item;
 
-          blockReferences.forEach((reference) => {
-            const remapped = remapStoredValue(item?.[reference.fieldKey], reference.fieldType, fromValue, toValue);
+          containerReferences.forEach((reference) => {
+            const currentValue = reference.storage === 'grid_spec'
+              ? item?.specs?.[reference.fieldKey]
+              : item?.[reference.fieldKey];
+            const remapped = remapStoredValue(currentValue, reference.fieldType, fromValue, toValue);
             if (!remapped.changed) return;
             if (nextItem === item) {
               nextItem = { ...item };
             }
-            nextItem[reference.fieldKey] = remapped.nextValue;
+            if (reference.storage === 'grid_spec') {
+              nextItem.specs = { ...(item.specs || {}), [reference.fieldKey]: remapped.nextValue };
+            } else {
+              nextItem[reference.fieldKey] = remapped.nextValue;
+            }
             updatedFields += 1;
-            blockChanged = true;
+            containerChanged = true;
           });
 
           return nextItem;
         });
 
-        if (!blockChanged) return;
-        patch[blockId] = nextRows;
+        if (!containerChanged) return;
+        patch[containerKey] = nextRows;
         recordChanged = true;
       });
 
