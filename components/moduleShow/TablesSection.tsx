@@ -18,6 +18,9 @@ interface TablesSectionProps {
   canViewField?: (fieldKey: string) => boolean;
   canEditModule?: boolean;
   onDataUpdate?: (patch: Record<string, any>) => void;
+  focusedTaskId?: string | null;
+  focusedTaskAction?: 'popover' | 'handover-forms' | null;
+  onFocusedTaskHandled?: () => void;
 }
 
 const shouldShowInvoiceSummary = (summaryConfig: any) =>
@@ -32,6 +35,9 @@ const TablesSection: React.FC<TablesSectionProps> = ({
   canViewField,
   canEditModule = true,
   onDataUpdate,
+  focusedTaskId = null,
+  focusedTaskAction = null,
+  onFocusedTaskHandled,
 }) => {
   if (!module || !data) return null;
 
@@ -105,6 +111,9 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               draftStages={data?.production_stages_draft || []}
               onDraftStagesChange={(stages) => onDataUpdate?.({ production_stages_draft: stages })}
               showWageSummary={module.id === 'production_orders'}
+              focusedTaskId={focusedTaskId}
+              focusedTaskAction={focusedTaskAction}
+              onFocusedTaskHandled={onFocusedTaskHandled}
             />
         </div>
       ))}

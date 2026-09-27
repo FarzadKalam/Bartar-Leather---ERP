@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Avatar, Card, Row, Col, Button, Dropdown, Statistic, Table, Timeline, Empty, Select, Switch, Tag } from 'antd';
 import {
   MoreOutlined,
@@ -16,6 +16,7 @@ import { supabase } from '../supabaseClient';
 import { MODULES } from '../moduleRegistry';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 import { DASHBOARD_PERMISSION_KEY } from '../utils/permissions';
+import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
@@ -77,6 +78,11 @@ const Dashboard: React.FC = () => {
   const [productionStatusFilter, setProductionStatusFilter] = useState<string[]>([]);
   const [productionWorkflowLoading, setProductionWorkflowLoading] = useState(false);
   const [productionWorkflowGroups, setProductionWorkflowGroups] = useState<ProductionWorkflowGroup[]>([]);
+  const stageClickTimerRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (stageClickTimerRef.current !== null) window.clearTimeout(stageClickTimerRef.current);
+  }, []);
 
   // Get today's Persian date
   const getTodayPersianDate = () => {
@@ -205,7 +211,7 @@ const Dashboard: React.FC = () => {
           status: String(row?.stage_status || 'todo'),
           dueDate: row?.due_date || null,
           assigneeName: String(row?.assignee_name || 'مسئول تعیین‌نشده'),
-          assigneeAvatar: row?.assignee_avatar_url || null,
+          assigneeAvatar: normalizeStoragePublicUrl(row?.assignee_avatar_url) || null,
           assigneeIsRole: !!row?.assignee_is_role,
         });
         grouped.set(groupId, current);
@@ -825,8 +831,31 @@ const Dashboard: React.FC = () => {
                             {order.stages.map((stage, index) => (
                               <div
                                 key={stage.id}
-                                className={`relative flex-1 min-w-28 px-8 py-2 text-center text-white ${index ? 'border-r border-white/30' : ''}`}
+                                role="button"
+                                tabIndex={0}
+                                title="کلیک: جزئیات مرحله · دابل‌کلیک: فرم‌های تحویل"
+                                className={`relative flex-1 min-w-28 px-3 py-2 text-center text-white cursor-pointer hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-white/90 ${index ? 'border-r border-white/30' : ''}`}
                                 style={{ backgroundColor: getStatusColor(stage.status) === 'green' ? '#10b981' : getStatusColor(stage.status) === 'blue' ? '#3b82f6' : getStatusColor(stage.status) === 'orange' ? '#f97316' : getStatusColor(stage.status) === 'red' ? '#ef4444' : '#9ca3af' }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (stageClickTimerRef.current !== null) window.clearTimeout(stageClickTimerRef.current);
+                                  stageClickTimerRef.current = window.setTimeout(() => {
+                                    navigate(`/production_orders/${order.id}?stage=${encodeURIComponent(stage.id)}`);
+                                    stageClickTimerRef.current = null;
+                                  }, 220);
+                                }}
+                                onDoubleClick={(event) => {
+                                  event.stopPropagation();
+                                  if (stageClickTimerRef.current !== null) window.clearTimeout(stageClickTimerRef.current);
+                                  stageClickTimerRef.current = null;
+                                  navigate(`/production_orders/${order.id}?stage=${encodeURIComponent(stage.id)}&handover=forms`);
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  navigate(`/production_orders/${order.id}?stage=${encodeURIComponent(stage.id)}`);
+                                }}
                               >
                                 <Avatar
                                   size={26}
@@ -834,9 +863,6 @@ const Dashboard: React.FC = () => {
                                   icon={stage.assigneeIsRole ? <TeamOutlined /> : <UserOutlined />}
                                   className="!absolute right-2 top-2 !bg-white/90 !text-leather-700"
                                 />
-                                <Avatar size={26} className="!absolute left-2 top-2 !bg-black/20 !text-white">
-                                  {stage.name.slice(0, 1)}
-                                </Avatar>
                                 <div className="font-bold text-xs truncate mt-7">{stage.name}</div>
                                 <div className="text-[10px] truncate opacity-95">{stage.assigneeName}</div>
                                 <div className="text-[9px] truncate opacity-90 mt-0.5">

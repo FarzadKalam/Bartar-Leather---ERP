@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button, Spin, App, Avatar, Checkbox, Modal, Select } from 'antd';
 import { EditOutlined, CheckOutlined, CloseOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -81,6 +81,7 @@ const normalizeInvoiceRecordForView = (moduleId: string, record: any) => {
 const ModuleShow: React.FC = () => {
   const { moduleId = 'products', id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { message: msg, modal } = App.useApp();
   const moduleConfig = MODULES[moduleId];
 
@@ -3039,6 +3040,24 @@ const ModuleShow: React.FC = () => {
     setData((prev: any) => ({ ...(prev || {}), ...patch }));
   }, []);
 
+  const focusedTaskId = useMemo(() => {
+    if (moduleId !== 'production_orders') return null;
+    return new URLSearchParams(location.search).get('stage');
+  }, [location.search, moduleId]);
+  const focusedTaskAction = useMemo<'popover' | 'handover-forms' | null>(() => {
+    if (!focusedTaskId) return null;
+    return new URLSearchParams(location.search).get('handover') === 'forms'
+      ? 'handover-forms'
+      : 'popover';
+  }, [focusedTaskId, location.search]);
+  const clearFocusedTask = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    params.delete('stage');
+    params.delete('handover');
+    const nextSearch = params.toString();
+    navigate({ pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
+
   if (accessDenied) {
     return (
       <div className="flex h-screen items-center justify-center text-gray-400">
@@ -3346,6 +3365,9 @@ const ModuleShow: React.FC = () => {
         canViewField={canViewField}
         canEditModule={canEditModule}
         onDataUpdate={handleRecordPatch}
+        focusedTaskId={focusedTaskId}
+        focusedTaskAction={focusedTaskAction}
+        onFocusedTaskHandled={clearFocusedTask}
       />
 
       {isEditDrawerOpen && (

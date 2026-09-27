@@ -28,6 +28,7 @@ import { MODULES } from '../moduleRegistry';
 import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils/durableDraft';
+import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -42,6 +43,9 @@ interface ProductionStagesFieldProps {
   onDraftStagesChange?: (stages: any[]) => void | Promise<void>;
   draftStagesPersistedByParent?: boolean;
   showWageSummary?: boolean;
+  focusedTaskId?: string | null;
+  focusedTaskAction?: 'popover' | 'handover-forms' | null;
+  onFocusedTaskHandled?: () => void;
 }
 
 type StageHandoverSide = 'giver' | 'receiver';
@@ -96,7 +100,7 @@ type OpenHandoverOptions = {
   sourceOverrideTask?: any | null;
 };
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false, focusedTaskId = null, focusedTaskAction = null, onFocusedTaskHandled }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -141,6 +145,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [lineQuantityDrafts, setLineQuantityDrafts] = useState<Record<string, number>>({});
   const [savingLineQuantityId, setSavingLineQuantityId] = useState<string | null>(null);
   const hasFetchedLinesRef = useRef(false);
+  const handledFocusedTaskRef = useRef<string | null>(null);
 
   const handoverDraftKey = useMemo(() => {
     if (!recordId || !handoverTask?.id || !activeHandoverFormId) return null;
@@ -2064,6 +2069,35 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     }
   }, [assigneeLabelFromIds, handleCreateHandoverForm, openHandoverEditorForForm, openTaskHandoverModal]);
 
+  // داشبورد می‌تواند یک مرحله را در صفحهٔ اصلی سفارش هدف بگیرد؛ خودِ نمایش و فرم
+  // همچنان توسط همین کامپوننت مرکزی انجام می‌شود تا منطق تحویل و مجوزها تکرار نشود.
+  useEffect(() => {
+    if (!focusedTaskId || !focusedTaskAction || isBom) return;
+    const task = tasks.find((item: any) => String(item?.id) === String(focusedTaskId));
+    if (!task) return;
+
+    const actionKey = `${focusedTaskAction}:${String(focusedTaskId)}`;
+    if (handledFocusedTaskRef.current === actionKey) return;
+    handledFocusedTaskRef.current = actionKey;
+
+    if (focusedTaskAction === 'handover-forms') {
+      void (async () => {
+        await openTaskHandoverModal(task, tasks);
+        onFocusedTaskHandled?.();
+      })();
+      return;
+    }
+
+    setOpenTaskPopoverId(String(task.id));
+    window.setTimeout(() => {
+      document.getElementById(`production-stage-task-${String(task.id)}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    }, 0);
+    onFocusedTaskHandled?.();
+  }, [focusedTaskAction, focusedTaskId, isBom, onFocusedTaskHandled, openTaskHandoverModal, tasks]);
+
   const handleOpenHandoverForm = useCallback((formId: string, ownerTaskId: string) => {
     if (!formId || !ownerTaskId) return;
     if (handoverTask?.id && String(ownerTaskId) === String(handoverTask.id)) {
@@ -2967,7 +3001,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       okType: 'danger',
       cancelText: 'انصراف',
       onOk: async () => {
-        const next = draftLocal.filter((s: any) => s.id !== id);
+        const next = draftLocal.filter((s: any) => String(s?.id ?? '') !== String(id ?? ''));
         await saveDraftStages(next);
       },
     });
@@ -2986,11 +3020,13 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   }, [isDraftModalOpen, editingDraft, draftForm]);
 
   const normalizeStageName = (val: any) => String(val || '').trim().toLowerCase();
-  const draftSegments = draftList.map((stage: any) => ({
+  const draftSegments = draftList
+    .filter((stage: any) => String(stage?.name || stage?.title || '').trim() !== '')
+    .map((stage: any) => ({
     ...stage,
     type: 'draft',
     label: stage.name || stage.title || 'مرحله',
-  }));
+    }));
 
   const getLineSegments = (lineTasks: any[]) => {
     const normalizedTasks = (lineTasks || []).map((task: any) => ({
@@ -3091,16 +3127,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       onOk: async () => {
         try {
           setLoading(true);
-          const { error: taskError } = await supabase
-            .from('tasks')
-            .delete()
-            .eq('production_line_id', line.id);
-          if (taskError) throw taskError;
-          const { error: lineError } = await supabase
-            .from('production_lines')
-            .delete()
-            .eq('id', line.id);
-          if (lineError) throw lineError;
+          const { data: deleted, error: deleteError } = await supabase.rpc('delete_production_line_cascade', {
+            p_line_id: String(line.id),
+          });
+          if (deleteError) throw deleteError;
+          if (!deleted) throw new Error('خط تولید پیدا نشد یا امکان حذف آن وجود ندارد.');
           message.success('خط تولید حذف شد.');
           await fetchLines();
           await fetchTasks();
@@ -3308,7 +3339,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                       const segmentColor = getStatusColor(segment.status);
                       const handoverIssue = getTaskHandoverIssue(segment);
                       const assigneeName = getAssigneeLabel(segment);
-                      const activityInitial = String(segment.title || segment.name || 'م').trim().slice(0, 1);
                       return (
                     <Popover
                       key={segment.id}
@@ -3323,6 +3353,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                       title={null}
                     >
                       <div
+                        id={String(focusedTaskId) === String(segment.id) ? `production-stage-task-${String(segment.id)}` : undefined}
                         className={`relative flex items-center justify-center cursor-pointer transition-all hover:brightness-110 group ${index !== 0 ? 'border-r border-white/30' : ''} ${index === 0 ? 'rounded-r-lg' : ''} ${index === lineSegments.length - 1 ? 'rounded-l-lg' : ''} ${isHighlightedTask ? 'z-10' : ''}`}
                         style={{
                           flex: 1,
@@ -3335,16 +3366,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                         <div className="relative flex flex-col items-center justify-center w-full h-full px-8 overflow-hidden">
                           <Avatar
                             size={compact ? 22 : 28}
-                            src={segment?.assignee?.avatar_url || undefined}
+                            src={normalizeStoragePublicUrl(segment?.assignee?.avatar_url) || undefined}
                             icon={segment.assignee_type === 'role' ? <TeamOutlined /> : <UserOutlined />}
                             className="!absolute right-1.5 top-1.5 !bg-white/90 !text-leather-700 shadow-sm"
                           />
-                          <Avatar
-                            size={compact ? 22 : 28}
-                            className="!absolute left-1.5 top-1.5 !bg-black/20 !text-white"
-                          >
-                            {activityInitial}
-                          </Avatar>
                           {handoverIssue ? (
                             <Tooltip title={handoverIssue}>
                               <WarningOutlined className="absolute left-1.5 bottom-1.5 text-amber-300 drop-shadow" />
@@ -3402,12 +3427,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                             icon={<UserOutlined />}
                             className="!absolute right-1.5 top-1.5 !bg-gray-100 !text-gray-400"
                           />
-                          <Avatar
-                            size={compact ? 22 : 28}
-                            className="!absolute left-1.5 top-1.5 !bg-leather-100 !text-leather-700"
-                          >
-                            {String(segment.label || 'م').trim().slice(0, 1)}
-                          </Avatar>
                           <span className={`text-gray-700 font-bold truncate w-full text-center ${compact ? 'text-[10px]' : 'text-xs'}`}>
                             {segment.label}
                           </span>
