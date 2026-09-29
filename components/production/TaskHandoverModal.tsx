@@ -383,12 +383,12 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   return (
     <Modal
       title="فرم تحویل کالا"
-      width="min(980px, calc(100vw - 24px))"
+      width="min(1440px, calc(100vw - 16px))"
       open={open}
       onCancel={onCancel}
       confirmLoading={loading}
       destroyOnHidden
-      styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
+      styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }}
       footer={[
         <Button key="cancel" onClick={onCancel}>
           انصراف
@@ -758,7 +758,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             title: 'مقدار واحد اصلی',
                             dataIndex: 'mainQuantity',
                             key: 'mainQuantity',
-                            width: isMobile ? 200 : 160,
+                            width: isMobile ? 240 : 250,
                             render: (value: number, record: StageHandoverDeliveryRow) => (
                               <div className="flex gap-1"><InputNumber value={value} className="w-full persian-number" stringMode
                                 formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)}
@@ -794,7 +794,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             title: 'مقدار واحد فرعی',
                             dataIndex: 'subQuantity',
                             key: 'subQuantity',
-                            width: isMobile ? 200 : 160,
+                            width: isMobile ? 240 : 250,
                             render: (value: number, record: StageHandoverDeliveryRow) => (
                               <div className="flex gap-1">
                                 <InputNumber value={value} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} disabled={locked} />

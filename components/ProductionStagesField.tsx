@@ -1,8 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Avatar, Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
-import { PlusOutlined, ClockCircleOutlined, UserOutlined, ArrowRightOutlined, DownOutlined, OrderedListOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined, WarningOutlined } from '@ant-design/icons';
+import { PlusOutlined, UserOutlined, DownOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined, WarningOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
-import { Link } from 'react-router-dom';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import PersianDatePicker from './PersianDatePicker';
 import TaskHandoverModal, {
@@ -140,7 +139,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [handoverSourceStageValue, setHandoverSourceStageValue] = useState<string | null>(null);
   const [handoverSourceShelfId, setHandoverSourceShelfId] = useState<string | null>(null);
   const [handoverDestinationStageId, setHandoverDestinationStageId] = useState<string | null>(null);
-  const [openTaskPopoverId, setOpenTaskPopoverId] = useState<string | null>(null);
   const [expandedStageBars, setExpandedStageBars] = useState<Record<string, boolean>>({});
   const [lineQuantityDrafts, setLineQuantityDrafts] = useState<Record<string, number>>({});
   const [savingLineQuantityId, setSavingLineQuantityId] = useState<string | null>(null);
@@ -994,7 +992,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const openTaskHandoverModal = useCallback(async (task: any, providedTasks?: any[]) => {
     if (!task?.id || !recordId || isBom) return;
     try {
-      setOpenTaskPopoverId(null);
       setHandoverLoading(true);
       if (!productionShelfOptions.length) await fetchProductionShelves();
       if (!assignees.users.length && !assignees.roles.length) await fetchAssignees();
@@ -2080,22 +2077,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     if (handledFocusedTaskRef.current === actionKey) return;
     handledFocusedTaskRef.current = actionKey;
 
-    if (focusedTaskAction === 'handover-forms') {
-      void (async () => {
-        await openTaskHandoverModal(task, tasks);
-        onFocusedTaskHandled?.();
-      })();
-      return;
-    }
-
-    setOpenTaskPopoverId(String(task.id));
-    window.setTimeout(() => {
-      document.getElementById(`production-stage-task-${String(task.id)}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-    }, 0);
-    onFocusedTaskHandled?.();
+    void (async () => {
+      await openTaskHandoverModal(task, tasks);
+      onFocusedTaskHandled?.();
+    })();
   }, [focusedTaskAction, focusedTaskId, isBom, onFocusedTaskHandled, openTaskHandoverModal, tasks]);
 
   const handleOpenHandoverForm = useCallback((formId: string, ownerTaskId: string) => {
@@ -2266,6 +2251,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       name: draftStage?.name || '',
       sort_order: draftStage?.sort_order || ((tasks.length + 1) * 10),
       wage: draftStage?.wage || 0,
+      description: draftStage?.description || '',
       production_shelf_id: null,
     };
     taskForm.setFieldsValue(initial);
@@ -2304,6 +2290,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         production_shelf_id: values.production_shelf_id || null,
         due_date: values.due_date || null,
         wage: values.wage || null,
+        description: values.description?.trim() || null,
         sort_order: values.sort_order || ((tasks.length + 1) * 10),
         created_by: user?.id,
       };
@@ -2337,12 +2324,15 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ? { ...item, ...patch }
         : item
     )));
+    setHandoverTask((prev: any) => String(prev?.id || '') === String(taskId) ? { ...prev, ...patch } : prev);
 
     try {
       const { error } = await supabase.from('tasks').update(patch).eq('id', taskId);
       if (error) throw error;
       message.success('وضعیت بروزرسانی شد');
       const nextTasks = await fetchTasks();
+      const refreshedTask = nextTasks.find((item: any) => String(item?.id) === String(taskId));
+      if (refreshedTask) setHandoverTask((prev: any) => String(prev?.id || '') === String(taskId) ? refreshedTask : prev);
       await maybeOpenHandoverByStatus(taskId, newStatus, nextTasks);
     } catch (err: any) {
       setTasks((prev) => prev.map((item: any) => (
@@ -2350,25 +2340,32 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           ? previousTask
           : item
       )));
+      setHandoverTask((prev: any) => String(prev?.id || '') === String(taskId) ? previousTask : prev);
       message.error(err?.message || 'خطا در بروزرسانی وضعیت');
     }
   };
 
   const handleProducedQtyChange = async (taskId: string, value: number | null) => {
+    const nextProducedQty = Math.max(0, toNumber(value));
+    const task = tasks.find((item: any) => String(item?.id) === String(taskId)) || handoverTask;
+    await handleTaskFieldChange(task, { produced_qty: nextProducedQty }, { produced_qty: nextProducedQty });
+  };
+
+  const handleTaskFieldChange = async (task: any, patch: Record<string, any>, localPatch: Record<string, any> = patch) => {
+    if (!task?.id) return;
+    const taskId = String(task.id);
+    const previousTask = tasks.find((item: any) => String(item?.id) === taskId) || task;
+    const applyPatch = (item: any) => String(item?.id) === taskId ? { ...item, ...localPatch } : item;
+
+    setTasks((previous: any[]) => previous.map(applyPatch));
+    setHandoverTask((previous: any) => String(previous?.id || '') === taskId ? { ...previous, ...localPatch } : previous);
     try {
-      const nextProducedQty = Math.max(0, toNumber(value));
-      const { error } = await supabase
-        .from('tasks')
-        .update({ produced_qty: nextProducedQty })
-        .eq('id', taskId);
+      const { error } = await supabase.from('tasks').update(patch).eq('id', taskId);
       if (error) throw error;
-      setTasks((prev) => prev.map((item: any) => (
-        String(item?.id) === String(taskId)
-          ? { ...item, produced_qty: nextProducedQty }
-          : item
-      )));
-    } catch (err: any) {
-      message.error(err?.message || 'خطا در ثبت مقدار تولید شده');
+    } catch (error: any) {
+      setTasks((previous: any[]) => previous.map((item: any) => String(item?.id) === taskId ? previousTask : item));
+      setHandoverTask((previous: any) => String(previous?.id || '') === taskId ? previousTask : previous);
+      message.error(error?.message || 'بروزرسانی اطلاعات فعالیت ناموفق بود.');
     }
   };
 
@@ -2454,6 +2451,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       return task.assignee.full_name;
     }
     return 'تعیین نشده';
+  };
+
+  const getTaskAssigneeValue = (task: any) => {
+    if (task?.assignee_role_id) return `role:${task.assignee_role_id}`;
+    if (task?.assignee_id) return `user:${task.assignee_id}`;
+    return undefined;
   };
 
   const isTaskAssignedToCurrentUser = useCallback((task: any) => {
@@ -2804,114 +2807,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
   }, [buildHandoverGroupHistoryKey, handoverGroups, handoverPreviousRowsByGroupKey, toNumber]);
 
-  const renderPopupContent = (task: any) => (
-    <div className="w-72 p-1 font-['Vazirmatn']">
-      <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-2">
-        <div className="min-w-0 flex-1">
-          <h4 className="font-bold text-gray-800 m-0 text-sm line-clamp-2">{task.title || task.name}</h4>
-          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-            {taskStatusActions.map((action) => {
-              const isActive = String(task?.status || '').toLowerCase() === action.value;
-              const actionColor = getStatusColor(action.value);
-              return (
-                <Tooltip key={action.value} title={action.label}>
-                  <button
-                    type="button"
-                    aria-label={action.label}
-                    onClick={() => {
-                      if (isActive) return;
-                      void handleStatusChange(String(task.id), action.value);
-                    }}
-                    className="h-8 w-8 rounded-full border transition-all duration-150 flex items-center justify-center"
-                    style={{
-                      color: isActive ? '#ffffff' : actionColor,
-                      backgroundColor: isActive ? actionColor : '#ffffff',
-                      borderColor: isActive ? actionColor : `${actionColor}33`,
-                      boxShadow: isActive ? `0 8px 18px ${actionColor}33` : 'none',
-                      opacity: isActive ? 1 : 0.92,
-                    }}
-                  >
-                    <span className="text-sm leading-none">{action.icon}</span>
-                  </button>
-                </Tooltip>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-3 mb-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-gray-500">وضعیت:</span>
-          <span
-            className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium"
-            style={{
-              color: getStatusColor(task.status),
-              backgroundColor: `${getStatusColor(task.status)}14`,
-            }}
-          >
-            {getStatusLabel(task.status)}
-          </span>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-gray-500">مقدار تولید شده:</span>
-          <InputNumber
-            size="small"
-            min={0}
-            className="w-36 persian-number"
-            value={toNumber(task?.produced_qty)}
-            disabled={String(task?.status || '').toLowerCase() === 'todo' || String(task?.status || '').toLowerCase() === 'pending'}
-            onChange={(val) => {
-              void handleProducedQtyChange(String(task.id), val);
-            }}
-          />
-        </div>
-
-        <div className="bg-gray-50 p-2 rounded-lg border border-gray-100 space-y-2 text-xs text-gray-600">
-          <div className="flex items-center gap-2">
-            <OrderedListOutlined className="text-leather-700" />
-            <span>ترتیب: {toPersianNumber(task.sort_order || '-')}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {task.assignee_type === 'role' ? <TeamOutlined className="text-leather-700" /> : <UserOutlined className="text-leather-700" />}
-            <span>مسئول: {getAssigneeLabel(task)}</span>
-          </div>
-          {task.wage !== undefined && task.wage !== null && (
-            <div className="flex items-center gap-2">
-              <span className="text-leather-700">💰</span>
-              <span>دستمزد: {toPersianNumber(Number(task.wage || 0).toLocaleString('en-US'))} تومان</span>
-            </div>
-          )}
-          {task.due_date && (
-            <div className="flex items-center gap-2">
-              <ClockCircleOutlined className="text-leather-700" />
-              <span>موعد: {renderDate(task.due_date)}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="flex justify-between pt-2 border-t border-gray-100">
-        <Button
-          size="small"
-          type="link"
-          className="text-xs text-leather-700 hover:text-leather-600 px-0"
-          onClick={() => {
-            setOpenTaskPopoverId(null);
-            void openTaskHandoverModal(task);
-          }}
-        >
-          فرم‌های تحویل کالا
-        </Button>
-        <Link to={`/tasks/${task.id}`} target="_blank">
-          <Button size="small" type="link" icon={<ArrowRightOutlined />} className="text-xs text-leather-700 hover:text-leather-600">
-            جزئیات کامل
-          </Button>
-        </Link>
-      </div>
-    </div>
-  );
-
   const renderStageDetails = (stage: any, lineQuantity = 0) => {
     const wage = Math.max(0, toNumber(stage?.wage));
     const lineWage = wage * Math.max(0, toNumber(lineQuantity));
@@ -2977,13 +2872,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     if (editingDraft?.id) {
       next = next.map((stage: any) =>
         stage.id === editingDraft.id
-          ? { ...stage, name: values.name, sort_order: values.sort_order || stage.sort_order }
+          ? { ...stage, name: values.name, description: values.description?.trim() || null, sort_order: values.sort_order || stage.sort_order }
           : stage
       );
     } else {
       next.push({
         id: Date.now(),
         name: values.name,
+        description: values.description?.trim() || null,
         sort_order: values.sort_order || ((draftLocal.length + 1) * 10),
       });
     }
@@ -3012,6 +2908,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     if (editingDraft) {
       draftForm.setFieldsValue({
         name: editingDraft.name,
+        description: editingDraft.description || '',
         sort_order: editingDraft.sort_order,
       });
     } else {
@@ -3095,6 +2992,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           assignee_type: task.assignee_type ?? null,
           due_date: task.due_date ?? null,
           wage: task.wage ?? null,
+          description: task.description ?? null,
           sort_order: task.sort_order ?? null,
           created_by: userId,
         }));
@@ -3340,20 +3238,18 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                       const handoverIssue = getTaskHandoverIssue(segment);
                       const assigneeName = getAssigneeLabel(segment);
                       return (
-                    <Popover
-                      key={segment.id}
-                      content={renderPopupContent(segment)}
-                      trigger={compact ? 'hover' : 'click'}
-                      open={compact ? undefined : openTaskPopoverId === String(segment.id)}
-                      onOpenChange={(open) => {
-                        if (compact) return;
-                        setOpenTaskPopoverId(open ? String(segment.id) : null);
-                      }}
-                      overlayStyle={{ zIndex: 10000 }}
-                      title={null}
-                    >
                       <div
+                        key={segment.id}
                         id={String(focusedTaskId) === String(segment.id) ? `production-stage-task-${String(segment.id)}` : undefined}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => { void openTaskHandoverModal(segment, tasks); }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            void openTaskHandoverModal(segment, tasks);
+                          }
+                        }}
                         className={`relative flex items-center justify-center cursor-pointer transition-all hover:brightness-110 group ${index !== 0 ? 'border-r border-white/30' : ''} ${index === 0 ? 'rounded-r-lg' : ''} ${index === lineSegments.length - 1 ? 'rounded-l-lg' : ''} ${isHighlightedTask ? 'z-10' : ''}`}
                         style={{
                           flex: 1,
@@ -3388,7 +3284,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                           ) : null}
                         </div>
                       </div>
-                    </Popover>
                       );
                     })()
                   ) : (
@@ -3609,6 +3504,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 />
               </Form.Item>
             </div>
+
+            <div className="col-span-12">
+              <Form.Item name="description" label="توضیحات فعالیت">
+                <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} placeholder="توضیحات این مرحله..." />
+              </Form.Item>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 mt-4 border-t pt-4">
@@ -3642,6 +3543,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 <InputNumber className="w-full" min={1} />
               </Form.Item>
             </div>
+            <div className="col-span-12">
+              <Form.Item name="description" label="توضیحات مرحله">
+                <Input.TextArea autoSize={{ minRows: 2, maxRows: 5 }} placeholder="توضیحات این مرحله..." />
+              </Form.Item>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 mt-4 border-t pt-4">
@@ -3669,6 +3575,101 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         onCreateForm={handleCreateHandoverForm}
         onOpenForm={handleOpenHandoverForm}
         onClose={closeHandoverModal}
+        activityDetailsHref={handoverTask?.id ? `/tasks/${handoverTask.id}` : null}
+        stageActivityPanel={handoverTask ? (
+          <div className="space-y-4" dir="rtl">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-base font-black text-[#17372a]">اطلاعات فعالیت</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  ترتیب اجرا: {toPersianNumber(handoverTask.sort_order ?? '-')} · وضعیت فعلی: {getStatusLabel(handoverTask.status)}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {taskStatusActions.map((action) => (
+                  <Button
+                    key={action.value}
+                    size="small"
+                    icon={action.icon}
+                    type={String(handoverTask.status || '') === action.value ? 'primary' : 'default'}
+                    disabled={handoverLoading || readOnly}
+                    onClick={() => { void handleStatusChange(String(handoverTask.id), action.value); }}
+                  >
+                    {action.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <div className="mb-1 text-xs font-semibold text-gray-600">مسئول فعالیت</div>
+                <Select
+                  className="w-full"
+                  value={getTaskAssigneeValue(handoverTask)}
+                  placeholder="تعیین مسئول"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  disabled={handoverLoading || readOnly}
+                  onChange={(value) => {
+                    const [type, id] = String(value || '').split(':');
+                    const selected = type === 'role'
+                      ? assignees.roles.find((item: any) => String(item.id) === String(id))
+                      : assignees.users.find((item: any) => String(item.id) === String(id));
+                    void handleTaskFieldChange(
+                      handoverTask,
+                      { assignee_id: type === 'user' ? id : null, assignee_role_id: type === 'role' ? id : null, assignee_type: type || null },
+                      {
+                        assignee_id: type === 'user' ? id : null,
+                        assignee_role_id: type === 'role' ? id : null,
+                        assignee_type: type || null,
+                        assignee: type === 'user' ? { full_name: selected?.full_name || 'تعیین نشده' } : null,
+                        assigned_role: type === 'role' ? { title: selected?.title || 'تعیین نشده' } : null,
+                      }
+                    );
+                  }}
+                >
+                  <Select.OptGroup label="کاربران">
+                    {assignees.users.map((user: any) => <Select.Option key={`user-${user.id}`} value={`user:${user.id}`} label={user.full_name}><Space><UserOutlined />{user.full_name}</Space></Select.Option>)}
+                  </Select.OptGroup>
+                  <Select.OptGroup label="تیم‌ها">
+                    {assignees.roles.map((role: any) => <Select.Option key={`role-${role.id}`} value={`role:${role.id}`} label={role.title}><Space><TeamOutlined />{role.title}</Space></Select.Option>)}
+                  </Select.OptGroup>
+                </Select>
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-semibold text-gray-600">دستمزد</div>
+                <InputNumber className="w-full" min={0} value={handoverTask.wage ?? undefined} disabled={handoverLoading || readOnly} onChange={(value) => { void handleTaskFieldChange(handoverTask, { wage: value == null ? null : toNumber(value) }); }} />
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-semibold text-gray-600">موعد انجام</div>
+                <PersianDatePicker type="DATETIME" value={handoverTask.due_date || null} disabled={handoverLoading || readOnly} onChange={(value) => { void handleTaskFieldChange(handoverTask, { due_date: value }); }} placeholder="انتخاب موعد" className="w-full" />
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-semibold text-gray-600">مقدار تولیدشده</div>
+                <InputNumber className="w-full" min={0} value={handoverTask.produced_qty ?? 0} disabled={handoverLoading || readOnly} onChange={(value) => { void handleProducedQtyChange(String(handoverTask.id), value); }} />
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-semibold text-gray-600">توضیحات فعالیت</div>
+              <Input.TextArea
+                defaultValue={handoverTask.description || ''}
+                key={`task-description-${handoverTask.id}-${handoverTask.description || ''}`}
+                autoSize={{ minRows: 2, maxRows: 5 }}
+                disabled={handoverLoading || readOnly}
+                placeholder="توضیحات تحویل‌دهنده یا اجرای این مرحله"
+                onBlur={(event) => {
+                  const description = event.target.value.trim();
+                  if (description !== String(handoverTask.description || '')) {
+                    void handleTaskFieldChange(handoverTask, { description: description || null }, { description: description || null });
+                  }
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
       />
 
       <TaskHandoverModal

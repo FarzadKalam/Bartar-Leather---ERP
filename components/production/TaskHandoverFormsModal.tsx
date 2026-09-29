@@ -90,6 +90,8 @@ interface TaskHandoverFormsModalProps {
   onCreateForm: () => void;
   onOpenForm: (formId: string, ownerTaskId: string) => void;
   onClose: () => void;
+  stageActivityPanel?: React.ReactNode;
+  activityDetailsHref?: string | null;
 }
 
 const toNumber = (value: any) => {
@@ -141,6 +143,8 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
   onCreateForm,
   onOpenForm,
   onClose,
+  stageActivityPanel,
+  activityDetailsHref = null,
 }) => {
   const summaryTabs = useMemo<SummaryTab[]>(() => {
     const grouped = new Map<string, SummaryTab>();
@@ -545,10 +549,10 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
       title="فرم‌های تحویل کالا"
       open={open}
       onCancel={onClose}
-      width="min(1120px, calc(100vw - 24px))"
+      width="min(1440px, calc(100vw - 16px))"
       footer={null}
       destroyOnHidden
-      styles={{ body: { maxHeight: '74vh', overflowY: 'auto' } }}
+      styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }}
       centered
     >
       <div className="space-y-4 font-['Vazirmatn']" dir="rtl">
@@ -562,6 +566,12 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
           <div className="text-xs text-gray-600">
             نام سفارش تولید: <span className="font-semibold text-gray-800">{orderTitle}</span>
           </div>
+        ) : null}
+
+        {stageActivityPanel ? (
+          <section className="rounded-2xl border border-[#c9b29a] bg-white p-3 sm:p-4 shadow-sm">
+            {stageActivityPanel}
+          </section>
         ) : null}
 
         <div className="rounded-xl border border-gray-200 overflow-hidden">
@@ -723,6 +733,20 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
             />
           )}
         </div>
+
+        {activityDetailsHref ? (
+          <div className="flex justify-end border-t border-gray-100 pt-2">
+            <a
+              href={activityDetailsHref}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-sm font-semibold text-[#1f4534] hover:text-[#356d52]"
+            >
+              جزئیات کامل فعالیت
+              <RightOutlined />
+            </a>
+          </div>
+        ) : null}
       </div>
     </Modal>
   );
