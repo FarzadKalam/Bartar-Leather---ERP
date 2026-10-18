@@ -413,7 +413,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                 <div className={`sticky top-0 z-30 px-3 py-2 flex items-center justify-between gap-2 ${headerToneClass}`}>
                   <div className="min-w-0">
                     <div className="text-xs">دسته‌بندی: {group.categoryLabel}</div>
-                    <div className="text-xs truncate">
+                    <div className="text-base sm:text-lg leading-6 font-bold truncate">
                       محصول انتخاب‌شده: {group.selectedProductName || '-'}
                       {group.selectedProductCode ? ` (${group.selectedProductCode})` : ''}
                     </div>

@@ -330,7 +330,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
       width: 300,
       render: (value: string, record: any) => (
         <div className="flex flex-col">
-          <span className="font-medium">{value || '-'}</span>
+          <span className="text-base font-semibold text-[#17372a]">{value || '-'}</span>
           <span className="text-[11px] text-gray-500">{record?.productCode || '-'}</span>
           {Array.isArray(record?.pieceDetails) && record.pieceDetails.length > 0 ? (
             <button

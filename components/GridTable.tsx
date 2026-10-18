@@ -1446,7 +1446,7 @@ const GridTable: React.FC<GridTableProps> = ({
                         if (!rowCanEdit) {
                           return (
                             <div className="min-w-[220px] w-full sm:w-auto flex flex-col">
-                              <span className="text-sm sm:text-base text-white font-black truncate">{selectedLabel}</span>
+                              <span className="text-base sm:text-lg leading-6 text-white font-black truncate">{selectedLabel}</span>
                               {selectedId ? (
                                 <span className="text-[11px] text-white/90 font-medium">
                                   موجودی: {formatStockLabel(selectedStock)} {selectedMainUnit || ''}
