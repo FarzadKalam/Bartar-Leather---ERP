@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { App, Badge, Button, Card, Empty, Input, Select, Spin, Table, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -22,6 +22,8 @@ import { BlockDefinition } from '../types';
 import { supabase } from '../supabaseClient';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { applyProductionMoves, syncProductStock } from '../utils/productionWorkflow';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
+import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { getAllowNegativeInventory } from '../utils/companySettings';
 import {
   buildGroupStartMaterials,
@@ -235,6 +237,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
   const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
 
   const [currentStep, setCurrentStep] = useState(0);
+  const [isChangingStep, setIsChangingStep] = useState(false);
+  const materialSaveHandlersRef = useRef(new Map<string, () => Promise<boolean>>());
   const [startMaterials, setStartMaterials] = useState<StartMaterialGroup[]>([]);
   const [sourceBundleOptionsByProduct, setSourceBundleOptionsByProduct] = useState<Record<string, {
     label: string;
@@ -243,7 +247,17 @@ const ProductionGroupOrderWizard: React.FC = () => {
     shelfId?: string | null;
     shelfLabel?: string | null;
     disabled?: boolean;
+    sourceDisabled?: boolean;
   }[]>>({});
+  const [destinationBundleOptions, setDestinationBundleOptions] = useState<DestinationBundleOption[]>([]);
+  useEffect(() => {
+    if (currentStep !== 3) return;
+    let active = true;
+    void loadDestinationBundleOptions(supabase as any)
+      .then((options) => { if (active) setDestinationBundleOptions(options); })
+      .catch((error) => console.warn('Could not load destination bundles', error));
+    return () => { active = false; };
+  }, [currentStep]);
   const [startFormMode, setStartFormMode] = useState<'list' | 'create'>('list');
   const [startStageTaskOptions, setStartStageTaskOptions] = useState<StartStageTaskOption[]>([]);
   const [startStageForms, setStartStageForms] = useState<StartStageFormRow[]>([]);
@@ -605,23 +619,6 @@ const ProductionGroupOrderWizard: React.FC = () => {
       if (lineResult.error) throw lineResult.error;
 
       const allTasks = Array.isArray(taskResult.data) ? taskResult.data : [];
-      const byOrderLine = new Map<string, any>();
-      allTasks.forEach((task: any) => {
-        const orderId = String(task?.related_production_order || '');
-        if (!orderId) return;
-        const lineId = String(task?.production_line_id || '__default__');
-        const key = `${orderId}:${lineId}`;
-        const current = byOrderLine.get(key);
-        if (!current) {
-          byOrderLine.set(key, task);
-          return;
-        }
-        const currentSort = Number(current?.sort_order ?? 0);
-        const nextSort = Number(task?.sort_order ?? 0);
-        if (nextSort < currentSort) byOrderLine.set(key, task);
-      });
-
-      const firstTasks = Array.from(byOrderLine.values());
 
       // تحویل اولیه می‌تواند مستقیماً به هر مرحلهٔ همان سفارش/خط ارسال شود،
       // نه فقط نخستین مرحلهٔ خط تولید.
@@ -657,7 +654,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
       setStartStageTaskOptions(stageOptions);
 
       const forms: StartStageFormRow[] = [];
-      firstTasks.forEach((task: any) => {
+      // فرم تحویل اولیه ممکن است مستقیماً برای هر یک از مراحل مقصد ساخته شده باشد،
+      // بنابراین تاریخچه را فقط به «مرحله اول» محدود نمی‌کنیم.
+      allTasks.forEach((task: any) => {
         const ownerTaskId = String(task?.id || '');
         if (!ownerTaskId) return;
         const orderId = String(task?.related_production_order || '');
@@ -1170,19 +1169,19 @@ const ProductionGroupOrderWizard: React.FC = () => {
   const handleSaveSetup = useCallback(async () => {
     if (!canEditGroup) {
       msg.error('دسترسی ویرایش برای این عملیات ندارید.');
-      return;
+      return false;
     }
     if (!groupName.trim()) {
       msg.error('عنوان سفارش گروهی را وارد کنید.');
-      return;
+      return false;
     }
     if (!selectedOrderIds.length) {
       msg.error('حداقل یک سفارش تولید انتخاب کنید.');
-      return;
+      return false;
     }
     if (!allSelectedPending && !groupId) {
       msg.error('در ایجاد سفارش گروهی جدید، فقط سفارش‌های در وضعیت «در انتظار» قابل انتخاب هستند.');
-      return;
+      return false;
     }
 
     setIsSavingSetup(true);
@@ -1226,8 +1225,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
         navigate(`/production_group_orders/${targetGroupId}`, { replace: true });
       }
       msg.success('تنظیمات سفارش گروهی ذخیره شد.');
+      return true;
     } catch (err: any) {
       msg.error(err?.message || 'خطا در ذخیره سفارش گروهی');
+      return false;
     } finally {
       setIsSavingSetup(false);
     }
@@ -1247,11 +1248,11 @@ const ProductionGroupOrderWizard: React.FC = () => {
   const handleSaveRows = useCallback(async () => {
     if (!canEditGroup) {
       msg.error('دسترسی ویرایش برای این عملیات ندارید.');
-      return;
+      return false;
     }
     if (!selectedOrderIds.length) {
       msg.warning('سفارشی برای ذخیره قطعات انتخاب نشده است.');
-      return;
+      return false;
     }
     setIsSavingRows(true);
     try {
@@ -1269,8 +1270,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
       }
       msg.success('قطعات سفارش‌های تولید ذخیره شد.');
       await loadSelectedOrders(selectedOrderIds, true);
+      return true;
     } catch (err: any) {
       msg.error(err?.message || 'خطا در ذخیره قطعات');
+      return false;
     } finally {
       setIsSavingRows(false);
     }
@@ -1279,11 +1282,11 @@ const ProductionGroupOrderWizard: React.FC = () => {
   const handleSaveQuantities = useCallback(async () => {
     if (!canEditGroup) {
       msg.error('دسترسی ویرایش برای این عملیات ندارید.');
-      return;
+      return false;
     }
     if (!selectedOrderIds.length) {
       msg.warning('سفارشی برای ثبت تعداد انتخاب نشده است.');
-      return;
+      return false;
     }
     setIsSavingQuantities(true);
     try {
@@ -1299,12 +1302,50 @@ const ProductionGroupOrderWizard: React.FC = () => {
       }
       msg.success('تعداد سفارش‌های تولید ذخیره شد.');
       await loadSelectedOrders(selectedOrderIds, true);
+      return true;
     } catch (err: any) {
       msg.error(err?.message || 'خطا در ذخیره تعداد سفارش‌ها');
+      return false;
     } finally {
       setIsSavingQuantities(false);
     }
   }, [canEditGroup, currentUserId, loadSelectedOrders, msg, orderQuantityMap, selectedOrderIds]);
+
+  const registerMaterialSaveHandler = useCallback((
+    orderId: string,
+    handler: (() => Promise<boolean>) | null
+  ) => {
+    if (handler) materialSaveHandlersRef.current.set(String(orderId), handler);
+    else materialSaveHandlersRef.current.delete(String(orderId));
+  }, []);
+
+  const changeWizardStep = useCallback(async (targetStep: number) => {
+    const boundedTarget = Math.max(0, Math.min(steps.length - 1, targetStep));
+    if (boundedTarget === currentStep || isChangingStep) return;
+    if (boundedTarget > 0 && !groupId) {
+      msg.warning('ابتدا مرحله اول را ذخیره کنید.');
+      return;
+    }
+
+    setIsChangingStep(true);
+    try {
+      let saved = true;
+      if (canEditGroup && groupStatus !== 'completed') {
+        if (currentStep === 0) {
+          saved = await handleSaveSetup();
+        } else if (currentStep === 1) {
+          const handlers = Array.from(materialSaveHandlersRef.current.values());
+          const results = await Promise.all(handlers.map((handler) => handler()));
+          saved = results.every(Boolean);
+        } else if (currentStep === 2) {
+          saved = await handleSaveQuantities();
+        }
+      }
+      if (saved) setCurrentStep(boundedTarget);
+    } finally {
+      setIsChangingStep(false);
+    }
+  }, [canEditGroup, currentStep, groupId, groupStatus, handleSaveQuantities, handleSaveSetup, isChangingStep, msg, steps.length]);
 
   const syncGroupOrderQuantityState = useCallback((orderId: string, quantity: number) => {
     const nextQuantity = Math.max(0, toNumber(quantity));
@@ -1348,6 +1389,11 @@ const ProductionGroupOrderWizard: React.FC = () => {
       pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || null,
       sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || null,
+      sourceBundleLabel: rawRow?.sourceBundleLabel || rawRow?.source_bundle_label || null,
+      targetBundleId: rawRow
+        ? (rawRow?.targetBundleId || rawRow?.target_bundle_id || USE_SOURCE_BUNDLE_VALUE)
+        : CREATE_NEW_BUNDLE_VALUE,
+      targetBundleLabel: rawRow?.targetBundleLabel || rawRow?.target_bundle_label || null,
       name: String(rawRow?.name ?? firstPiece?.name ?? ''),
       length: toNumber(rawRow?.length ?? firstPiece?.length ?? 0),
       width: toNumber(rawRow?.width ?? firstPiece?.width ?? 0),
@@ -1495,7 +1541,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const options = group.selectedProductId ? (sourceBundleOptionsByProduct[group.selectedProductId] || []) : [];
       const bundle = options.find((option) => String(option.value) === String(bundleId || ''));
       const deliveryRows = (group.deliveryRows || []).map((row) => String(row.key) === String(rowKey)
-        ? { ...row, sourceBundleId: bundleId, sourceShelfId: bundle?.shelfId || null }
+        ? { ...row, sourceBundleId: bundleId, sourceShelfId: bundle?.shelfId || null, sourceBundleLabel: bundle?.label || null }
         : row);
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
@@ -1533,6 +1579,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
     const rowsWithQty = (group.deliveryRows || []).filter((row) => calcDeliveredQty(row) > 0);
     if (!rowsWithQty.length || rowsWithQty.some((row) => !row.sourceBundleId || !row.sourceShelfId)) {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را انتخاب کنید.');
+      return;
+    }
+    if (rowsWithQty.some((row) => !row.targetBundleId)) {
+      msg.error('برای همه ردیف‌های تحویل، بسته تحویل مقصد را انتخاب کنید.');
       return;
     }
     if (rowsWithQty.some((row) => !row.targetStageTaskId)) {
@@ -1607,25 +1657,26 @@ const ProductionGroupOrderWizard: React.FC = () => {
     }
 
     const nextOptions: Record<string, { label: string; value: string; stock?: number }[]> = {};
-    const bundleRowsByProduct = new Map<string, Map<string, Array<{ shelfId: string; shelfLabel: string; stock: number }>>>();
+    const bundleRowsByProduct = new Map<string, Map<string, Array<{ shelfId: string; shelfLabel: string; stock: number; isProductionWarehouse: boolean }>>>();
     validRows.forEach((row: any) => {
       const productId = String(row.product_id);
       const shelfId = String(row.shelf_id);
       const stock = toNumber(row.stock);
       const shelfInfo = shelfMap.get(shelfId);
-      if (shelfInfo?.isProductionWarehouse) return;
       const productUnit = productUnits.get(productId);
       const unitSuffix = productUnit ? ` ${productUnit}` : '';
       const label = `${shelfInfo?.label || shelfId} (موجودی: ${toPersianNumber(stock)}${unitSuffix})`;
-      if (!nextOptions[productId]) nextOptions[productId] = [];
-      if (!nextOptions[productId].some((item) => item.value === shelfId)) {
-        nextOptions[productId].push({ value: shelfId, label, stock });
+      if (!shelfInfo?.isProductionWarehouse) {
+        if (!nextOptions[productId]) nextOptions[productId] = [];
+        if (!nextOptions[productId].some((item) => item.value === shelfId)) {
+          nextOptions[productId].push({ value: shelfId, label, stock });
+        }
       }
       if (!row?.bundle_id) return;
       const bundleId = String(row.bundle_id);
       const bucketByBundle = bundleRowsByProduct.get(productId) || new Map();
       const bundleRows = bucketByBundle.get(bundleId) || [];
-      bundleRows.push({ shelfId, shelfLabel: shelfInfo?.label || shelfId, stock });
+      bundleRows.push({ shelfId, shelfLabel: shelfInfo?.label || shelfId, stock, isProductionWarehouse: Boolean(shelfInfo?.isProductionWarehouse) });
       bucketByBundle.set(bundleId, bundleRows);
       bundleRowsByProduct.set(productId, bucketByBundle);
     });
@@ -1659,6 +1710,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       shelfId?: string | null;
       shelfLabel?: string | null;
       disabled?: boolean;
+      sourceDisabled?: boolean;
     }[]> = {};
     bundleRowsByProduct.forEach((bundles, productId) => {
       nextBundleOptions[productId] = Array.from(bundles.entries()).map(([bundleId, bundleRows]) => {
@@ -1676,6 +1728,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
           shelfId: hasSingleShelf ? shelfIds[0] : null,
           shelfLabel,
           disabled: !hasSingleShelf,
+          sourceDisabled: hasSingleShelf && Boolean(bundleRows[0]?.isProductionWarehouse),
         };
       });
     });
@@ -1890,6 +1943,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را مشخص کنید.');
       return;
     }
+    if (deliveryRows.some(({ row }) => !row.targetBundleId)) {
+      msg.error('برای همه ردیف‌های تحویل، بسته مقصد را مشخص کنید.');
+      return;
+    }
     const missingStage = deliveryRows.some(({ row }) => !row.targetStageTaskId);
     if (missingStage) {
       msg.error('برای همه محصولات تایید شده باید مرحله تولید مقصد انتخاب شود.');
@@ -1949,13 +2006,19 @@ const ProductionGroupOrderWizard: React.FC = () => {
       }));
     });
 
+    const getMovementKey = (group: StartMaterialGroup, row: StartMaterialDeliveryRow) => `${group.key}:${row.key}`;
     const moves = deliveryRows.map(({ group, row, quantity }) => {
       const option = row.targetStageTaskId ? startStageOptionMap.get(String(row.targetStageTaskId)) : null;
       return {
+        client_key: getMovementKey(group, row),
         product_id: String(group.selectedProductId),
         from_shelf_id: String(row.sourceShelfId),
         to_shelf_id: String(option?.shelfId || group.productionShelfId || ''),
         bundle_id: row.sourceBundleId,
+        target_bundle_id: (!isCreateNewBundleValue(row.targetBundleId) && !isUseSourceBundleValue(row.targetBundleId))
+          ? String(row.targetBundleId)
+          : (isUseSourceBundleValue(row.targetBundleId) ? String(row.sourceBundleId) : null),
+        create_new_target_bundle: isCreateNewBundleValue(row.targetBundleId),
         quantity,
         unit: row.mainUnit
           || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit
@@ -1965,7 +2028,22 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
     setIsStartingGroup(true);
     try {
-      await applyProductionMoves(moves);
+      const moveResults = await applyProductionMoves(moves);
+      const resolvedMoveByKey = new Map(moveResults.map((result) => [String(result.client_key), result]));
+      void loadDestinationBundleOptions(supabase as any)
+        .then(setDestinationBundleOptions)
+        .catch((error) => console.warn('Could not refresh destination bundles', error));
+      const getResolvedTargetBundleId = (group: StartMaterialGroup, row: StartMaterialDeliveryRow) => (
+        resolvedMoveByKey.get(getMovementKey(group, row))?.target_bundle_id
+        || (isUseSourceBundleValue(row.targetBundleId) ? row.sourceBundleId : row.targetBundleId)
+        || row.sourceBundleId
+        || null
+      );
+      const getResolvedTargetBundleLabel = (group: StartMaterialGroup, row: StartMaterialDeliveryRow) => (
+        resolvedMoveByKey.get(getMovementKey(group, row))?.target_bundle_number
+        || row.targetBundleLabel
+        || null
+      );
       await Promise.all(Array.from(new Set(moves.map((move) => move.product_id))).map((productId) => syncProductStock(productId)));
 
       const nowIso = new Date().toISOString();
@@ -2015,6 +2093,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
             const baseArea = Math.max(0, toNumber(item.row.length)) * Math.max(0, toNumber(item.row.width));
             return {
               ...item.row,
+              targetBundleId: getResolvedTargetBundleId(group, item.row),
+              target_bundle_id: getResolvedTargetBundleId(group, item.row),
+              targetBundleLabel: getResolvedTargetBundleLabel(group, item.row),
+              target_bundle_label: getResolvedTargetBundleLabel(group, item.row),
               quantity: baseArea > 0 ? allocatedQty / baseArea : allocatedQty,
               deliveredQty: allocatedQty,
             };
@@ -2055,10 +2137,12 @@ const ProductionGroupOrderWizard: React.FC = () => {
               allocatedSoFar += quantity;
               if (quantity <= 0) return;
               orderMovesMap[allocation.orderId].push({
+                client_key: getMovementKey(group, item.row),
                 product_id: String(group.selectedProductId),
                 from_shelf_id: String(item.row.sourceShelfId),
                 to_shelf_id: String(stageOption?.shelfId || group.productionShelfId || ''),
                 bundle_id: item.row.sourceBundleId,
+                target_bundle_id: getResolvedTargetBundleId(group, item.row),
                 quantity,
                 unit: item.row.mainUnit || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit || null,
               });
@@ -2122,7 +2206,15 @@ const ProductionGroupOrderWizard: React.FC = () => {
           orderPieces: (Array.isArray(group.orderRequirements) ? group.orderRequirements : []).flatMap((req: any) => (
             Array.isArray(req?.pieces) ? req.pieces : []
           )),
-          deliveryRows: Array.isArray(group.deliveryRows) ? group.deliveryRows : [],
+          deliveryRows: Array.isArray(group.deliveryRows)
+            ? group.deliveryRows.map((row) => ({
+                ...row,
+                targetBundleId: getResolvedTargetBundleId(group, row),
+                target_bundle_id: getResolvedTargetBundleId(group, row),
+                targetBundleLabel: getResolvedTargetBundleLabel(group, row),
+                target_bundle_label: getResolvedTargetBundleLabel(group, row),
+              }))
+            : [],
           totalSourceQty: toNumber(group.totalDeliveredQty),
           totalOrderQty: toNumber(group.totalUsage),
           totalHandoverQty: toNumber(group.totalDeliveredQty),
@@ -2200,7 +2292,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
             production_order_id: orderId || null,
             from_shelf_id: move?.from_shelf_id || null,
             to_shelf_id: move?.to_shelf_id || null,
-            bundle_id: move?.bundle_id ?? null,
+            bundle_id: move?.target_bundle_id ?? move?.bundle_id ?? null,
+            source_bundle_id: move?.bundle_id ?? null,
+            target_bundle_id: move?.target_bundle_id ?? move?.bundle_id ?? null,
             sender_id: currentUserId || null,
             receiver_id: currentUserId || null,
             delivered_at: new Date().toISOString(),
@@ -2493,6 +2587,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
                         [order.id]: normalizeGridRowsForWizard(nextRows),
                       }));
                     }}
+                    registerSaveHandler={(handler) => registerMaterialSaveHandler(order.id, handler)}
                   />
                 )}
               </div>
@@ -2549,6 +2644,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
                   moduleId="production_orders"
                   compact
                   readOnly={!canEditGroup || groupStatus === 'completed'}
+                  orderStatus={String(order.status || '')}
                   draftStages={Array.isArray((order as any).production_stages_draft) ? (order as any).production_stages_draft : []}
                   onDraftStagesChange={(stages) => saveOrderDraftStages(order.id, stages)}
                   draftStagesPersistedByParent
@@ -2726,6 +2822,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
               materials={startMaterials}
               orderName={groupName || 'سفارش گروهی'}
               sourceBundleOptionsByProduct={sourceBundleOptionsByProduct}
+              destinationBundleOptions={destinationBundleOptions}
               productionShelfOptions={[]}
               productionStageOptions={startStageTaskOptions}
               productionTargetType="stage"
@@ -2777,6 +2874,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
           sourceShelfId={null}
           destinationStageId={null}
           stageOptions={startFormEditorStageOptions}
+          bundleOptionsByProduct={sourceBundleOptionsByProduct}
+          destinationBundleOptions={destinationBundleOptions}
           centralSourceShelfOptions={[]}
           groups={startFormEditorGroups}
           shelfOptions={stageShelfOptions}
@@ -2905,16 +3004,17 @@ const ProductionGroupOrderWizard: React.FC = () => {
         <div className="flex min-w-max">
           {steps.map((step, index) => {
             const active = index === currentStep;
-            const blocked = index > 0 && !groupId;
-            const canClick = !blocked && (index <= currentStep || !!groupId);
+            const blocked = isChangingStep || (index > 0 && !groupId);
+            const canClick = !blocked;
             return (
               <button
                 key={step.key}
                 type="button"
                 onClick={() => {
                   if (!canClick) return;
-                  setCurrentStep(index);
+                  void changeWizardStep(index);
                 }}
+                disabled={isChangingStep}
                 className={`relative px-4 py-2 text-sm font-semibold transition-all border ${
                   active
                     ? 'bg-leather-600 text-white border-leather-600'
@@ -2943,16 +3043,18 @@ const ProductionGroupOrderWizard: React.FC = () => {
       <div className="flex items-center justify-between shrink-0">
         <Button
           icon={<RightOutlined />}
-          onClick={() => setCurrentStep((prev) => Math.max(0, prev - 1))}
-          disabled={currentStep === 0}
+          onClick={() => void changeWizardStep(currentStep - 1)}
+          disabled={currentStep === 0 || isChangingStep}
+          loading={isChangingStep}
         >
           مرحله قبل
         </Button>
         <Button
           type="primary"
           icon={<LeftOutlined />}
-          onClick={() => setCurrentStep((prev) => Math.min(steps.length - 1, prev + 1))}
-          disabled={currentStep >= steps.length - 1 || (currentStep === 0 && !groupId)}
+          onClick={() => void changeWizardStep(currentStep + 1)}
+          disabled={isChangingStep || currentStep >= steps.length - 1 || (currentStep === 0 && !groupId)}
+          loading={isChangingStep}
           className="bg-leather-600 hover:!bg-leather-500 border-none"
         >
           مرحله بعد

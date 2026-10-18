@@ -23,11 +23,15 @@ import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
+import { applyProductionMoves, type ProductionMove } from '../utils/productionWorkflow';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
+import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { MODULES } from '../moduleRegistry';
 import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils/durableDraft';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
+import { formatGroupedNumberInput, parseGroupedNumberInput } from '../utils/groupedNumberInput';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -127,10 +131,19 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const [nextStageSubTotalsByProduct, setNextStageSubTotalsByProduct] = useState<Record<string, number>>({});
   const [handoverStageInventoryRows, setHandoverStageInventoryRows] = useState<StageHandoverInventoryRow[]>([]);
   const [handoverBundleOptionsByProduct, setHandoverBundleOptionsByProduct] = useState<Record<string, StageHandoverBundleOption[]>>({});
+  const [destinationBundleOptions, setDestinationBundleOptions] = useState<DestinationBundleOption[]>([]);
   const [handoverNextTask, setHandoverNextTask] = useState<any | null>(null);
   const [activeHandoverFormId, setActiveHandoverFormId] = useState<string | null>(null);
   const [handoverFormsModalOpen, setHandoverFormsModalOpen] = useState(false);
   const [handoverEditorOpen, setHandoverEditorOpen] = useState(false);
+  useEffect(() => {
+    if (!handoverEditorOpen) return;
+    let active = true;
+    void loadDestinationBundleOptions(supabase as any)
+      .then((options) => { if (active) setDestinationBundleOptions(options); })
+      .catch((error) => console.warn('Could not load destination bundles', error));
+    return () => { active = false; };
+  }, [handoverEditorOpen]);
   const [handoverLoading, setHandoverLoading] = useState(false);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
   const [allShelfOptions, setAllShelfOptions] = useState<Array<{ label: string; value: string; warehouseName: string }>>([]);
@@ -276,6 +289,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       subQuantity: Math.max(0, toNumber(rawRow?.subQuantity ?? 0)),
       deliveredQty: Math.max(0, toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? (length * width * quantity))),
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || rawRow?.bundle_id || firstDeliveryRow?.sourceBundleId || (firstDeliveryRow as any)?.source_bundle_id || (firstDeliveryRow as any)?.bundle_id || group?.sourceBundleId || (group as any)?.source_bundle_id || (group as any)?.bundle_id || null,
+      sourceBundleLabel: rawRow?.sourceBundleLabel || rawRow?.source_bundle_label || null,
+      targetBundleId: rawRow
+        ? (rawRow?.targetBundleId || rawRow?.target_bundle_id || USE_SOURCE_BUNDLE_VALUE)
+        : CREATE_NEW_BUNDLE_VALUE,
+      targetBundleLabel: rawRow?.targetBundleLabel || rawRow?.target_bundle_label || null,
       sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || firstDeliveryRow?.sourceShelfId || (firstDeliveryRow as any)?.source_shelf_id || group?.sourceShelfId || (group as any)?.source_shelf_id || null,
       giverNote: String(rawRow?.giverNote ?? rawRow?.giver_note ?? ''),
     };
@@ -1407,6 +1425,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const bundleOption = (handoverBundleOptionsByProduct[productId] || [])
           .find((option) => String(option.value) === String(nextValue || ''));
         updatedRow.sourceShelfId = bundleOption?.shelfId || null;
+        updatedRow.sourceBundleLabel = bundleOption?.label || null;
       }
       if (['length', 'width', 'quantity'].includes(String(field))) {
         updatedRow.mainQuantity = Math.max(0, toNumber(updatedRow.length) * toNumber(updatedRow.width) * toNumber(updatedRow.quantity));
@@ -1447,6 +1466,15 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       message.error('برای این محصول، مقدار تحویل شده معتبر نیست.');
       return;
     }
+    const rowsWithQuantity = (group.deliveryRows || []).filter((row) => toNumber(row.mainQuantity ?? row.deliveredQty) > 0);
+    if (rowsWithQuantity.some((row) => !row.sourceBundleId || !row.sourceShelfId)) {
+      message.error('برای همه ردیف‌های تحویل، بسته برداشت را مشخص کنید.');
+      return;
+    }
+    if (rowsWithQuantity.some((row) => !row.targetBundleId)) {
+      message.error('برای همه ردیف‌های تحویل، بسته تحویل مقصد را مشخص کنید.');
+      return;
+    }
     setHandoverGroups((prev) => {
       const next = [...prev];
       const current = next[groupIndex];
@@ -1455,7 +1483,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       return next;
     });
     message.success('این محصول ثبت شد.');
-  }, [handoverContext?.targetShelfId, handoverGroups]);
+  }, [handoverContext?.targetShelfId, handoverGroups, toNumber]);
 
   const saveHandover = useCallback(async (confirmSide?: StageHandoverSide) => {
     if (!handoverContext || !handoverTask) return false;
@@ -1596,6 +1624,16 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       if (hasRowWithoutBundle) {
         throw new Error('برای هر ردیفِ تحویل مرحله‌ای، بسته محصول باید مشخص باشد.');
       }
+      const hasRowWithoutTargetBundle = effectiveGroups.some((group: any) => {
+        const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+        return rows.some((row: any) => (
+          Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))) > 0
+          && !(row?.targetBundleId || row?.target_bundle_id)
+        ));
+      });
+      if (hasRowWithoutTargetBundle) {
+        throw new Error('برای هر ردیفِ تحویل مرحله‌ای، بسته تحویل مقصد باید مشخص باشد.');
+      }
       const nextTotalsByProduct = toGroupTotals(effectiveGroups as any);
       const previousBundleTotals = toGroupBundleTotals(previousGroups as any);
       const nextBundleTotals = toGroupBundleTotals(effectiveGroups as any);
@@ -1643,59 +1681,177 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ).trim();
         if (unit) productUnitById.set(productId, unit);
       });
-      const deltas: Array<{ productId: string; shelfId: string; delta: number; unit?: string | null }> = [];
+      const deltas: Array<{ productId: string; shelfId: string; bundleId?: string | null; delta: number; unit?: string | null }> = [];
       const transferLogs: any[] = [];
       const userId = currentUser.id;
-      const bundleKeys = new Set<string>([
-        ...Array.from(previousBundleTotals.keys()),
-        ...Array.from(nextBundleTotals.keys()),
-      ]);
-      bundleKeys.forEach((key) => {
-        const previous = previousBundleTotals.get(key);
-        const next = nextBundleTotals.get(key);
-        const productId = next?.productId || previous?.productId || '';
-        const bundleId = next?.bundleId ?? previous?.bundleId ?? null;
-        const prevQty = toNumber(previous?.quantity);
-        const nextQty = toNumber(next?.quantity);
-        const delta = nextQty - prevQty;
-        if (!delta) return;
-        const sourceShelfId = String(next?.shelfId || previous?.shelfId || effectiveSourceShelfId || '');
-        const targetShelfId = String(effectiveTargetShelfId);
-        if (!sourceShelfId || !targetShelfId || sourceShelfId === targetShelfId) return;
-        const mainUnit = next?.unit || previous?.unit || productUnitById.get(productId) || null;
-        if (delta > 0) {
-          deltas.push({ productId, shelfId: sourceShelfId, bundleId, delta: -delta, unit: mainUnit } as any);
-          deltas.push({ productId, shelfId: targetShelfId, bundleId, delta, unit: mainUnit } as any);
-          transferLogs.push({
-            transfer_type: 'production_stage',
-            product_id: productId,
-            required_qty: delta,
-            delivered_qty: delta,
-            production_order_id: handoverContext.orderId,
-            from_shelf_id: sourceShelfId,
-            to_shelf_id: targetShelfId,
-            bundle_id: bundleId,
-            sender_id: userId,
-            receiver_id: userId,
+      type FlatHandoverRow = {
+        key: string;
+        groupKey: string;
+        rowKey: string;
+        productId: string;
+        quantity: number;
+        sourceShelfId: string;
+        sourceBundleId: string;
+        targetBundleId: string;
+        unit: string | null;
+      };
+      const flattenRows = (groups: any[]): Map<string, FlatHandoverRow> => {
+        const result = new Map<string, FlatHandoverRow>();
+        (groups || []).forEach((group: any, groupIndex: number) => {
+          const productId = String(group?.selectedProductId || group?.selected_product_id || '').trim();
+          if (!productId) return;
+          (Array.isArray(group?.deliveryRows) ? group.deliveryRows : []).forEach((row: any, rowIndex: number) => {
+            const quantity = Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity))));
+            const groupKey = String(group?.key || `group_${groupIndex}`);
+            const rowKey = String(row?.key || `row_${rowIndex}`);
+            result.set(`${groupKey}:${rowKey}`, {
+              key: `${groupKey}:${rowKey}`,
+              groupKey,
+              rowKey,
+              productId,
+              quantity,
+              sourceShelfId: String(row?.sourceShelfId || row?.source_shelf_id || effectiveSourceShelfId || ''),
+              sourceBundleId: String(row?.sourceBundleId || row?.source_bundle_id || row?.bundle_id || ''),
+              targetBundleId: String(row?.targetBundleId || row?.target_bundle_id || USE_SOURCE_BUNDLE_VALUE),
+              unit: String(row?.mainUnit || '').trim() || productUnitById.get(productId) || null,
+            });
           });
-        } else {
-          const rollbackQty = Math.abs(delta);
-          deltas.push({ productId, shelfId: sourceShelfId, bundleId, delta: rollbackQty, unit: mainUnit } as any);
-          deltas.push({ productId, shelfId: targetShelfId, bundleId, delta: -rollbackQty, unit: mainUnit } as any);
-          transferLogs.push({
-            transfer_type: 'production_stage',
-            product_id: productId,
-            required_qty: rollbackQty,
-            delivered_qty: rollbackQty,
-            production_order_id: handoverContext.orderId,
-            from_shelf_id: targetShelfId,
-            to_shelf_id: sourceShelfId,
-            bundle_id: bundleId,
-            sender_id: userId,
-            receiver_id: userId,
+        });
+        return result;
+      };
+      const previousRowsByKey = flattenRows(previousGroups as any[]);
+      const nextRowsByKey = flattenRows(effectiveGroups as any[]);
+      const previousTargetShelfIdForMoves = String(existingForm?.targetShelfId || effectiveTargetShelfId || '');
+      const movementKeys = new Set([...previousRowsByKey.keys(), ...nextRowsByKey.keys()]);
+      const productionMoves: ProductionMove[] = [];
+      movementKeys.forEach((key) => {
+        const previous = previousRowsByKey.get(key);
+        const next = nextRowsByKey.get(key);
+        const previousResolvedTarget = previous
+          ? (isUseSourceBundleValue(previous.targetBundleId) ? previous.sourceBundleId : previous.targetBundleId)
+          : '';
+        const nextResolvedTarget = next
+          ? (isUseSourceBundleValue(next.targetBundleId) ? next.sourceBundleId : next.targetBundleId)
+          : '';
+        const routeChanged = Boolean(previous && next && (
+          previous.productId !== next.productId
+          || previous.sourceShelfId !== next.sourceShelfId
+          || previous.sourceBundleId !== next.sourceBundleId
+          || previousResolvedTarget !== nextResolvedTarget
+          || previousTargetShelfIdForMoves !== String(effectiveTargetShelfId)
+        ));
+        if (routeChanged && previous && previous.quantity > 0) {
+          productionMoves.push({
+            client_key: `rollback:${key}`,
+            product_id: previous.productId,
+            from_shelf_id: previousTargetShelfIdForMoves,
+            to_shelf_id: previous.sourceShelfId,
+            bundle_id: previousResolvedTarget,
+            target_bundle_id: previous.sourceBundleId,
+            create_new_target_bundle: false,
+            quantity: previous.quantity,
+            unit: previous.unit,
+          });
+        }
+        if (routeChanged && next && next.quantity > 0) {
+          productionMoves.push({
+            client_key: key,
+            product_id: next.productId,
+            from_shelf_id: next.sourceShelfId,
+            to_shelf_id: String(effectiveTargetShelfId),
+            bundle_id: next.sourceBundleId,
+            target_bundle_id: (!isCreateNewBundleValue(next.targetBundleId) && !isUseSourceBundleValue(next.targetBundleId))
+              ? next.targetBundleId
+              : (isUseSourceBundleValue(next.targetBundleId) ? next.sourceBundleId : null),
+            create_new_target_bundle: isCreateNewBundleValue(next.targetBundleId),
+            quantity: next.quantity,
+            unit: next.unit,
+          });
+          return;
+        }
+        const delta = toNumber(next?.quantity) - toNumber(previous?.quantity);
+        if (Math.abs(delta) <= 0.000000001) return;
+        if (delta > 0 && next) {
+          productionMoves.push({
+            client_key: key,
+            product_id: next.productId,
+            from_shelf_id: next.sourceShelfId,
+            to_shelf_id: String(effectiveTargetShelfId),
+            bundle_id: next.sourceBundleId,
+            target_bundle_id: (!isCreateNewBundleValue(next.targetBundleId) && !isUseSourceBundleValue(next.targetBundleId))
+              ? next.targetBundleId
+              : (isUseSourceBundleValue(next.targetBundleId) ? next.sourceBundleId : null),
+            create_new_target_bundle: isCreateNewBundleValue(next.targetBundleId),
+            quantity: delta,
+            unit: next.unit,
+          });
+        } else if (delta < 0 && previous) {
+          const previousTargetBundleId = isUseSourceBundleValue(previous.targetBundleId)
+            ? previous.sourceBundleId
+            : previous.targetBundleId;
+          productionMoves.push({
+            client_key: `rollback:${key}`,
+            product_id: previous.productId,
+            from_shelf_id: previousTargetShelfIdForMoves,
+            to_shelf_id: previous.sourceShelfId,
+            bundle_id: previousTargetBundleId,
+            target_bundle_id: previous.sourceBundleId,
+            create_new_target_bundle: false,
+            quantity: Math.abs(delta),
+            unit: previous.unit,
           });
         }
       });
+
+      let persistedGroups = (effectiveGroups as any[]).map((group: any) => ({
+        ...group,
+        deliveryRows: (Array.isArray(group?.deliveryRows) ? group.deliveryRows : []).map((row: any) => ({ ...row })),
+      }));
+      if (productionMoves.length > 0) {
+        const movementResults = await applyProductionMoves(productionMoves);
+        const resultByKey = new Map(movementResults.map((result) => [String(result.client_key), result]));
+        void loadDestinationBundleOptions(supabase as any)
+          .then(setDestinationBundleOptions)
+          .catch((error) => console.warn('Could not refresh destination bundles', error));
+        persistedGroups = persistedGroups.map((group: any, groupIndex: number) => {
+          const groupKey = String(group?.key || `group_${groupIndex}`);
+          return {
+            ...group,
+            deliveryRows: (Array.isArray(group?.deliveryRows) ? group.deliveryRows : []).map((row: any, rowIndex: number) => {
+              const rowKey = String(row?.key || `row_${rowIndex}`);
+              const result = resultByKey.get(`${groupKey}:${rowKey}`);
+              if (!result) return row;
+              return {
+                ...row,
+                targetBundleId: result.target_bundle_id,
+                target_bundle_id: result.target_bundle_id,
+                targetBundleLabel: result.target_bundle_number || row.targetBundleLabel || null,
+                target_bundle_label: result.target_bundle_number || row.target_bundle_label || null,
+              };
+            }),
+          };
+        });
+        productionMoves.forEach((move) => {
+          const result = resultByKey.get(String(move.client_key));
+          const targetBundleId = result?.target_bundle_id || move.target_bundle_id || move.bundle_id || null;
+          const isRollback = String(move.client_key || '').startsWith('rollback:');
+          transferLogs.push({
+            transfer_type: 'production_stage',
+            product_id: move.product_id,
+            required_qty: move.quantity,
+            delivered_qty: move.quantity,
+            production_order_id: handoverContext.orderId,
+            from_shelf_id: move.from_shelf_id,
+            to_shelf_id: move.to_shelf_id,
+            bundle_id: targetBundleId,
+            source_bundle_id: move.bundle_id,
+            target_bundle_id: targetBundleId,
+            sender_id: userId,
+            receiver_id: userId,
+            notes: isRollback ? 'اصلاح فرم تحویل مرحله‌ای' : null,
+          });
+        });
+      }
 
       const wasteProductIds = new Set<string>([
         ...Object.keys(previousWasteByProduct),
@@ -1782,7 +1938,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         targetShelfId: effectiveTargetShelfId,
         giver: handoverContext.giver,
         receiver: handoverContext.receiver,
-        groups: effectiveGroups as any,
+        groups: persistedGroups as any,
         wasteByProduct: finalWasteByProduct,
         giverConfirmation: nextGiverConfirmation,
         receiverConfirmation: nextReceiverConfirmation,
@@ -1850,6 +2006,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       )));
       setHandoverTask(updatedTask);
       setHandoverForms(nextForms as StageHandoverForm[]);
+      setHandoverGroups(persistedGroups as StageHandoverGroup[]);
       setActiveHandoverFormId(formId);
       setHandoverContext((prev) => {
         if (!prev) return prev;
@@ -3456,7 +3613,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
             <div className="col-span-6">
               <Form.Item name="wage" label="دستمزد">
-                <InputNumber className="w-full" min={0} />
+                <InputNumber
+                  className="w-full persian-number"
+                  min={0}
+                  controls={false}
+                  inputMode="decimal"
+                  formatter={formatGroupedNumberInput}
+                  parser={parseGroupedNumberInput}
+                />
               </Form.Item>
             </div>
 
@@ -3640,7 +3804,17 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               </div>
               <div>
                 <div className="mb-1 text-xs font-semibold text-gray-600">دستمزد</div>
-                <InputNumber className="w-full" min={0} value={handoverTask.wage ?? undefined} disabled={handoverLoading || readOnly} onChange={(value) => { void handleTaskFieldChange(handoverTask, { wage: value == null ? null : toNumber(value) }); }} />
+                <InputNumber
+                  className="w-full persian-number"
+                  min={0}
+                  controls={false}
+                  inputMode="decimal"
+                  formatter={formatGroupedNumberInput}
+                  parser={parseGroupedNumberInput}
+                  value={handoverTask.wage ?? undefined}
+                  disabled={handoverLoading || readOnly}
+                  onChange={(value) => { void handleTaskFieldChange(handoverTask, { wage: value == null ? null : toNumber(value) }); }}
+                />
               </div>
               <div>
                 <div className="mb-1 text-xs font-semibold text-gray-600">موعد انجام</div>
@@ -3687,6 +3861,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         destinationStageId={handoverDestinationStageId}
         stageOptions={handoverStageOptions}
         bundleOptionsByProduct={handoverBundleOptionsByProduct}
+        destinationBundleOptions={destinationBundleOptions}
+        targetShelfId={handoverTrafficType === 'outgoing'
+          ? (handoverStageOptions.find((option) => String(option.value) === String(handoverDestinationStageId || ''))?.shelfId || null)
+          : (handoverContext?.targetShelfId || null)}
         groups={handoverEditorGroups}
         giverConfirmation={handoverContext?.giverConfirmation || { confirmed: false }}
         receiverConfirmation={handoverContext?.receiverConfirmation || { confirmed: false }}

@@ -243,7 +243,7 @@ const RelatedSidebar: React.FC<RelatedSidebarProps> = ({ moduleConfig, recordId,
 
   return (
     <>
-        <div className="hidden md:flex fixed top-24 left-0 bottom-6 w-14 bg-white dark:bg-[#1a1a1a] border-r border-gray-200 dark:border-gray-800 flex-col items-center py-5 gap-5 z-40 shadow-[4px_0_24px_rgba(0,0,0,0.02)] rounded-r-3xl transition-all">
+        <div className="hidden md:flex fixed top-24 left-5 bottom-6 w-14 bg-white dark:bg-[#1a1a1a] border-r border-gray-200 dark:border-gray-800 flex-col items-center py-5 gap-5 z-40 shadow-[4px_0_24px_rgba(0,0,0,0.02)] rounded-r-3xl transition-all">
             {allTabs.map(tab => {
                 const isActive = activeKey === tab.key;
                 return (

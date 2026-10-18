@@ -5,6 +5,9 @@ import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from '../../utils/productionBundles';
+import DeliveryProgressBar from './DeliveryProgressBar';
+import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
 
 export type StartMaterialPiece = {
   key: string;
@@ -26,6 +29,10 @@ export type StartMaterialDeliveryRow = {
   pieceKey?: string;
   sourceBundleId?: string | null;
   sourceShelfId?: string | null;
+  sourceBundleLabel?: string | null;
+  /** بسته‌ای که موجودی تحویل‌شده در قفسه مقصد داخل آن قرار می‌گیرد. */
+  targetBundleId?: string | null;
+  targetBundleLabel?: string | null;
   name?: string;
   length?: number;
   width?: number;
@@ -87,7 +94,9 @@ interface StartProductionModalProps {
     shelfId?: string | null;
     shelfLabel?: string | null;
     disabled?: boolean;
+    sourceDisabled?: boolean;
   }[]>;
+  destinationBundleOptions?: DestinationBundleOption[];
   productionShelfOptions: { label: string; value: string }[];
   productionStageOptions?: { label: string; value: string; orderId?: string; shelfId?: string | null }[];
   productionTargetType?: 'shelf' | 'stage';
@@ -207,6 +216,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
   inline = false,
   orderName,
   sourceBundleOptionsByProduct,
+  destinationBundleOptions = [],
   productionShelfOptions,
   productionStageOptions = [],
   productionTargetType = 'shelf',
@@ -360,6 +370,11 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
             const sourceBundleOptions = group.selectedProductId
               ? (sourceBundleOptionsByProduct[group.selectedProductId] || [])
               : [];
+            const targetShelfId = productionTargetType === 'stage'
+              ? productionStageOptions?.find((option) => String(option.value) === String(
+                group.deliveryRows?.find((row) => row.targetStageTaskId)?.targetStageTaskId || ''
+              ))?.shelfId || group.productionShelfId
+              : group.productionShelfId;
             const selectedRowKeys = getSelectedRowKeys(group.key);
             const consumptionUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.mainUnit));
             const consumptionSubUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.subUnit));
@@ -373,7 +388,6 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
               parseNumberInput(group.previousDeliveredQty ?? previousDeliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0))
             );
             const totalDeliveredWithHistory = previousDeliveredQty + Math.max(0, parseNumberInput(group.totalDeliveredQty));
-            const isFullyDelivered = totalDeliveredWithHistory >= Math.max(0, parseNumberInput(group.totalUsage)) - 0.000001;
             const currentSubQuantity = (group.deliveryRows || []).reduce(
               (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
               0
@@ -389,16 +403,10 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
             ]) || consumptionSubUnitLabel;
             const isRequirementsDrawerOpen = requirementsDrawerGroupKey === group.key;
 
-            const headerToneClass = isFullyDelivered
-              ? 'bg-[#1f4534] text-white shadow-sm'
-              : 'bg-white text-[#17372a] border-b border-dashed border-[#8bb49a]';
-            const headerButtonClass = isFullyDelivered
-              ? '!text-white hover:!text-white/90'
-              : '!text-[#17372a] hover:!text-[#1f4534]';
-            const containerClass = isFullyDelivered
-              ? 'rounded-xl border border-gray-200'
-              : 'rounded-xl border-2 border-dashed border-[#8bb49a] bg-white';
-            const headerMetaClass = isFullyDelivered ? 'text-white/90' : 'text-[#1f4534]';
+            const headerToneClass = 'bg-[#1f4534] text-white shadow-sm border-b border-[#17372a]';
+            const headerButtonClass = '!text-white hover:!text-white/90';
+            const containerClass = 'rounded-xl border border-gray-200 bg-white';
+            const headerMetaClass = 'text-white/90';
 
             return (
               <div key={group.key} className={containerClass}>
@@ -430,6 +438,11 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                         </>
                       ) : null}
                     </div>
+                    <DeliveryProgressBar
+                      delivered={totalDeliveredWithHistory}
+                      required={Math.max(0, parseNumberInput(group.totalUsage))}
+                      className="max-w-md text-white/90"
+                    />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
@@ -773,7 +786,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                         </span>
                       </div>
 
-                      <div className={`w-full min-w-0 rounded-lg p-3 space-y-3 ${hasDeliveryRows ? 'border border-[#c9b29a] bg-[#f7f1ea]' : 'border border-dashed border-[#8bb49a] bg-white'}`}>
+                      <div className={`w-full min-w-0 rounded-lg border p-3 space-y-3 ${hasDeliveryRows ? 'border-[#c9b29a] bg-[#f7f1ea]' : 'border-[#d6e5db] bg-white'}`}>
                         <div className="text-xs font-medium text-[#17372a]">
                           از محصول "{group.selectedProductName || '-'}" برای سفارش تولید "{orderName || '-'}" چه مقدار تحویل می دهید؟
                         </div>
@@ -915,7 +928,12 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 <Select
                                   value={value || undefined}
                                   placeholder="انتخاب بسته"
-                                  options={sourceBundleOptions}
+                                  options={(value && !sourceBundleOptions.some((option) => String(option.value) === String(value))
+                                    ? [{ label: record.sourceBundleLabel || String(value), value }, ...sourceBundleOptions]
+                                    : sourceBundleOptions).map((option) => ({
+                                      ...option,
+                                      disabled: Boolean(option.disabled || option.sourceDisabled),
+                                    }))}
                                   showSearch
                                   optionFilterProp="label"
                                   className="w-full min-w-0"
@@ -923,6 +941,50 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   onChange={(bundleId) => onDeliveryRowSourceBundleChange(groupIndex, String(record.key), bundleId || null)}
                                 />
                               ),
+                            },
+                            {
+                              title: 'بسته تحویل مقصد',
+                              dataIndex: 'targetBundleId',
+                              key: 'targetBundleId',
+                              width: isMobile ? 280 : 250,
+                              render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => {
+                                const rowTargetShelfId = productionTargetType === 'stage'
+                                  ? productionStageOptions?.find((option) => String(option.value) === String(record.targetStageTaskId || ''))?.shelfId
+                                  : targetShelfId;
+                                const sourceBundleOption = sourceBundleOptions.find((option) => String(option.value) === String(record.sourceBundleId || ''));
+                                const isPartialSourceBundle = Number(sourceBundleOption?.stock || 0) > calcDeliveredQty(record) + 0.000001;
+                                const options = [
+                                  { label: 'ساخت بسته جدید', value: CREATE_NEW_BUNDLE_VALUE },
+                                  {
+                                    label: isPartialSourceBundle ? 'همان بسته محصول مبدأ (فقط در انتقال کامل بسته)' : 'همان بسته محصول مبدأ',
+                                    value: USE_SOURCE_BUNDLE_VALUE,
+                                    disabled: !record.sourceBundleId || isPartialSourceBundle,
+                                  },
+                                  ...destinationBundleOptions
+                                    .filter((option) => String(option.value) !== String(record.sourceBundleId || ''))
+                                    .map((option) => ({
+                                      ...option,
+                                      label: option.label,
+                                      disabled: Boolean(option.disabled || (option.stock && option.stock > 0 && rowTargetShelfId && option.shelfId && String(option.shelfId) !== String(rowTargetShelfId))),
+                                    })),
+                                ];
+                                if (value && ![CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE].includes(String(value))
+                                  && !options.some((option) => String(option.value) === String(value))) {
+                                  options.push({ label: record.targetBundleLabel || String(value), value } as any);
+                                }
+                                return (
+                                  <Select
+                                    value={value || CREATE_NEW_BUNDLE_VALUE}
+                                    placeholder="انتخاب بسته مقصد"
+                                    options={options}
+                                    showSearch
+                                    optionFilterProp="label"
+                                    className="w-full min-w-0"
+                                    getPopupContainer={() => document.body}
+                                    onChange={(bundleId) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'targetBundleId', bundleId)}
+                                  />
+                                );
+                              },
                             },
                             {
                               title: 'واحد اصلی',

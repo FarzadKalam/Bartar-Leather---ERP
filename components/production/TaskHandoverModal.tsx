@@ -9,6 +9,9 @@ import gregorianEn from 'react-date-object/locales/gregorian_en';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from '../../utils/productionBundles';
+import DeliveryProgressBar from './DeliveryProgressBar';
+import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
 
 export type StageHandoverPiece = {
   key: string;
@@ -38,6 +41,9 @@ export type StageHandoverDeliveryRow = {
   deliveredQty: number;
   sourceBundleId?: string | null;
   sourceShelfId?: string | null;
+  sourceBundleLabel?: string | null;
+  targetBundleId?: string | null;
+  targetBundleLabel?: string | null;
   /** توضیح تحویل‌دهنده برای همین ردیف. */
   giverNote?: string;
 };
@@ -85,6 +91,7 @@ export type StageHandoverBundleOption = {
   label: string;
   shelfId?: string | null;
   stock?: number;
+  disabled?: boolean;
 };
 
 interface TaskHandoverModalProps {
@@ -102,6 +109,7 @@ interface TaskHandoverModalProps {
   destinationStageId: string | null;
   stageOptions: StageHandoverTaskOption[];
   bundleOptionsByProduct?: Record<string, StageHandoverBundleOption[]>;
+  destinationBundleOptions?: DestinationBundleOption[];
   /** Legacy shelf props are accepted for callers with persisted/read-only forms;
    * shelf selection is no longer rendered and package rows determine source shelf. */
   sourceShelfId?: string | null;
@@ -229,6 +237,8 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   destinationStageId,
   stageOptions,
   bundleOptionsByProduct = {},
+  destinationBundleOptions = [],
+  targetShelfId = null,
   groups,
   giverConfirmation,
   receiverConfirmation,
@@ -516,17 +526,10 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
               ...(group.deliveryRows || []).map((row) => row.mainUnit),
               ...previousDeliveryRows.map((row) => row.mainUnit),
             ]) || consumptionUnitLabel;
-            const hasDeliveryRows = Array.isArray(group.deliveryRows) && group.deliveryRows.length > 0;
-            const headerToneClass = hasDeliveryRows
-              ? 'bg-[#1f4534] text-white shadow-sm'
-              : 'bg-white text-[#17372a] border-b border-dashed border-[#8bb49a]';
-            const headerButtonClass = hasDeliveryRows
-              ? '!text-white hover:!text-white/90'
-              : '!text-[#17372a] hover:!text-[#1f4534]';
-            const containerClass = hasDeliveryRows
-              ? 'rounded-xl border border-gray-200'
-              : 'rounded-xl border-2 border-dashed border-[#8bb49a] bg-white';
-            const headerMetaClass = hasDeliveryRows ? 'text-white/90' : 'text-[#1f4534]';
+            const headerToneClass = 'bg-[#1f4534] text-white shadow-sm border-b border-[#17372a]';
+            const headerButtonClass = '!text-white hover:!text-white/90';
+            const containerClass = 'rounded-xl border border-gray-200 bg-white';
+            const headerMetaClass = 'text-white/90';
 
             return (
               <div key={group.key} className={containerClass}>
@@ -551,6 +554,11 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         </>
                       ) : null}
                     </div>
+                    <DeliveryProgressBar
+                      delivered={totalDeliveredWithHistory}
+                      required={Math.max(0, parseNumberInput(group.totalSourceQty))}
+                      className="max-w-md text-white/90"
+                    />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <Button
@@ -698,7 +706,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         }}
                         columns={[
                           {
-                            title: 'بسته محصول',
+                            title: 'بسته برداشت',
                             dataIndex: 'sourceBundleId',
                             key: 'sourceBundleId',
                             width: isMobile ? 220 : 180,
@@ -706,7 +714,9 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               <Select
                                 value={value || undefined}
                                 placeholder="انتخاب بسته"
-                                options={bundleOptions}
+                                options={value && !bundleOptions.some((option) => String(option.value) === String(value))
+                                  ? [{ label: record.sourceBundleLabel || String(value), value }, ...bundleOptions]
+                                  : bundleOptions}
                                 showSearch
                                 optionFilterProp="label"
                                 className="w-full"
@@ -715,6 +725,50 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 disabled={locked}
                               />
                             ),
+                          },
+                          {
+                            title: 'بسته تحویل مقصد',
+                            dataIndex: 'targetBundleId',
+                            key: 'targetBundleId',
+                            width: isMobile ? 260 : 220,
+                            render: (value: string | null | undefined, record: StageHandoverDeliveryRow) => {
+                              const selectValue = value && String(value) === String(record.sourceBundleId || '')
+                                ? USE_SOURCE_BUNDLE_VALUE
+                                : (value || CREATE_NEW_BUNDLE_VALUE);
+                              const sourceBundleOption = bundleOptions.find((option) => String(option.value) === String(record.sourceBundleId || ''));
+                              const isPartialSourceBundle = Number(sourceBundleOption?.stock || 0) > calcDeliveredQty(record) + 0.000001;
+                              const destinationOptions = [
+                                { label: 'ساخت بسته جدید', value: CREATE_NEW_BUNDLE_VALUE },
+                                {
+                                  label: isPartialSourceBundle ? 'همان بسته محصول مبدأ (فقط در انتقال کامل بسته)' : 'همان بسته محصول مبدأ',
+                                  value: USE_SOURCE_BUNDLE_VALUE,
+                                  disabled: !record.sourceBundleId || isPartialSourceBundle,
+                                },
+                                ...destinationBundleOptions
+                                  .filter((option) => String(option.value) !== String(record.sourceBundleId || ''))
+                                  .map((option) => ({
+                                    ...option,
+                                    disabled: Boolean(option.disabled || (option.stock && option.stock > 0 && targetShelfId && option.shelfId && String(option.shelfId) !== String(targetShelfId))),
+                                  })),
+                              ];
+                              if (value && String(value) !== String(record.sourceBundleId || '')
+                                && !destinationOptions.some((option) => String(option.value) === String(value))) {
+                                destinationOptions.push({ label: record.targetBundleLabel || String(value), value } as any);
+                              }
+                              return (
+                                <Select
+                                  value={selectValue}
+                                  placeholder="انتخاب بسته مقصد"
+                                  options={destinationOptions}
+                                  showSearch
+                                  optionFilterProp="label"
+                                  className="w-full"
+                                  getPopupContainer={() => document.body}
+                                  onChange={(bundleId) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'targetBundleId', bundleId)}
+                                  disabled={locked}
+                                />
+                              );
+                            },
                           },
                           {
                             title: 'نام قطعه',

@@ -7,10 +7,20 @@ export type ProductionMove = {
   product_id: string;
   from_shelf_id: string;
   to_shelf_id: string;
-  // موجودی تولید همیشه در سطح محصول، قفسه و بسته (در صورت وجود) جابه‌جا می‌شود.
+  // شناسه قدیمی bundle_id همچنان بسته مبدأ است تا داده‌های قبلی سازگار بمانند.
   bundle_id?: string | null;
+  target_bundle_id?: string | null;
+  create_new_target_bundle?: boolean;
+  client_key?: string;
   quantity: number;
   unit?: string | null;
+};
+
+export type ProductionMoveResult = {
+  client_key: string;
+  source_bundle_id: string;
+  target_bundle_id: string;
+  target_bundle_number?: string | null;
 };
 
 const ITEM_TABLES = ['items_leather', 'items_lining', 'items_fitting', 'items_accessory'];
@@ -183,7 +193,7 @@ const adjustStock = async (
   if (insertError) throw insertError;
 };
 
-export const applyProductionMoves = async (moves: ProductionMove[]) => {
+export const applyProductionMoves = async (moves: ProductionMove[]): Promise<ProductionMoveResult[]> => {
   const allowNegativeStock = await getAllowNegativeInventory(supabase as any);
   const productMetaCache = new Map<string, { mainUnit: string | null; name: string | null }>();
   const decisionCache = new Map<string, boolean>();
@@ -205,23 +215,26 @@ export const applyProductionMoves = async (moves: ProductionMove[]) => {
     normalizedMoves.push({ ...move, quantity: normalizedQty });
   }
 
-  const grouped = new Map<string, ProductionMove>();
-  normalizedMoves.forEach((move) => {
-    const key = `${move.product_id}:${move.from_shelf_id}:${move.to_shelf_id}:${move.bundle_id || '__null__'}`;
-    const existing = grouped.get(key);
-    if (existing) {
-      existing.quantity += move.quantity;
-    } else {
-      grouped.set(key, { ...move });
-    }
-  });
+  if (!normalizedMoves.length) return [];
 
-  const groupedMoves = Array.from(grouped.values());
-  for (const move of groupedMoves) {
-    await adjustStock(move.product_id, move.from_shelf_id, -move.quantity, undefined, move.bundle_id, { allowNegativeStock });
-    const destWarehouseId = await getShelfWarehouseId(move.to_shelf_id);
-    await adjustStock(move.product_id, move.to_shelf_id, move.quantity, destWarehouseId, move.bundle_id, { allowNegativeStock });
-  }
+  // کم‌کردن موجودی مبدأ، ساخت بسته مقصد و افزودن موجودی مقصد باید یک تراکنش واحد باشد؛
+  // در غیر این صورت شکست یکی از درخواست‌ها موجودی را نیمه‌کاره باقی می‌گذارد.
+  const payload = normalizedMoves.map((move, index) => ({
+    client_key: move.client_key || `production_move_${index}`,
+    product_id: move.product_id,
+    source_shelf_id: move.from_shelf_id,
+    target_shelf_id: move.to_shelf_id,
+    source_bundle_id: move.bundle_id,
+    target_bundle_id: move.target_bundle_id || null,
+    create_new_bundle: move.create_new_target_bundle === true,
+    quantity: move.quantity,
+  }));
+  const { data, error } = await (supabase as any).rpc('apply_production_bundle_moves', {
+    p_moves: payload,
+    p_allow_negative: allowNegativeStock,
+  });
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as ProductionMoveResult[];
 };
 
 export const rollbackProductionMoves = async (moves: ProductionMove[]) => {
@@ -229,6 +242,9 @@ export const rollbackProductionMoves = async (moves: ProductionMove[]) => {
     ...move,
     from_shelf_id: move.to_shelf_id,
     to_shelf_id: move.from_shelf_id,
+    bundle_id: move.target_bundle_id || move.bundle_id,
+    target_bundle_id: move.bundle_id || null,
+    create_new_target_bundle: false,
   }));
   await applyProductionMoves(reversed);
 };
@@ -239,7 +255,8 @@ export const consumeProductionMaterials = async (moves: ProductionMove[], produc
   const decisionCache = new Map<string, boolean>();
   const grouped = new Map<string, number>();
   for (const move of moves || []) {
-    if (!move?.bundle_id) {
+    const productionBundleId = move?.target_bundle_id || move?.bundle_id;
+    if (!productionBundleId) {
       throw new Error('برای مصرف مواد در تولید، بسته محصول الزامی است.');
     }
     const normalizedQty = await normalizeQuantityToProductMainUnit(
@@ -254,7 +271,7 @@ export const consumeProductionMaterials = async (moves: ProductionMove[], produc
     if (!normalizedQty) continue;
     const targetShelfId = move?.to_shelf_id || productionShelfId;
     if (!targetShelfId) continue;
-    const key = `${move.product_id}:${targetShelfId}:${move.bundle_id || '__null__'}`;
+    const key = `${move.product_id}:${targetShelfId}:${productionBundleId || '__null__'}`;
     grouped.set(key, (grouped.get(key) || 0) + normalizedQty);
   }
   for (const [key, qty] of grouped.entries()) {

@@ -34,6 +34,8 @@ import {
   addFinishedGoods,
   syncProductStock,
 } from '../utils/productionWorkflow';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
+import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { syncInvoiceInventoryOnSave } from '../utils/invoiceInventoryWorkflow';
 import { canAccessAssignedRecord, resolveFilesAccessPermissions } from '../utils/permissions';
 import { isMissingRecordFilesError } from '../utils/recordFilesAvailability';
@@ -122,7 +124,17 @@ const ModuleShow: React.FC = () => {
     shelfId?: string | null;
     shelfLabel?: string | null;
     disabled?: boolean;
+    sourceDisabled?: boolean;
   }[]>>({});
+  const [destinationBundleOptions, setDestinationBundleOptions] = useState<DestinationBundleOption[]>([]);
+  useEffect(() => {
+    if (productionModal !== 'start') return;
+    let active = true;
+    void loadDestinationBundleOptions(supabase as any)
+      .then((options) => { if (active) setDestinationBundleOptions(options); })
+      .catch((error) => console.warn('Could not load destination bundles', error));
+    return () => { active = false; };
+  }, [productionModal]);
   const [startMaterials, setStartMaterials] = useState<StartMaterialGroup[]>([]);
   const [outputProductOptions, setOutputProductOptions] = useState<{ label: string; value: string; product_type?: string | null }[]>([]);
   const [outputShelfOptions, setOutputShelfOptions] = useState<{ label: string; value: string }[]>([]);
@@ -236,6 +248,11 @@ const ModuleShow: React.FC = () => {
       pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || null,
       sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || null,
+      sourceBundleLabel: rawRow?.sourceBundleLabel || rawRow?.source_bundle_label || null,
+      targetBundleId: rawRow
+        ? (rawRow?.targetBundleId || rawRow?.target_bundle_id || USE_SOURCE_BUNDLE_VALUE)
+        : CREATE_NEW_BUNDLE_VALUE,
+      targetBundleLabel: rawRow?.targetBundleLabel || rawRow?.target_bundle_label || null,
       name: String(rawRow?.name ?? firstPiece?.name ?? ''),
       length: toNumber(rawRow?.length ?? firstPiece?.length ?? 0),
       width: toNumber(rawRow?.width ?? firstPiece?.width ?? 0),
@@ -508,7 +525,7 @@ const ModuleShow: React.FC = () => {
       const options = group.selectedProductId ? (sourceBundleOptionsByProduct[group.selectedProductId] || []) : [];
       const bundle = options.find((option) => String(option.value) === String(bundleId || ''));
       const deliveryRows = (group.deliveryRows || []).map((row) => String(row.key) === String(rowKey)
-        ? { ...row, sourceBundleId: bundleId, sourceShelfId: bundle?.shelfId || null }
+        ? { ...row, sourceBundleId: bundleId, sourceShelfId: bundle?.shelfId || null, sourceBundleLabel: bundle?.label || null }
         : row);
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
@@ -971,20 +988,21 @@ const ModuleShow: React.FC = () => {
     }
 
     const next: Record<string, { label: string; value: string; stock?: number }[]> = {};
-    const bundleRowsByProduct = new Map<string, Map<string, Array<{ shelfId: string; shelfLabel: string; stock: number }>>>();
+    const bundleRowsByProduct = new Map<string, Map<string, Array<{ shelfId: string; shelfLabel: string; stock: number; isProductionWarehouse: boolean }>>>();
     rows.forEach((row: any) => {
       const productId = String(row.product_id);
       const shelfId = String(row.shelf_id);
       const stock = parseFloat(row?.stock) || 0;
       const shelfInfo = shelfMap.get(shelfId);
-      if (shelfInfo?.isProductionWarehouse) return;
       const labelBase = shelfInfo?.label || shelfId;
       const productUnit = productUnits.get(productId);
       const unitSuffix = productUnit ? ` ${productUnit}` : '';
       const label = `${labelBase} (موجودی: ${toPersianNumber(stock)}${unitSuffix})`;
-      if (!next[productId]) next[productId] = [];
-      if (!next[productId].some((opt) => opt.value === shelfId)) {
-        next[productId].push({ value: shelfId, label, stock });
+      if (!shelfInfo?.isProductionWarehouse) {
+        if (!next[productId]) next[productId] = [];
+        if (!next[productId].some((opt) => opt.value === shelfId)) {
+          next[productId].push({ value: shelfId, label, stock });
+        }
       }
       // تولید فقط از بسته برداشت می‌کند؛ موجودی قدیمی بدون بسته همچنان در سیستم
       // باقی می‌ماند اما در فرم تولید قابل انتخاب نیست.
@@ -992,7 +1010,7 @@ const ModuleShow: React.FC = () => {
       const bundleId = String(row.bundle_id);
       const bucketByBundle = bundleRowsByProduct.get(productId) || new Map();
       const bundleRows = bucketByBundle.get(bundleId) || [];
-      bundleRows.push({ shelfId, shelfLabel: labelBase, stock });
+      bundleRows.push({ shelfId, shelfLabel: labelBase, stock, isProductionWarehouse: Boolean(shelfInfo?.isProductionWarehouse) });
       bucketByBundle.set(bundleId, bundleRows);
       bundleRowsByProduct.set(productId, bucketByBundle);
     });
@@ -1027,6 +1045,7 @@ const ModuleShow: React.FC = () => {
       shelfId?: string | null;
       shelfLabel?: string | null;
       disabled?: boolean;
+      sourceDisabled?: boolean;
     }[]> = {};
     bundleRowsByProduct.forEach((bundles, productId) => {
       nextBundles[productId] = Array.from(bundles.entries()).map(([bundleId, bundleRows]) => {
@@ -1044,6 +1063,7 @@ const ModuleShow: React.FC = () => {
           shelfId: hasSingleShelf ? shelfIds[0] : null,
           shelfLabel,
           disabled: !hasSingleShelf,
+          sourceDisabled: hasSingleShelf && Boolean(bundleRows[0]?.isProductionWarehouse),
         };
       });
     });
@@ -2561,22 +2581,52 @@ const ModuleShow: React.FC = () => {
         msg.error('برای هر ردیف تحویل، بسته محصول برداشت را انتخاب کنید.');
         return;
       }
+      if (deliveryRows.some(({ row }) => !row.targetBundleId)) {
+        msg.error('برای هر ردیف تحویل، بسته تحویل مقصد را انتخاب کنید.');
+        return;
+      }
       const missingProductionShelf = materialsWithDelivery.filter((group) => !group.productionShelfId);
       if (missingProductionShelf.length > 0) {
         msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
         return;
       }
+      const getMovementKey = (group: StartMaterialGroup, row: StartMaterialDeliveryRow) => `${group.key}:${row.key}`;
       const moves = deliveryRows.map(({ group, row, quantity }) => ({
+        client_key: getMovementKey(group, row),
         product_id: String(group.selectedProductId),
         from_shelf_id: String(row.sourceShelfId),
         to_shelf_id: String(group.productionShelfId),
         bundle_id: row.sourceBundleId,
+        target_bundle_id: (!isCreateNewBundleValue(row.targetBundleId) && !isUseSourceBundleValue(row.targetBundleId))
+          ? String(row.targetBundleId)
+          : (isUseSourceBundleValue(row.targetBundleId) ? String(row.sourceBundleId) : null),
+        create_new_target_bundle: isCreateNewBundleValue(row.targetBundleId),
         quantity,
         unit: row.mainUnit || group.pieces?.find((piece: any) => String(piece?.mainUnit || '').trim())?.mainUnit || null,
       }));
 
       setStatusLoading(true);
-      await applyProductionMoves(moves);
+      const moveResults = await applyProductionMoves(moves);
+      const resolvedMoveByKey = new Map(moveResults.map((result) => [String(result.client_key), result]));
+      void loadDestinationBundleOptions(supabase as any)
+        .then(setDestinationBundleOptions)
+        .catch((error) => console.warn('Could not refresh destination bundles', error));
+      const resolvedMaterials = materialsWithDelivery.map((group) => ({
+        ...group,
+        deliveryRows: (group.deliveryRows || []).map((row) => ({
+          ...row,
+          targetBundleId: resolvedMoveByKey.get(getMovementKey(group, row))?.target_bundle_id
+            || (isUseSourceBundleValue(row.targetBundleId) ? row.sourceBundleId : row.targetBundleId)
+            || row.sourceBundleId
+            || null,
+          targetBundleLabel: resolvedMoveByKey.get(getMovementKey(group, row))?.target_bundle_number || row.targetBundleLabel || null,
+        })),
+      }));
+      const targetBundleByMoveKey = new Map(moveResults.map((result) => [String(result.client_key), String(result.target_bundle_id)]));
+      moves.forEach((move) => {
+        move.target_bundle_id = targetBundleByMoveKey.get(String(move.client_key)) || move.target_bundle_id || move.bundle_id || null;
+        move.create_new_target_bundle = false;
+      });
       await Promise.all(Array.from(new Set(moves.map((move) => move.product_id))).map((productId) => syncProductStock(productId)));
       try {
         const { data: authData } = await supabase.auth.getUser();
@@ -2590,7 +2640,9 @@ const ModuleShow: React.FC = () => {
           production_order_id: id || null,
           from_shelf_id: move.from_shelf_id,
           to_shelf_id: move.to_shelf_id,
-          bundle_id: move.bundle_id ?? null,
+          bundle_id: move.target_bundle_id ?? move.bundle_id ?? null,
+          source_bundle_id: move.bundle_id ?? null,
+          target_bundle_id: move.target_bundle_id ?? move.bundle_id ?? null,
           sender_id: userId,
           receiver_id: userId,
         }));
@@ -2602,7 +2654,7 @@ const ModuleShow: React.FC = () => {
       }
       const currentGridMaterials = Array.isArray(data?.grid_materials) ? data.grid_materials : [];
       const deliveredByGroupKey = new Map<string, StartMaterialGroup>(
-        materialsWithDelivery.map((group) => [group.key, group])
+        resolvedMaterials.map((group) => [group.key, group])
       );
       const nextGridMaterials = currentGridMaterials.map((row: any, rowIndex: number) => {
         const rowKey = `${String(row?.key || 'group')}_${rowIndex}`;
@@ -2666,6 +2718,10 @@ const ModuleShow: React.FC = () => {
     const rowsWithQty = (group.deliveryRows || []).filter((row) => calcDeliveredQty(row) > 0);
     if (!rowsWithQty.length || rowsWithQty.some((row) => !row.sourceBundleId || !row.sourceShelfId)) {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را انتخاب کنید.');
+      return;
+    }
+    if (rowsWithQty.some((row) => !row.targetBundleId)) {
+      msg.error('برای همه ردیف‌های تحویل، بسته تحویل مقصد را انتخاب کنید.');
       return;
     }
     if (!group.productionShelfId) {
@@ -3428,6 +3484,7 @@ const ModuleShow: React.FC = () => {
             materials={startMaterials}
             orderName={String(data?.name || '')}
             sourceBundleOptionsByProduct={sourceBundleOptionsByProduct}
+            destinationBundleOptions={destinationBundleOptions}
             productionShelfOptions={productionShelfOptions}
             onCancel={() => setProductionModal(null)}
             onStart={handleConfirmStartProduction}

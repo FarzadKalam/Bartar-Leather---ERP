@@ -31,6 +31,7 @@ interface GridTableProps {
   orderQuantity?: number;
   showDeliveredQtyColumn?: boolean;
   forceProductionOrderMode?: boolean;
+  registerSaveHandler?: (handler: (() => Promise<boolean>) | null) => void;
 }
 
 const defaultPiece = () => ({
@@ -112,6 +113,15 @@ const formatStockLabel = (value: any) => {
   return toPersianNumber(parsed.toLocaleString('en-US'));
 };
 
+const hasRecordedDelivery = (row: any) => {
+  const deliveredTotal = Number(row?.delivered_total_qty ?? row?.deliveredTotalQty ?? 0);
+  if (Number.isFinite(deliveredTotal) && deliveredTotal > 0) return true;
+  return (Array.isArray(row?.delivery_rows) ? row.delivery_rows : []).some((deliveryRow: any) => {
+    const quantity = Number(deliveryRow?.mainQuantity ?? deliveryRow?.deliveredQty ?? deliveryRow?.delivered_qty ?? 0);
+    return Number.isFinite(quantity) && quantity > 0;
+  });
+};
+
 const GridTable: React.FC<GridTableProps> = ({
   block,
   initialData,
@@ -128,6 +138,7 @@ const GridTable: React.FC<GridTableProps> = ({
   orderQuantity = 0,
   showDeliveredQtyColumn = false,
   forceProductionOrderMode = false,
+  registerSaveHandler,
 }) => {
   const isReadOnly = readOnly === true || canEditModule === false || block?.readonly === true;
   const isProductionOrder = moduleId === 'production_orders' || forceProductionOrderMode;
@@ -601,6 +612,11 @@ const GridTable: React.FC<GridTableProps> = ({
 
   const confirmRemoveGridRow = (rowIndex: number) => {
     if (isReadOnly) return;
+    const row = getWorkingData()[rowIndex];
+    if (moduleId === 'production_orders' && hasRecordedDelivery(row)) {
+      message.warning('این ماده اولیه قبلاً تحویل شده و قابل حذف نیست.');
+      return;
+    }
     message.warning('در حال حذف جدول مواد اولیه هستید.');
     Modal.confirm({
       title: 'حذف جدول مواد اولیه',
@@ -620,6 +636,10 @@ const GridTable: React.FC<GridTableProps> = ({
     }
     const cloned = JSON.parse(JSON.stringify(data));
     const rowIndex = cloned.findIndex((row: any, idx: number) => getRowKeyValue(row, idx) === rowKey);
+    if (moduleId === 'production_orders' && rowIndex >= 0 && hasRecordedDelivery(cloned[rowIndex])) {
+      message.warning('این ماده اولیه قبلاً تحویل شده و قابل تغییر نیست.');
+      return;
+    }
     if (rowIndex >= 0) {
       cloned[rowIndex] = { ...cloned[rowIndex], collapsed: false };
     }
@@ -644,6 +664,26 @@ const GridTable: React.FC<GridTableProps> = ({
 
   const persistGridRows = async (rows: any[], successMessage = 'ذخیره شد') => {
     if (!moduleId || !recordId) throw new Error('رکورد یافت نشد');
+    if (moduleId === 'production_orders') {
+      const { data: freshOrder, error: freshOrderError } = await supabase
+        .from('production_orders')
+        .select(block.id)
+        .eq('id', recordId)
+        .maybeSingle();
+      if (freshOrderError) throw freshOrderError;
+      const freshRows = Array.isArray((freshOrder as any)?.[block.id]) ? (freshOrder as any)[block.id] : [];
+      freshRows.forEach((freshRow: any, index: number) => {
+        if (!hasRecordedDelivery(freshRow)) return;
+        const candidate = rows[index];
+        const freshProductId = String(freshRow?.header?.selected_product_id || freshRow?.selected_product_id || '');
+        const candidateProductId = String(candidate?.header?.selected_product_id || candidate?.selected_product_id || '');
+        const freshDelivered = Number(freshRow?.delivered_total_qty || 0);
+        const candidateDelivered = Number(candidate?.delivered_total_qty || 0);
+        if (!candidate || freshProductId !== candidateProductId || candidateDelivered + 0.000001 < freshDelivered) {
+          throw new Error('ماده اولیه‌ای که برای آن تحویل ثبت شده، قابل حذف یا تغییر محصول نیست. ابتدا وضعیت تحویل را تعیین تکلیف کنید.');
+        }
+      });
+    }
     const payload = (rows || []).map(({ key, ...rest }: any) => rest);
     const { error } = await supabase.from(moduleId).update({ [block.id]: payload }).eq('id', recordId);
     if (error) throw error;
@@ -653,19 +693,27 @@ const GridTable: React.FC<GridTableProps> = ({
     message.success(successMessage);
   };
 
-  const handleSave = async () => {
-    if (mode === 'local' || mode === 'external_view') return;
-    if (!activeEditRowKey) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (mode === 'local' || mode === 'external_view') return true;
+    if (!activeEditRowKey) return true;
     setSaving(true);
     try {
       await persistGridRows(tempData, 'ذخیره شد');
       setActiveEditRowKey(null);
+      return true;
     } catch (e: any) {
       message.error(e.message || 'خطا در ذخیره');
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    if (!registerSaveHandler) return;
+    registerSaveHandler(handleSave);
+    return () => registerSaveHandler(null);
+  }, [activeEditRowKey, block.id, mode, moduleId, recordId, registerSaveHandler, tempData]);
 
   const fetchProductById = async (productId: string) => {
     const { data: product, error } = await supabase.from('products').select('*').eq('id', productId).single();
@@ -820,6 +868,10 @@ const GridTable: React.FC<GridTableProps> = ({
     const source = getWorkingData();
     const targetRow = source[rowIndex];
     if (!targetRow) return;
+    if (moduleId === 'production_orders' && hasRecordedDelivery(targetRow)) {
+      message.warning('ردیف تحویل‌شده برای جلوگیری از تکرار موجودی قابل کپی نیست.');
+      return;
+    }
 
     const clonedRow = cloneGridRowWithNewKeys(targetRow);
     const nextData = [...source];
@@ -1173,7 +1225,8 @@ const GridTable: React.FC<GridTableProps> = ({
         {sourceData.map((row: any, rowIndex: number) => {
           const rowKey = String(row.key || rowIndex);
           const isRowEditing = mode === 'db' && activeEditRowKey === rowKey;
-          const rowCanEdit = !isReadOnly && (mode === 'local' || isRowEditing);
+          const rowDeliveryLocked = moduleId === 'production_orders' && hasRecordedDelivery(row);
+          const rowCanEdit = !rowDeliveryLocked && !isReadOnly && (mode === 'local' || isRowEditing);
           const categoryValue = row.header?.category || null;
           let specFields = getSpecFields(categoryValue);
           if (moduleId === 'production_boms') {
@@ -1457,7 +1510,15 @@ const GridTable: React.FC<GridTableProps> = ({
 
                 <div className="flex items-center gap-1 shrink-0">
                   {mode === 'db' && !isReadOnly && (
-                    isRowEditing ? (
+                    rowDeliveryLocked ? (
+                      <Button
+                        type="text"
+                        size="small"
+                        className="p-0 !text-white/90"
+                        icon={<LockOutlined />}
+                        title="به‌دلیل ثبت تحویل، این ردیف قفل است"
+                      />
+                    ) : isRowEditing ? (
                       <>
                         <Button
                           type="text"
@@ -1521,7 +1582,7 @@ const GridTable: React.FC<GridTableProps> = ({
                       </>
                     )
                   )}
-                  {mode !== 'db' && !isReadOnly && (
+                  {mode !== 'db' && !isReadOnly && !rowDeliveryLocked && (
                     <>
                       <Button
                         type="text"
