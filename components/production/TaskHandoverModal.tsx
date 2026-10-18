@@ -9,7 +9,7 @@ import gregorianEn from 'react-date-object/locales/gregorian_en';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
-import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from '../../utils/productionBundles';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue } from '../../utils/productionBundles';
 import DeliveryProgressBar from './DeliveryProgressBar';
 import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
 
@@ -710,21 +710,28 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             dataIndex: 'sourceBundleId',
                             key: 'sourceBundleId',
                             width: isMobile ? 220 : 180,
-                            render: (value: string | null | undefined, record: StageHandoverDeliveryRow) => (
-                              <Select
-                                value={value || undefined}
-                                placeholder="انتخاب بسته"
-                                options={value && !bundleOptions.some((option) => String(option.value) === String(value))
-                                  ? [{ label: record.sourceBundleLabel || String(value), value }, ...bundleOptions]
-                                  : bundleOptions}
-                                showSearch
-                                optionFilterProp="label"
-                                className="w-full"
-                                getPopupContainer={() => document.body}
-                                onChange={(bundleId) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'sourceBundleId', bundleId || null)}
-                                disabled={locked}
-                              />
-                            ),
+                            render: (value: string | null | undefined, record: StageHandoverDeliveryRow) => {
+                              const sourceOption = bundleOptions.find((option) => String(option.value) === String(value || ''));
+                              const sourceLabel = record.sourceBundleLabel || sourceOption?.label || (value ? String(value) : '—');
+                              if (locked) {
+                                return <span className="block rounded-md border border-gray-300 bg-gray-100 px-2 py-1.5 text-sm font-semibold text-gray-800">{sourceLabel}</span>;
+                              }
+                              return (
+                                <Select
+                                  value={value || undefined}
+                                  placeholder="انتخاب بسته"
+                                  options={value && !bundleOptions.some((option) => String(option.value) === String(value))
+                                    ? [{ label: sourceLabel, value }, ...bundleOptions]
+                                    : bundleOptions}
+                                  showSearch
+                                  optionFilterProp="label"
+                                  className="w-full"
+                                  getPopupContainer={() => document.body}
+                                  onChange={(bundleId) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'sourceBundleId', bundleId || null)}
+                                  disabled={locked}
+                                />
+                              );
+                            },
                           },
                           {
                             title: 'بسته تحویل مقصد',
@@ -754,6 +761,14 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               if (value && String(value) !== String(record.sourceBundleId || '')
                                 && !destinationOptions.some((option) => String(option.value) === String(value))) {
                                 destinationOptions.push({ label: record.targetBundleLabel || String(value), value } as any);
+                              }
+                              const sourceLabel = record.sourceBundleLabel || sourceBundleOption?.label || (record.sourceBundleId ? String(record.sourceBundleId) : '—');
+                              const selectedTargetOption = destinationOptions.find((option) => String(option.value) === String(value || ''));
+                              const targetLabel = record.targetBundleLabel
+                                || (String(value || '') === String(record.sourceBundleId || '') ? sourceLabel : selectedTargetOption?.label)
+                                || (isCreateNewBundleValue(value) ? 'بسته جدید' : (value ? String(value) : '—'));
+                              if (locked) {
+                                return <span className="block rounded-md border border-gray-300 bg-gray-100 px-2 py-1.5 text-sm font-semibold text-gray-800">{targetLabel}</span>;
                               }
                               return (
                                 <Select
