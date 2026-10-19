@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { Alert, Button, Drawer, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
 import { CalculatorOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
@@ -402,6 +402,13 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
               ...previousDeliveryRows.map((row) => row.subUnit),
             ]) || consumptionSubUnitLabel;
             const isRequirementsDrawerOpen = requirementsDrawerGroupKey === group.key;
+            const selectedStageShelf = productionTargetType === 'stage'
+              ? productionStageOptions?.find((option) => String(option.value) === String(group.deliveryRows?.find((row) => row.targetStageTaskId)?.targetStageTaskId || ''))
+              : productionShelfOptions.find((option) => String(option.value) === String(group.productionShelfId || ''));
+            const sourceShelfLabel = sourceBundleOptions.find((option) => String(option.value) === String(group.sourceBundleId || ''))?.shelfLabel || group.sourceShelfId || 'قفسه مبدأ مشخص نشده';
+            const targetShelfLabel = (selectedStageShelf as any)?.shelfLabel || selectedStageShelf?.label || group.productionShelfId || 'قفسه مقصد مشخص نشده';
+            const targetShelfForWarning = productionTargetType === 'stage' ? (selectedStageShelf as any)?.shelfId : group.productionShelfId;
+            const sameShelfWarning = group.sourceShelfId && targetShelfForWarning && String(group.sourceShelfId) === String(targetShelfForWarning);
 
             const headerToneClass = 'bg-[#1f4534] text-white shadow-sm border-b border-[#17372a]';
             const headerButtonClass = '!text-white hover:!text-white/90';
@@ -1214,8 +1221,16 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 }}
                               />
                             </div>
+                            <div className="text-xs text-gray-600">قفسه مقصد: <span className="font-semibold text-gray-800">{targetShelfLabel}</span></div>
+                            {sameShelfWarning ? <Alert type="warning" showIcon message="قفسه مبدأ و مقصد یکسان است؛ قفسه مقصد دیگری انتخاب کنید." /> : null}
                         </div>
-                      ) : null}
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="text-xs text-gray-600">قفسه مبدأ: <span className="font-semibold text-gray-800">{sourceShelfLabel}</span></div>
+                          <div className="text-xs text-gray-600">قفسه مقصد مرحله: <span className="font-semibold text-gray-800">{targetShelfLabel}</span></div>
+                          {sameShelfWarning ? <Alert type="warning" showIcon message="قفسه مبدأ و مقصد یکسان است؛ مرحله یا قفسه مقصد دیگری انتخاب کنید." /> : null}
+                        </div>
+                      )}
                     </div>
                     </div>
                   </div>

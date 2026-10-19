@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { Alert, Button, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
@@ -281,6 +281,9 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
     });
   }, [groups]);
 
+  const selectedDestinationStage = stageOptions.find((option) => String(option.value) === String(destinationStageId || ''));
+  const sameStageShelf = Boolean(targetShelfId && selectedDestinationStage?.shelfId && String(targetShelfId) === String(selectedDestinationStage.shelfId));
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onResize = () => setIsMobile(window.innerWidth < 768);
@@ -480,6 +483,8 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                     optionFilterProp="label"
                     placeholder="انتخاب مرحله مقصد"
                   />
+                  <div className="mt-1 text-xs text-gray-600">قفسه مقصد: <span className="font-semibold text-gray-800">{selectedDestinationStage?.shelfLabel || selectedDestinationStage?.shelfId || 'قفسه تعیین نشده'}</span></div>
+                  {sameStageShelf ? <Alert className="mt-2" type="warning" showIcon message="قفسه مبدأ و مقصد یکسان است؛ مرحله مقصد دیگری انتخاب کنید." /> : null}
                 </div>
               </>
             )}

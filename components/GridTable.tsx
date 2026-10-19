@@ -482,8 +482,8 @@ const GridTable: React.FC<GridTableProps> = ({
       });
       const qtySub = Number.isFinite(qtySubRaw) ? Math.round(qtySubRaw * 100) / 100 : 0;
 
-      const unitPrice = parseFloat(piece.unit_price) || 0;
-      const subUnitPrice = parseFloat(piece.sub_unit_price) || 0;
+      const unitPrice = parseFloat(piece.unit_price ?? piece.main_unit_price ?? gridRow?.header?.selected_product_main_unit_price) || 0;
+      const subUnitPrice = parseFloat(piece.sub_unit_price ?? piece.sub_buy_price ?? gridRow?.header?.selected_product_sub_unit_price) || 0;
       const costPerItem = unitPrice > 0
         ? unitPrice * finalUsage
         : subUnitPrice * qtySub;
@@ -760,6 +760,8 @@ const GridTable: React.FC<GridTableProps> = ({
         selected_product_sub_stock: product?.sub_stock ?? 0,
         selected_product_main_unit: product?.main_unit || null,
         selected_product_sub_unit: product?.sub_unit || null,
+        selected_product_main_unit_price: product?.main_unit_price ?? product?.buy_price ?? null,
+        selected_product_sub_unit_price: product?.sub_unit_price ?? product?.sub_buy_price ?? null,
       };
       row.collapsed = false;
 
@@ -1960,6 +1962,7 @@ const GridTable: React.FC<GridTableProps> = ({
                             title: 'قیمت واحد اصلی',
                             dataIndex: 'unit_price',
                             key: 'unit_price',
+                            width: 240,
                             render: (val: any, _record: any, pieceIndex: number) => {
                               const conversion = getPieceUnitConversion('unit_price');
                               return (
@@ -1967,8 +1970,8 @@ const GridTable: React.FC<GridTableProps> = ({
                                   {rowCanEdit
                                     ? (
                                   <InputNumber
-                                    className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
-                                    style={{ minWidth: 0, maxWidth: '100%' }}
+                                    className="w-full min-w-[170px] max-w-full font-medium persian-number smart-number-input"
+                                    style={{ minWidth: 170, maxWidth: '100%' }}
                                     value={val}
                                     onChange={(v) => updatePiece(rowIndex, pieceIndex, { unit_price: v })}
                                     formatter={(v) => formatGroupedInput(v)}
@@ -1999,6 +2002,7 @@ const GridTable: React.FC<GridTableProps> = ({
                             title: 'قیمت واحد فرعی',
                             dataIndex: 'sub_unit_price',
                             key: 'sub_unit_price',
+                            width: 240,
                             render: (val: any, _record: any, pieceIndex: number) => {
                               const conversion = getPieceUnitConversion('sub_unit_price');
                               return (
@@ -2006,8 +2010,8 @@ const GridTable: React.FC<GridTableProps> = ({
                                   {rowCanEdit
                                     ? (
                                   <InputNumber
-                                    className="w-full min-w-0 max-w-full font-medium persian-number smart-number-input"
-                                    style={{ minWidth: 0, maxWidth: '100%' }}
+                                    className="w-full min-w-[170px] max-w-full font-medium persian-number smart-number-input"
+                                    style={{ minWidth: 170, maxWidth: '100%' }}
                                     value={val}
                                     onChange={(v) => updatePiece(rowIndex, pieceIndex, { sub_unit_price: v })}
                                     formatter={(v) => formatGroupedInput(v)}

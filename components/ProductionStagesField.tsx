@@ -4,6 +4,7 @@ import { PlusOutlined, UserOutlined, DownOutlined, TeamOutlined, CopyOutlined, D
 import { supabase } from '../supabaseClient';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import PersianDatePicker from './PersianDatePicker';
+import SmartFieldRenderer from './SmartFieldRenderer';
 import TaskHandoverModal, {
   type StageHandoverConfirm,
   type StageHandoverBundleOption,
@@ -32,6 +33,7 @@ import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQ
 import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils/durableDraft';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 import { formatGroupedNumberInput, parseGroupedNumberInput } from '../utils/groupedNumberInput';
+import { FieldType } from '../types';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -244,7 +246,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     const parsed = parseFloat(value);
     return Number.isFinite(parsed) ? parsed : 0;
   }, []);
-  const isLineCreationLocked = !isBom && String(orderStatus || '').toLowerCase() === 'in_progress';
+  const isLineCreationLocked = false;
 
   const categoryLabelMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -2315,10 +2317,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const handleAddLine = async (values: any) => {
     if (!recordId) return;
-    if (isLineCreationLocked) {
-      message.warning('در وضعیت در حال تولید امکان افزودن خط جدید وجود ندارد.');
-      return;
-    }
     try {
       let nextNo = values.line_no;
       if (!nextNo) {
@@ -3106,10 +3104,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const handleCopyLine = async (line: any) => {
     if (!recordId || !line?.id) return;
-    if (isLineCreationLocked) {
-      message.warning('در وضعیت در حال تولید امکان افزودن خط جدید وجود ندارد.');
-      return;
-    }
     try {
       setLoading(true);
       const { data: maxRow, error: maxError } = await supabase
@@ -3533,16 +3527,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
       {!readOnly && !isBom && (
         <div className="flex justify-start">
-          <Tooltip title={isLineCreationLocked ? 'در وضعیت در حال تولید امکان افزودن خط جدید وجود ندارد.' : 'افزودن خط تولید جدید'}>
+          <Tooltip title="افزودن خط تولید جدید">
             <Button
               type="dashed"
               icon={<PlusOutlined />}
               size={compact ? 'small' : 'middle'}
               onClick={() => {
-                if (isLineCreationLocked) return;
                 setIsLineModalOpen(true);
               }}
-              disabled={isLineCreationLocked}
               className="border-leather-300 text-leather-700 hover:!border-leather-600 hover:!text-leather-600 hover:!bg-leather-50"
             >
               افزودن خط
@@ -3647,13 +3639,21 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
             <div className="col-span-12">
               <Form.Item name="production_shelf_id" label="قفسه مرحله">
-                <Select
-                  placeholder="انتخاب قفسه از انبار تولید"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
+                <SmartFieldRenderer
+                  field={{
+                    key: 'production_shelf_id',
+                    type: FieldType.RELATION,
+                    labels: { fa: 'قفسه مرحله' },
+                    relationConfig: { targetModule: 'shelves', targetField: 'name' },
+                  } as any}
+                  value={taskForm.getFieldValue('production_shelf_id')}
+                  onChange={(value) => taskForm.setFieldsValue({ production_shelf_id: value || null })}
                   options={productionShelfOptions}
-                  getPopupContainer={() => document.body}
+                  forceEditMode
+                  compactMode
+                  moduleId="production_orders"
+                  popupContainer={typeof document !== 'undefined' ? document.body : null}
+                  popupZIndex={14000}
                 />
               </Form.Item>
             </div>
