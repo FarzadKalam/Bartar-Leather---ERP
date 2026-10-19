@@ -3748,6 +3748,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 <div className="mt-1 text-xs text-gray-500">
                   ترتیب اجرا: {toPersianNumber(handoverTask.sort_order ?? '-')} · وضعیت فعلی: {getStatusLabel(handoverTask.status)}
                 </div>
+                <div className="mt-1 text-sm font-semibold text-[#1f4534]">
+                  تعداد تولید مورد نیاز: {toPersianNumber(String(Math.max(0, toNumber(lines.find((line: any) => String(line.id) === String(handoverContext?.lineId))?.quantity || 0))))}
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {taskStatusActions.map((action) => (

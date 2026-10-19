@@ -283,6 +283,11 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
 
   const selectedDestinationStage = stageOptions.find((option) => String(option.value) === String(destinationStageId || ''));
   const sameStageShelf = Boolean(targetShelfId && selectedDestinationStage?.shelfId && String(targetShelfId) === String(selectedDestinationStage.shelfId));
+  const resolveShelfLabel = (shelfId: string | null | undefined) => {
+    if (!shelfId) return 'تعیین نشده';
+    const option = stageOptions.find((item) => String(item.shelfId || '') === String(shelfId));
+    return option?.shelfLabel || String(shelfId);
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -557,6 +562,13 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                           <span className="font-semibold">{toQty(totalSubQuantity)}</span>
                           <span className="font-semibold mr-1">{subUnitLabel}</span>
                         </>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-white/90">
+                      <span>قفسه مبدأ: <strong>{resolveShelfLabel(group.sourceShelfId)}</strong></span>
+                      <span>قفسه مقصد: <strong>{resolveShelfLabel(group.targetShelfId || targetShelfId)}</strong></span>
+                      {group.sourceShelfId && group.targetShelfId && String(group.sourceShelfId) === String(group.targetShelfId) ? (
+                        <span className="font-bold text-amber-200">هشدار: قفسه مبدأ و مقصد یکسان است</span>
                       ) : null}
                     </div>
                     <DeliveryProgressBar
