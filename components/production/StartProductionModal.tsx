@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Drawer, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { Button, Drawer, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
 import { CalculatorOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
@@ -98,7 +98,7 @@ interface StartProductionModalProps {
   }[]>;
   destinationBundleOptions?: DestinationBundleOption[];
   productionShelfOptions: { label: string; value: string }[];
-  productionStageOptions?: { label: string; value: string; orderId?: string; shelfId?: string | null }[];
+  productionStageOptions?: { label: string; value: string; orderId?: string; shelfId?: string | null; shelfLabel?: string | null }[];
   productionTargetType?: 'shelf' | 'stage';
   readonlyUnitFields?: boolean;
   onCancel: () => void;
@@ -402,13 +402,6 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
               ...previousDeliveryRows.map((row) => row.subUnit),
             ]) || consumptionSubUnitLabel;
             const isRequirementsDrawerOpen = requirementsDrawerGroupKey === group.key;
-            const selectedStageShelf = productionTargetType === 'stage'
-              ? productionStageOptions?.find((option) => String(option.value) === String(group.deliveryRows?.find((row) => row.targetStageTaskId)?.targetStageTaskId || ''))
-              : productionShelfOptions.find((option) => String(option.value) === String(group.productionShelfId || ''));
-            const sourceShelfLabel = sourceBundleOptions.find((option) => String(option.value) === String(group.sourceBundleId || ''))?.shelfLabel || group.sourceShelfId || 'قفسه مبدأ مشخص نشده';
-            const targetShelfLabel = (selectedStageShelf as any)?.shelfLabel || selectedStageShelf?.label || group.productionShelfId || 'قفسه مقصد مشخص نشده';
-            const targetShelfForWarning = productionTargetType === 'stage' ? (selectedStageShelf as any)?.shelfId : group.productionShelfId;
-            const sameShelfWarning = group.sourceShelfId && targetShelfForWarning && String(group.sourceShelfId) === String(targetShelfForWarning);
 
             const headerToneClass = 'bg-[#1f4534] text-white shadow-sm border-b border-[#17372a]';
             const headerButtonClass = '!text-white hover:!text-white/90';
@@ -1073,18 +1066,25 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'مرحله مقصد',
                               dataIndex: 'targetStageTaskId',
                               key: 'targetStageTaskId',
-                              width: isMobile ? 260 : 220,
+                              width: isMobile ? 320 : 360,
                               render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
+                                <div>
                                 <Select
                                   value={value || undefined}
                                   placeholder="انتخاب مرحله"
                                   options={productionStageOptions}
+                                  optionRender={(option) => <div className="whitespace-normal leading-6">{option.label}</div>}
+                                  title={productionStageOptions.find((option) => option.value === value)?.label}
                                   showSearch
                                   optionFilterProp="label"
                                   className="w-full"
                                   getPopupContainer={() => document.body}
                                   onChange={(stageTaskId) => onProductionStageChange?.(groupIndex, String(record.key), stageTaskId || null)}
                                 />
+                                {record.sourceShelfId && productionStageOptions.find((option) => option.value === value)?.shelfId === record.sourceShelfId ? (
+                                  <div role="alert" className="mt-1 text-xs font-medium text-amber-700">قفسه مبدأ و مقصد یکسان است؛ مرحله یا قفسه مقصد را تغییر دهید.</div>
+                                ) : null}
+                                </div>
                               ),
                             }] : []),
                             {
@@ -1221,16 +1221,8 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 }}
                               />
                             </div>
-                            <div className="text-xs text-gray-600">قفسه مقصد: <span className="font-semibold text-gray-800">{targetShelfLabel}</span></div>
-                            {sameShelfWarning ? <Alert type="warning" showIcon message="قفسه مبدأ و مقصد یکسان است؛ قفسه مقصد دیگری انتخاب کنید." /> : null}
                         </div>
-                      ) : (
-                        <div className="space-y-1">
-                          <div className="text-xs text-gray-600">قفسه مبدأ: <span className="font-semibold text-gray-800">{sourceShelfLabel}</span></div>
-                          <div className="text-xs text-gray-600">قفسه مقصد مرحله: <span className="font-semibold text-gray-800">{targetShelfLabel}</span></div>
-                          {sameShelfWarning ? <Alert type="warning" showIcon message="قفسه مبدأ و مقصد یکسان است؛ مرحله یا قفسه مقصد دیگری انتخاب کنید." /> : null}
-                        </div>
-                      )}
+                      ) : null}
                     </div>
                     </div>
                   </div>
@@ -1326,6 +1318,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
     return (
       <div className="space-y-3">
         <div className="rounded-2xl border border-gray-200 bg-white p-3">
+          <h2 className="mb-3 text-lg font-bold text-[#17372a]">فرم تحویل مواد اولیه</h2>
           {bodyContent}
         </div>
         {transferModalNode}
@@ -1336,7 +1329,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
   return (
     <>
       <Modal
-        title="شروع تولید"
+        title="فرم تحویل مواد اولیه"
         width="min(980px, calc(100vw - 24px))"
         open={open}
         onOk={onStart}

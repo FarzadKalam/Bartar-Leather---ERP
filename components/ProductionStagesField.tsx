@@ -34,6 +34,7 @@ import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 import { formatGroupedNumberInput, parseGroupedNumberInput } from '../utils/groupedNumberInput';
 import { FieldType } from '../types';
+import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -395,7 +396,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         .limit(500);
       const allOptions = (shelves || []).map((row: any) => ({
         value: String(row.id),
-        label: `${row?.shelf_number || row?.name || row?.id}${row?.warehouses?.name ? ` - ${row.warehouses.name}` : ''}`,
+        label: formatProductionShelfLabel(row),
         warehouseName: String(row?.warehouses?.name || ''),
       }));
       setAllShelfOptions(allOptions);
@@ -1501,7 +1502,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           value: String(task.id),
           label: stageName,
           shelfId: stageShelfId,
-          shelfLabel: stageShelfId || 'قفسه تعیین نشده',
+          shelfLabel: allShelfOptions.find((option) => option.value === stageShelfId)?.label || 'قفسه تعیین نشده',
         };
       });
     const selectedSourceStageId =
@@ -2627,9 +2628,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const getShelfLabel = useCallback((shelfId: string | null | undefined) => {
     if (!shelfId) return 'تعیین نشده';
-    const option = productionShelfOptions.find((item) => String(item.value) === String(shelfId));
-    return option?.label || String(shelfId);
-  }, [productionShelfOptions]);
+    const option = allShelfOptions.find((item) => String(item.value) === String(shelfId));
+    return option?.label || 'اطلاعات قفسه در دسترس نیست';
+  }, [allShelfOptions]);
 
   const renderDate = (dateVal: any) => {
     if (!dateVal) return null;
@@ -2753,12 +2754,15 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const stageName = String(task?.name || task?.title || 'مرحله');
         const stageShelfId = task?.production_shelf_id ? String(task.production_shelf_id) : null;
         const stageShelfLabel = stageShelfId ? getShelfLabel(stageShelfId) : 'قفسه تعیین نشده';
+        const stageAssigneeLabel = task?.assignee_type === 'role'
+          ? String(task?.assigned_role?.title || '')
+          : String(task?.assignee?.full_name || '');
         const sortOrder = task?.sort_order !== undefined && task?.sort_order !== null
           ? ` (ترتیب: ${toPersianNumber(task.sort_order)})`
           : '';
         return {
           value: String(task.id),
-          label: `${stageName}${sortOrder}`,
+          label: [stageAssigneeLabel, stageName, `قفسه: ${stageShelfLabel}`].filter(Boolean).join(' — ') + sortOrder,
           shelfId: stageShelfId,
           shelfLabel: stageShelfLabel,
         };
@@ -3751,6 +3755,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 <div className="mt-1 text-sm font-semibold text-[#1f4534]">
                   تعداد تولید مورد نیاز: {toPersianNumber(String(Math.max(0, toNumber(lines.find((line: any) => String(line.id) === String(handoverContext?.lineId))?.quantity || 0))))}
                 </div>
+                <div className="mt-1 text-xs text-gray-600">قفسه مرحله: {getShelfLabel(handoverTask.production_shelf_id)}</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {taskStatusActions.map((action) => (

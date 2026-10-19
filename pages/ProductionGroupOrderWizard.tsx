@@ -20,6 +20,7 @@ import TaskHandoverModal, {
 import { MODULES } from '../moduleRegistry';
 import { BlockDefinition } from '../types';
 import { supabase } from '../supabaseClient';
+import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { applyProductionMoves, syncProductStock } from '../utils/productionWorkflow';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
@@ -604,7 +605,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
     }
     setStartFormsLoading(true);
     try {
-      const [taskResult, lineResult] = await Promise.all([
+      const [taskResult, lineResult, shelfResult] = await Promise.all([
         supabase
           .from('tasks')
           .select('id, related_production_order, production_line_id, sort_order, name, assignee_id, assignee_role_id, assignee_type, production_shelf_id, recurrence_info, assignee:profiles!tasks_assignee_id_fkey(full_name), assigned_role:org_roles(title)')
@@ -614,11 +615,19 @@ const ProductionGroupOrderWizard: React.FC = () => {
           .from('production_lines')
           .select('id, line_no, production_order_id')
           .in('production_order_id', ids),
+        supabase
+          .from('shelves')
+          .select('id, shelf_number, name, warehouses(name)')
+          .limit(500),
       ]);
       if (taskResult.error) throw taskResult.error;
       if (lineResult.error) throw lineResult.error;
+      if (shelfResult.error) throw shelfResult.error;
 
       const allTasks = Array.isArray(taskResult.data) ? taskResult.data : [];
+      const shelfLabels = new Map<string, string>((shelfResult.data || []).map((shelf: any) => {
+        return [String(shelf.id), formatProductionShelfLabel(shelf)];
+      }));
 
       // تحویل اولیه می‌تواند مستقیماً به هر مرحلهٔ همان سفارش/خط ارسال شود،
       // نه فقط نخستین مرحلهٔ خط تولید.
@@ -638,14 +647,14 @@ const ProductionGroupOrderWizard: React.FC = () => {
           return {
             value: taskId,
             // نام سفارش تکراری و طولانی است؛ نام مسئول/نقش او برای انتخاب سریع‌تر است.
-            label: assigneeLabel ? `${assigneeLabel} — ${stageName}` : stageName,
+            label: [assigneeLabel, stageName, task?.production_shelf_id ? `قفسه: ${shelfLabels.get(String(task.production_shelf_id)) || 'اطلاعات قفسه در دسترس نیست'}` : 'قفسه: تعیین نشده'].filter(Boolean).join(' — '),
             orderId,
             orderName,
             orderCode,
             lineId,
             stageName,
             shelfId: task?.production_shelf_id ? String(task.production_shelf_id) : null,
-            shelfLabel: task?.production_shelf_id ? String(task.production_shelf_id) : null,
+            shelfLabel: task?.production_shelf_id ? (shelfLabels.get(String(task.production_shelf_id)) || 'اطلاعات قفسه در دسترس نیست') : null,
             assigneeId: task?.assignee_id ? String(task.assignee_id) : null,
             assigneeType: task?.assignee_type === 'role' ? 'role' : (task?.assignee_type === 'user' ? 'user' : null),
           } as StartStageTaskOption;

@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { Button, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
@@ -281,13 +281,9 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
     });
   }, [groups]);
 
-  const selectedDestinationStage = stageOptions.find((option) => String(option.value) === String(destinationStageId || ''));
-  const sameStageShelf = Boolean(targetShelfId && selectedDestinationStage?.shelfId && String(targetShelfId) === String(selectedDestinationStage.shelfId));
-  const resolveShelfLabel = (shelfId: string | null | undefined) => {
-    if (!shelfId) return 'تعیین نشده';
-    const option = stageOptions.find((item) => String(item.shelfId || '') === String(shelfId));
-    return option?.shelfLabel || String(shelfId);
-  };
+  const hasSameShelfRoute = !locked && Boolean(targetShelfId && groups.some((group) =>
+    (group.deliveryRows || []).some((row) => row.sourceShelfId && String(row.sourceShelfId) === String(targetShelfId))
+  ));
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -482,17 +478,20 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                     onChange={(value) => onDestinationStageChange(value || null)}
                     disabled={!trafficTypeEditable || locked}
                     options={(stageOptions || []).map((option) => ({ value: option.value, label: option.label }))}
+                    optionRender={(option) => <div className="whitespace-normal leading-6">{option.label}</div>}
+                    title={stageOptions.find((option) => option.value === destinationStageId)?.label}
                     className="w-full"
                     getPopupContainer={() => document.body}
                     showSearch
                     optionFilterProp="label"
                     placeholder="انتخاب مرحله مقصد"
                   />
-                  <div className="mt-1 text-xs text-gray-600">قفسه مقصد: <span className="font-semibold text-gray-800">{selectedDestinationStage?.shelfLabel || selectedDestinationStage?.shelfId || 'قفسه تعیین نشده'}</span></div>
-                  {sameStageShelf ? <Alert className="mt-2" type="warning" showIcon message="قفسه مبدأ و مقصد یکسان است؛ مرحله مقصد دیگری انتخاب کنید." /> : null}
                 </div>
               </>
             )}
+            {hasSameShelfRoute ? (
+              <div role="alert" className="text-xs font-medium text-amber-700">قفسه مبدأ و مقصد یکسان است؛ مرحله یا قفسه مقصد را تغییر دهید.</div>
+            ) : null}
           </div>
         </div>
 
@@ -562,13 +561,6 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                           <span className="font-semibold">{toQty(totalSubQuantity)}</span>
                           <span className="font-semibold mr-1">{subUnitLabel}</span>
                         </>
-                      ) : null}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-white/90">
-                      <span>قفسه مبدأ: <strong>{resolveShelfLabel(group.sourceShelfId)}</strong></span>
-                      <span>قفسه مقصد: <strong>{resolveShelfLabel(group.targetShelfId || targetShelfId)}</strong></span>
-                      {group.sourceShelfId && group.targetShelfId && String(group.sourceShelfId) === String(group.targetShelfId) ? (
-                        <span className="font-bold text-amber-200">هشدار: قفسه مبدأ و مقصد یکسان است</span>
                       ) : null}
                     </div>
                     <DeliveryProgressBar
