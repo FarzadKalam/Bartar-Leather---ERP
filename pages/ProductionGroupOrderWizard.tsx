@@ -22,7 +22,7 @@ import { BlockDefinition } from '../types';
 import { supabase } from '../supabaseClient';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { applyProductionMoves, syncProductStock } from '../utils/productionWorkflow';
-import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { getAllowNegativeInventory } from '../utils/companySettings';
 import {
@@ -1581,7 +1581,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را انتخاب کنید.');
       return;
     }
-    if (rowsWithQty.some((row) => !row.targetBundleId)) {
+    if (rowsWithQty.some((row) => !hasTargetBundleSelection(row))) {
       msg.error('برای همه ردیف‌های تحویل، بسته تحویل مقصد را انتخاب کنید.');
       return;
     }
@@ -1943,7 +1943,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را مشخص کنید.');
       return;
     }
-    if (deliveryRows.some(({ row }) => !row.targetBundleId)) {
+    if (deliveryRows.some(({ row }) => !hasTargetBundleSelection(row))) {
       msg.error('برای همه ردیف‌های تحویل، بسته مقصد را مشخص کنید.');
       return;
     }

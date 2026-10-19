@@ -24,7 +24,7 @@ import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 import { applyProductionMoves, type ProductionMove } from '../utils/productionWorkflow';
-import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { MODULES } from '../moduleRegistry';
 import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
@@ -1471,7 +1471,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       message.error('برای همه ردیف‌های تحویل، بسته برداشت را مشخص کنید.');
       return;
     }
-    if (rowsWithQuantity.some((row) => !row.targetBundleId)) {
+    if (rowsWithQuantity.some((row) => !hasTargetBundleSelection(row))) {
       message.error('برای همه ردیف‌های تحویل، بسته تحویل مقصد را مشخص کنید.');
       return;
     }
