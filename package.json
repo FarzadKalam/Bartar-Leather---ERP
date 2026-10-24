@@ -1,13 +1,13 @@
 {
     "name":  "copy-of-bartar-leather-erp",
     "private":  true,
-    "version":  "2.4.6",
+    "version":  "2.4.7",
     "type":  "module",
     "scripts":  {
                     "dev":  "vite",
                     "check:encoding":  "node scripts/check-encoding.mjs",
                     "typecheck":  "node ./node_modules/typescript/bin/tsc --noEmit",
-                    "test:product-catalog":  "node -e \"require(\u0027fs\u0027).mkdirSync(\u0027.tmp-tests\u0027, { recursive: true }); require(\u0027fs\u0027).writeFileSync(\u0027.tmp-tests/package.json\u0027, \u0027{\\\"type\\\":\\\"commonjs\\\"}\u0027);\" \u0026\u0026 node ./node_modules/typescript/bin/tsc -p tsconfig.product-catalog-tests.json \u0026\u0026 node .tmp-tests/tests/productCatalog.test.js \u0026\u0026 node .tmp-tests/tests/manualStockMovements.test.js \u0026\u0026 node .tmp-tests/tests/inventoryWorkflow.test.js",
+                    "test:product-catalog":  "node -e \"require(\u0027fs\u0027).mkdirSync(\u0027.tmp-tests\u0027, { recursive: true }); require(\u0027fs\u0027).writeFileSync(\u0027.tmp-tests/package.json\u0027, \u0027{\\\"type\\\":\\\"commonjs\\\"}\u0027);\" \u0026\u0026 node ./node_modules/typescript/bin/tsc -p tsconfig.product-catalog-tests.json \u0026\u0026 node .tmp-tests/tests/productCatalog.test.js \u0026\u0026 node .tmp-tests/tests/manualStockMovements.test.js \u0026\u0026 node .tmp-tests/tests/inventoryWorkflow.test.js \u0026\u0026 node .tmp-tests/tests/productionDelivery.test.js",
                     "build":  "npm run check:encoding \u0026\u0026 node scripts/validate-supabase-url.mjs \u0026\u0026 vite build",
                     "preview":  "vite preview",
                     "deploy:server":  "powershell -ExecutionPolicy Bypass -File .\\scripts\\deploy.ps1",

@@ -19,6 +19,7 @@ import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
 import TablesSection from '../components/moduleShow/TablesSection';
 import PrintSection from '../components/moduleShow/PrintSection';
 import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece, type StartMaterialDeliveryRow } from '../components/production/StartProductionModal';
+import { getDeliveryMainQuantity } from '../utils/productionDeliveryRows';
 import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { convertArea } from '../utils/unitConversions';
@@ -225,15 +226,7 @@ const ModuleShow: React.FC = () => {
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
-  const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
-    if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
-      return Math.max(0, toNumber((row as any)?.mainQuantity));
-    }
-    const length = Math.max(0, toNumber((row as any)?.length));
-    const width = Math.max(0, toNumber((row as any)?.width));
-    const quantity = Math.max(0, toNumber((row as any)?.quantity));
-    return length * width * quantity;
-  };
+  const calcDeliveredQty = getDeliveryMainQuantity;
 
   const sumDeliveredRows = (rows: StartMaterialDeliveryRow[]) => {
     return rows.reduce((sum: number, row: StartMaterialDeliveryRow) => sum + calcDeliveredQty(row), 0);

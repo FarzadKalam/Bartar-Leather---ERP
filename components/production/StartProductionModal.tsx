@@ -7,6 +7,7 @@ import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from '../../utils/productionBundles';
 import DeliveryProgressBar from './DeliveryProgressBar';
+import { getDeliveryMainQuantity } from '../../utils/productionDeliveryRows';
 import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
 
 export type StartMaterialPiece = {
@@ -160,15 +161,7 @@ const formatQty = (value: number) => {
   return formatGroupedInput(rounded);
 };
 
-const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
-  if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
-    return Math.max(0, parseNumberInput((row as any).mainQuantity));
-  }
-  const length = parseNumberInput((row as any)?.length);
-  const width = parseNumberInput((row as any)?.width);
-  const quantity = parseNumberInput((row as any)?.quantity);
-  return Math.max(0, length * width * quantity);
-};
+const calcDeliveredQty = getDeliveryMainQuantity;
 
 const calcSubPerItemUsage = (piece?: Partial<StartMaterialPiece> | null) => {
   const explicitValue = (piece as any)?.subPerItemUsage ?? (piece as any)?.sub_per_item_usage;
@@ -853,9 +846,9 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   render: (value: number) => <span className="font-semibold text-[#17372a]">{formatQty(value)}</span>,
                                 },
                                 {
-                                  title: 'مقدار تحویل شده',
-                                  dataIndex: 'deliveredQty',
-                                  key: 'deliveredQty',
+                                  title: 'مقدار واحد اصلی',
+                                  dataIndex: 'mainQuantity',
+                                  key: 'mainQuantity',
                                   width: 140,
                                   render: (_value: number, record: StartMaterialDeliveryRow) => (
                                     <span className="font-semibold text-[#17372a]">{formatQty(calcDeliveredQty(record))}</span>

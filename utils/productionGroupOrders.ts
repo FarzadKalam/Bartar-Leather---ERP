@@ -1,4 +1,6 @@
 import { type StartMaterialDeliveryRow, type StartMaterialGroup, type StartMaterialPiece } from '../components/production/StartProductionModal';
+import { getDeliveryMainQuantity } from './productionDeliveryRows';
+import { getUnitConversionFactor } from './unitConversions';
 
 const toNumber = (value: any) => {
   const parsed = parseFloat(value);
@@ -91,7 +93,8 @@ export const buildGroupStartMaterials = ({
         // مقدار کل همیشه بر مبنای مجموع تعداد خطوط تولید محاسبه می‌شود.
         // مقدار ذخیره‌شده در گرید ممکن است متعلق به تعداد قبلی سفارش باشد.
         const totalUsage = perItemUsage * orderQty;
-        const subPerItemUsageRaw = toNumber(piece?.qty_sub);
+        const subFactor = getUnitConversionFactor(piece?.main_unit, piece?.sub_unit, { record: { ...(row?.specs || {}), category: categoryValue } });
+        const subPerItemUsageRaw = Number.isFinite(subFactor) ? perItemUsage * subFactor : toNumber(piece?.qty_sub);
         const subUsage = subPerItemUsageRaw > 0
           ? subPerItemUsageRaw * orderQty
           : 0;
@@ -238,8 +241,6 @@ export const sumDeliveredRows = (rows: StartMaterialDeliveryRow[]) =>
   (Array.isArray(rows) ? rows : []).reduce(
     (sum, row) =>
       sum
-      + (Math.max(0, toNumber(row?.length))
-      * Math.max(0, toNumber(row?.width))
-      * Math.max(0, toNumber(row?.quantity))),
+      + getDeliveryMainQuantity(row),
     0
   );

@@ -19,6 +19,7 @@
                             "noCheck":  true
                         },
     "include":  [
+                    "tests/productionDelivery.test.ts",
                     "tests/productCatalog.test.ts",
                     "utils/productCatalogPersistence.ts",
                     "tests/manualStockMovements.test.ts",

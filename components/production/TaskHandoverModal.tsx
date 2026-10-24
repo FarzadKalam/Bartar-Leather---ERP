@@ -11,6 +11,8 @@ import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue } from '../../utils/productionBundles';
 import DeliveryProgressBar from './DeliveryProgressBar';
+import { getDeliveryMainQuantity } from '../../utils/productionDeliveryRows';
+import { useDeliveryBundleLabels } from './useDeliveryBundleLabels';
 import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
 
 export type StageHandoverPiece = {
@@ -182,15 +184,7 @@ const toQty = (value: number) => {
   return formatGroupedInput(rounded);
 };
 
-const calcDeliveredQty = (row?: Partial<StageHandoverDeliveryRow> | null) => {
-  if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
-    return Math.max(0, parseNumberInput((row as any).mainQuantity));
-  }
-  const length = parseNumberInput((row as any)?.length);
-  const width = parseNumberInput((row as any)?.width);
-  const quantity = parseNumberInput((row as any)?.quantity);
-  return Math.max(0, length * width * quantity);
-};
+const calcDeliveredQty = getDeliveryMainQuantity;
 
 const getUnitSummaryLabel = (units: Array<string | null | undefined>) => {
   const unique = Array.from(
@@ -258,6 +252,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   onConfirmReceiver,
 }) => {
   const [selectedRowKeysByGroup, setSelectedRowKeysByGroup] = useState<Record<string, string[]>>({});
+  const bundleLabels = useDeliveryBundleLabels(open, groups);
   const [transferDialog, setTransferDialog] = useState<{
     sourceGroupIndex: number;
     rowKeys: string[];
@@ -513,6 +508,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             );
             const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalHandoverQty));
             const totalDeliveredWithHistory = previousDeliveredQty + currentDeliveredQty;
+            const requiredOrderQty = Math.max(0, parseNumberInput(group.totalOrderQty || group.totalSourceQty));
             const currentSubQuantity = (group.deliveryRows || []).reduce(
               (sum, row) => sum + Math.max(0, parseNumberInput(row?.subQuantity)),
               0
@@ -550,10 +546,10 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                       {group.selectedProductCode ? ` (${group.selectedProductCode})` : ''}
                     </div>
                     <div className={`text-[11px] mt-0.5 ${headerMetaClass}`}>
-                      مورد نیاز کل: <span className="font-semibold">{toQty(group.totalSourceQty || 0)}</span>
+                      مورد نیاز کل سفارش: <span className="font-semibold">{toQty(requiredOrderQty)}</span>
                       {consumptionUnitLabel ? <span className="font-semibold mr-1">{consumptionUnitLabel}</span> : null}
                       <span className="mx-1">|</span>
-                      تحویل شده کل: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
+                      {locked ? 'مقدار این فرم: ' : 'تحویل شده کل: '}<span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
                       {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                       {subUnitLabel ? (
                         <>
@@ -565,7 +561,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                     </div>
                     <DeliveryProgressBar
                       delivered={totalDeliveredWithHistory}
-                      required={Math.max(0, parseNumberInput(group.totalSourceQty))}
+                      required={requiredOrderQty}
                       className="max-w-md text-white/90"
                     />
                   </div>
@@ -655,9 +651,9 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 render: (value: string) => <span className="text-gray-700">{value || '-'}</span>,
                               },
                               {
-                                title: 'مقدار تحویل شده',
-                                dataIndex: 'deliveredQty',
-                                key: 'deliveredQty',
+                                title: 'مقدار واحد اصلی',
+                                dataIndex: 'mainQuantity',
+                                key: 'mainQuantity',
                                 width: 140,
                                 render: (_value: number, record: StageHandoverDeliveryRow) => (
                                   <span className="font-semibold text-[#17372a]">{toQty(calcDeliveredQty(record))}</span>
@@ -721,7 +717,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                             width: isMobile ? 220 : 180,
                             render: (value: string | null | undefined, record: StageHandoverDeliveryRow) => {
                               const sourceOption = bundleOptions.find((option) => String(option.value) === String(value || ''));
-                              const sourceLabel = record.sourceBundleLabel || sourceOption?.label || (value ? String(value) : '—');
+                              const sourceLabel = bundleLabels[String(value || '')] || record.sourceBundleLabel || sourceOption?.label || (value ? 'در حال دریافت شماره بسته…' : 'ثبت نشده');
                               if (locked) {
                                 return <span className="block rounded-md border border-gray-300 bg-gray-100 px-2 py-1.5 text-sm font-semibold text-gray-800">{sourceLabel}</span>;
                               }
@@ -771,11 +767,11 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 && !destinationOptions.some((option) => String(option.value) === String(value))) {
                                 destinationOptions.push({ label: record.targetBundleLabel || String(value), value } as any);
                               }
-                              const sourceLabel = record.sourceBundleLabel || sourceBundleOption?.label || (record.sourceBundleId ? String(record.sourceBundleId) : '—');
+                              const sourceLabel = bundleLabels[String(record.sourceBundleId || '')] || record.sourceBundleLabel || sourceBundleOption?.label || 'ثبت نشده';
                               const selectedTargetOption = destinationOptions.find((option) => String(option.value) === String(value || ''));
-                              const targetLabel = record.targetBundleLabel
-                                || (String(value || '') === String(record.sourceBundleId || '') ? sourceLabel : selectedTargetOption?.label)
-                                || (isCreateNewBundleValue(value) ? 'بسته جدید' : (value ? String(value) : '—'));
+                              const targetLabel = bundleLabels[String(value || '')] || record.targetBundleLabel
+                                || (value === USE_SOURCE_BUNDLE_VALUE || String(value || '') === String(record.sourceBundleId || '') ? sourceLabel : selectedTargetOption?.label)
+                                || (isCreateNewBundleValue(value) ? 'بسته جدید' : (value ? 'در حال دریافت شماره بسته…' : 'ثبت نشده'));
                               if (locked) {
                                 return <span className="block rounded-md border border-gray-300 bg-gray-100 px-2 py-1.5 text-sm font-semibold text-gray-800">{targetLabel}</span>;
                               }
@@ -952,7 +948,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                         return (
                           <div className="text-xs flex flex-col sm:flex-row gap-4 text-gray-700">
                             <span>
-                              جمع مقدار تحویل جدید: <span className="font-semibold">{toQty(currentDeliveredQty)}</span>
+                              {locked ? 'جمع تحویل این فرم: ' : 'جمع مقدار تحویل جدید: '}<span className="font-semibold">{toQty(currentDeliveredQty)}</span>
                               {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                             </span>
                             <span>
@@ -1020,6 +1016,13 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
         </div>
       </div>
       <style>{`
+        .task-handover-delivery-table .ant-input[disabled],
+        .task-handover-delivery-table .ant-input-number-disabled .ant-input-number-input,
+        .task-handover-delivery-table .ant-select-disabled .ant-select-selection-item {
+          color: #1f2937 !important;
+          -webkit-text-fill-color: #1f2937 !important;
+          opacity: 1;
+        }
         .task-handover-row-actions .ant-btn .anticon {
           font-size: 12px;
         }

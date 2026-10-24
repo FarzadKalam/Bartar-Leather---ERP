@@ -35,6 +35,7 @@ import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 import { formatGroupedNumberInput, parseGroupedNumberInput } from '../utils/groupedNumberInput';
 import { FieldType } from '../types';
 import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
+import { getDeliveryMainQuantity, normalizeProductionDeliverySnapshot } from '../utils/productionDeliveryRows';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -288,9 +289,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       quantity,
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
-      mainQuantity: Math.max(0, toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? (length * width * quantity))),
+      mainQuantity: getDeliveryMainQuantity({ length, width, quantity, ...rawRow }),
       subQuantity: Math.max(0, toNumber(rawRow?.subQuantity ?? 0)),
-      deliveredQty: Math.max(0, toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? (length * width * quantity))),
+      deliveredQty: getDeliveryMainQuantity({ length, width, quantity, ...rawRow }),
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || rawRow?.bundle_id || firstDeliveryRow?.sourceBundleId || (firstDeliveryRow as any)?.source_bundle_id || (firstDeliveryRow as any)?.bundle_id || group?.sourceBundleId || (group as any)?.source_bundle_id || (group as any)?.bundle_id || null,
       sourceBundleLabel: rawRow?.sourceBundleLabel || rawRow?.source_bundle_label || null,
       targetBundleId: rawRow
@@ -2930,6 +2931,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         if (!groupKey) return;
         const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
         const normalizedRows = rows.map((row: any, rowIndex: number) => ({
+          ...normalizeProductionDeliverySnapshot(row, group),
           key: String(row?.key || `${String(form?.id || 'form')}_${groupIndex}_${rowIndex}`),
           pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
           name: String(row?.name || ''),

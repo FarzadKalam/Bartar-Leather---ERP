@@ -21,6 +21,7 @@ import { MODULES } from '../moduleRegistry';
 import { BlockDefinition } from '../types';
 import { supabase } from '../supabaseClient';
 import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
+import { getDeliveryMainQuantity, normalizeProductionDeliverySnapshot, normalizeDraftTargetBundle } from '../utils/productionDeliveryRows';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { applyProductionMoves, syncProductStock } from '../utils/productionWorkflow';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
@@ -104,15 +105,7 @@ const toNumber = (value: any) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const calcDeliveredQty = (row?: Partial<StartMaterialDeliveryRow> | null) => {
-  if ((row as any)?.mainQuantity !== undefined && (row as any)?.mainQuantity !== null) {
-    return Math.max(0, toNumber((row as any)?.mainQuantity));
-  }
-  const length = Math.max(0, toNumber((row as any)?.length));
-  const width = Math.max(0, toNumber((row as any)?.width));
-  const quantity = Math.max(0, toNumber((row as any)?.quantity));
-  return length * width * quantity;
-};
+const calcDeliveredQty = getDeliveryMainQuantity;
 
 const parseRecurrenceInfo = (value: any): Record<string, any> => {
   if (!value) return {};
@@ -769,6 +762,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
       const deliveryRowsRaw = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
       const deliveryRows: StageHandoverDeliveryRow[] = deliveryRowsRaw.map((row: any, rowIndex: number) => ({
+        ...normalizeProductionDeliverySnapshot(row, group),
         key: String(row?.key || `${String(group?.key || groupIndex)}_delivery_${rowIndex}`),
         pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
         name: String(row?.name || ''),
@@ -777,7 +771,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         quantity: Math.max(0, toNumber(row?.quantity)),
         mainUnit: String(row?.mainUnit || row?.main_unit || ''),
         subUnit: String(row?.subUnit || row?.sub_unit || ''),
-        mainQuantity: Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? row?.delivered_qty)),
+        mainQuantity: calcDeliveredQty(row),
         subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
         deliveredQty: calcDeliveredQty(row),
       }));
@@ -830,7 +824,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
     try {
       const { data: task, error: taskError } = await supabase
         .from('tasks')
-        .select('id, name, assignee_id, assignee_type, production_shelf_id, recurrence_info')
+        .select('id, name, related_production_order, assignee_id, assignee_role_id, assignee_type, production_shelf_id, recurrence_info')
         .eq('id', ownerTaskId)
         .maybeSingle();
       if (taskError) throw taskError;
@@ -867,10 +861,32 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const targetShelfId = activeForm?.targetShelfId
         ? String(activeForm.targetShelfId)
         : (task?.production_shelf_id ? String(task.production_shelf_id) : null);
-      const groups = toStageHandoverGroups(
+      let groups = toStageHandoverGroups(
         Array.isArray(activeForm?.groups) ? activeForm.groups : (Array.isArray(record?.groups) ? record.groups : []),
         targetShelfId
       );
+      if (task?.related_production_order) {
+        const [orderResult, lineResult] = await Promise.all([
+          supabase.from('production_orders').select('id,name,system_code,quantity,grid_materials').eq('id', task.related_production_order).maybeSingle(),
+          supabase.from('production_lines').select('quantity').eq('production_order_id', task.related_production_order),
+        ]);
+        if (orderResult.error) throw orderResult.error;
+        if (lineResult.error) throw lineResult.error;
+        const order = orderResult.data;
+        if (order) {
+          const quantity = lineResult.data?.length ? lineResult.data.reduce((sum, line) => sum + toNumber(line.quantity), 0) : toNumber(order.quantity);
+          const requirements = buildGroupStartMaterials({ orders: [order], orderRowsMap: { [order.id]: order.grid_materials || [] }, orderQuantityMap: { [order.id]: quantity }, categoryLabelMap, productMetaMap });
+          groups = groups.map((group) => {
+            const required = requirements.find((item) => item.selectedProductId === group.selectedProductId && item.categoryLabel === group.categoryLabel);
+            return required ? { ...group, totalOrderQty: required.totalUsage, orderPieces: required.pieces.map((piece) => ({ ...piece, sourceQty: piece.totalUsage })) } : group;
+          });
+        }
+      }
+      const giverId = activeForm?.giverConfirmation?.userId || activeForm?.giver?.id;
+      const receiverId = activeForm?.receiverConfirmation?.userId || activeForm?.receiver?.id || task?.assignee_id;
+      const profileIds = Array.from(new Set([giverId, receiverId].filter(Boolean).map(String)));
+      const { data: people } = profileIds.length ? await supabase.from('profiles').select('id,full_name').in('id', profileIds) : { data: [] };
+      const personName = (personId: any) => people?.find((person) => String(person.id) === String(personId))?.full_name;
 
       setStartFormEditorTaskId(ownerTaskId);
       setStartFormEditorTaskName(String(task?.name || record?.stageName || 'مرحله'));
@@ -881,8 +897,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
       setStartFormEditorTrafficType(
         String(activeForm?.direction || '').toLowerCase() === 'outgoing' ? 'outgoing' : 'incoming'
       );
-      setStartFormEditorGiverName(String(activeForm?.giver?.label || 'شروع تولید'));
-      setStartFormEditorReceiverName(String(activeForm?.receiver?.label || task?.name || record?.stageName || 'مرحله'));
+      setStartFormEditorGiverName(String(personName(giverId) || activeForm?.giverConfirmation?.userName || activeForm?.giver?.label || 'تعیین نشده'));
+      setStartFormEditorReceiverName(String(personName(receiverId) || activeForm?.receiverConfirmation?.userName || activeForm?.receiver?.label || 'تعیین نشده'));
       setStartFormEditorGiverConfirmation(
         activeForm?.giverConfirmation?.confirmed
           ? activeForm.giverConfirmation
@@ -899,7 +915,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
     } finally {
       setStartFormEditorLoading(false);
     }
-  }, [msg, toStageHandoverGroups]);
+  }, [msg, toStageHandoverGroups, categoryLabelMap, productMetaMap]);
 
   const confirmStartFormSide = useCallback(async (side: 'giver' | 'receiver') => {
     if (!startFormEditorTaskId || !startFormEditorFormId) return;
@@ -1797,6 +1813,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         const key = `${categoryLabel}::${productId}`;
         const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
         const normalizedRows = rows.map((row: any, rowIndex: number) => ({
+          ...normalizeProductionDeliverySnapshot(row, group),
           key: String(row?.key || `${form.id}_${groupIndex}_${rowIndex}`),
           pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
           name: String(row?.name || ''),
@@ -1825,10 +1842,24 @@ const ProductionGroupOrderWizard: React.FC = () => {
       setStartMaterials([]);
       return;
     }
+    const orderIds = selectedOrderRows.map((order) => order.id);
+    const [currentOrders, currentLines] = await Promise.all([
+      supabase.from('production_orders').select('id,quantity,grid_materials').in('id', orderIds),
+      supabase.from('production_lines').select('production_order_id,quantity').in('production_order_id', orderIds),
+    ]);
+    if (currentOrders.error) throw currentOrders.error;
+    if (currentLines.error) throw currentLines.error;
+    const currentRows: Record<string, any[]> = {};
+    const currentQuantities: Record<string, number> = {};
+    (currentOrders.data || []).forEach((order: any) => {
+      currentRows[order.id] = Array.isArray(order.grid_materials) ? order.grid_materials : [];
+      const lines = (currentLines.data || []).filter((line: any) => line.production_order_id === order.id);
+      currentQuantities[order.id] = lines.length ? lines.reduce((sum: number, line: any) => sum + toNumber(line.quantity), 0) : toNumber(order.quantity);
+    });
     const groups = buildGroupStartMaterials({
       orders: selectedOrderRows,
-      orderRowsMap,
-      orderQuantityMap,
+      orderRowsMap: currentRows,
+      orderQuantityMap: currentQuantities,
       categoryLabelMap,
       productMetaMap,
     });
@@ -1870,7 +1901,23 @@ const ProductionGroupOrderWizard: React.FC = () => {
       };
     });
     const draft = readDurableDraft<StartMaterialGroup[]>(startDeliveryDraftKey || '');
-    setStartMaterials(Array.isArray(draft) && draft.length ? draft : normalizedGroups);
+    // Keep current requirements/history authoritative; drafts contain only unsaved delivery input.
+    const draftByKey = new Map((Array.isArray(draft) ? draft : []).map((group) => [group.key, group]));
+    setStartMaterials(normalizedGroups.map((group) => {
+      const saved = draftByKey.get(group.key);
+      if (!saved) return group;
+      return recalcStartGroup({
+        ...group,
+        collapsed: saved.collapsed,
+        isConfirmed: false,
+        deliveryRows: (saved.deliveryRows || []).map((row) => ({
+          ...row,
+          mainQuantity: calcDeliveredQty(row),
+          deliveredQty: calcDeliveredQty(row),
+          targetBundleId: normalizeDraftTargetBundle(row),
+        })),
+      });
+    }));
   }, [
     buildPreviousRowsByGroup,
     categoryLabelMap,
@@ -1884,6 +1931,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
     selectedOrderRows,
     startDeliveryDraftKey,
     startStageOptionMap,
+    recalcStartGroup,
   ]);
 
   useEffect(() => {
@@ -1990,12 +2038,15 @@ const ProductionGroupOrderWizard: React.FC = () => {
     );
     const { data: freshTasks, error: freshTasksError } = await supabase
       .from('tasks')
-      .select('*')
+      .select('*, assignee:profiles!tasks_assignee_id_fkey(full_name), assigned_role:org_roles(title)')
       .in('id', destinationTaskIds);
     if (freshTasksError) {
       msg.error(freshTasksError.message || 'خطا در دریافت مراحل تولید مقصد');
       return;
     }
+    const { data: giverProfile } = currentUserId
+      ? await supabase.from('profiles').select('full_name').eq('id', currentUserId).maybeSingle()
+      : { data: null };
     const taskById = new Map<string, any>(
       (freshTasks || []).map((task: any) => [String(task?.id || ''), task])
     );
@@ -2107,6 +2158,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
               targetBundleLabel: getResolvedTargetBundleLabel(group, item.row),
               target_bundle_label: getResolvedTargetBundleLabel(group, item.row),
               quantity: baseArea > 0 ? allocatedQty / baseArea : allocatedQty,
+              mainQuantity: allocatedQty,
+              subQuantity: sourceTotal > 0 ? toNumber(item.row.subQuantity) * allocatedQty / Math.max(item.quantity, 0.000000001) : 0,
               deliveredQty: allocatedQty,
             };
           }).filter((row) => toNumber(row.deliveredQty) > 0);
@@ -2243,12 +2296,12 @@ const ProductionGroupOrderWizard: React.FC = () => {
           giver: {
             id: currentUserId || null,
             type: 'user',
-            label: 'شروع تولید',
+            label: giverProfile?.full_name || 'تعیین نشده',
           },
           receiver: {
-            id: task?.assignee_id ? String(task.assignee_id) : null,
+            id: task?.assignee_type === 'role' ? (task?.assignee_role_id || task?.assignee_id || null) : (task?.assignee_id || null),
             type: task?.assignee_type === 'role' ? 'role' : (task?.assignee_type === 'user' ? 'user' : null),
-            label: String(task?.name || '?????'),
+            label: String(task?.assignee_type === 'role' ? task?.assigned_role?.title || 'تعیین نشده' : task?.assignee?.full_name || 'تعیین نشده'),
           },
           groups: normalizedGroups,
           wasteByProduct: {},
