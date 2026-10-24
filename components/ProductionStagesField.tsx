@@ -127,6 +127,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const isBom = moduleId === 'production_boms';
   const [currentUser, setCurrentUser] = useState<{ id: string | null; roleId: string | null; fullName: string }>({ id: null, roleId: null, fullName: 'کاربر' });
   const [handoverTask, setHandoverTask] = useState<any | null>(null);
+  const handoverTaskIdRef = useRef<string | null>(null);
+  handoverTaskIdRef.current = handoverTask?.id ? String(handoverTask.id) : null;
   const [handoverOrderTitle, setHandoverOrderTitle] = useState<string | null>(null);
   const [handoverContext, setHandoverContext] = useState<StageHandoverContext | null>(null);
   const [handoverGroups, setHandoverGroups] = useState<StageHandoverGroup[]>([]);
@@ -149,6 +151,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     return () => { active = false; };
   }, [handoverEditorOpen]);
   const [handoverLoading, setHandoverLoading] = useState(false);
+  const [stageShelfLocked, setStageShelfLocked] = useState(true);
+  const [stageShelfCheckFailed, setStageShelfCheckFailed] = useState(false);
+  const [stageShelfSaving, setStageShelfSaving] = useState(false);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
   const [allShelfOptions, setAllShelfOptions] = useState<Array<{ label: string; value: string; warehouseName: string }>>([]);
   const [handoverTrafficType, setHandoverTrafficType] = useState<StageHandoverTrafficType>('incoming');
@@ -1015,18 +1020,28 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     if (!task?.id || !recordId || isBom) return;
     try {
       setHandoverLoading(true);
+      setStageShelfLocked(true);
+      setStageShelfCheckFailed(false);
       if (!productionShelfOptions.length) await fetchProductionShelves();
       if (!assignees.users.length && !assignees.roles.length) await fetchAssignees();
 
-      const [{ data: latestTask }, { data: order }] = await Promise.all([
+      const [{ data: latestTask }, { data: order }, shelfLockResult] = await Promise.all([
         supabase.from('tasks').select('*').eq('id', task.id).maybeSingle(),
         supabase
           .from('production_orders')
           .select('id, name, system_code, quantity, assignee_id, assignee_type, grid_materials, production_shelf_id')
           .eq('id', recordId)
           .maybeSingle(),
+        readOnly ? Promise.resolve({ data: true, error: null })
+          : supabase.rpc('production_stage_shelf_is_locked', { p_task_id: task.id }),
       ]);
       const currentTask = latestTask || task;
+      if (!readOnly) {
+        if (shelfLockResult.error) {
+          setStageShelfCheckFailed(true);
+          message.error('بررسی سابقه تحویل ممکن نشد؛ ویرایش قفسه فعلاً غیرفعال است.');
+        } else setStageShelfLocked(shelfLockResult.data !== false);
+      }
       const lineId = currentTask?.production_line_id ? String(currentTask.production_line_id) : null;
       const allTasks = (providedTasks && providedTasks.length > 0) ? providedTasks : tasks;
       const lineTasks = getLineTaskChain(lineId, allTasks);
@@ -1321,6 +1336,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     toGroupTotals,
     toGroupSubTotals,
     tasks,
+    readOnly,
   ]);
 
   const setHandoverGroupCollapsed = useCallback((groupIndex: number, collapsed: boolean) => {
@@ -1521,7 +1537,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       ? (selectedSourceStageId
         ? (selectedSourceStage?.shelfId || null)
         : (handoverSourceShelfId || null))
-      : (handoverContext.targetShelfId || null);
+      : (handoverTask?.production_shelf_id || handoverContext.targetShelfId || null);
     const computedTargetShelfId = handoverTrafficType === 'incoming'
       ? (handoverContext.targetShelfId || null)
       : (selectedDestinationStage?.shelfId || null);
@@ -1986,7 +2002,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
       const updatePayload: any = {
         recurrence_info: nextRecurrence,
-        production_shelf_id: handoverContext.targetShelfId || freshTask?.production_shelf_id || null,
+        production_shelf_id: freshTask?.production_shelf_id || (effectiveDirection === 'outgoing' ? effectiveSourceShelfId : effectiveTargetShelfId) || null,
       };
       const { error: updateError } = await supabase
         .from('tasks')
@@ -2004,11 +2020,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           ? {
               ...item,
               recurrence_info: nextRecurrence,
-              production_shelf_id: handoverContext.targetShelfId || item?.production_shelf_id || null,
+              production_shelf_id: updatePayload.production_shelf_id,
             }
           : item
       )));
       setHandoverTask(updatedTask);
+      setStageShelfLocked((previous) => previous || effectiveDirection === 'incoming');
       setHandoverForms(nextForms as StageHandoverForm[]);
       setHandoverGroups(persistedGroups as StageHandoverGroup[]);
       setActiveHandoverFormId(formId);
@@ -2523,6 +2540,42 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       setTasks((previous: any[]) => previous.map((item: any) => String(item?.id) === taskId ? previousTask : item));
       setHandoverTask((previous: any) => String(previous?.id || '') === taskId ? previousTask : previous);
       message.error(error?.message || 'بروزرسانی اطلاعات فعالیت ناموفق بود.');
+    }
+  };
+
+  const handleStageShelfChange = async (value: any) => {
+    if (!handoverTask?.id || readOnly || stageShelfLocked || stageShelfSaving || handoverLoading) return;
+    const nextShelfId = value ? String(value) : null;
+    if (nextShelfId === (handoverTask.production_shelf_id || null)) return;
+    setStageShelfSaving(true);
+    try {
+      const { data: locked, error: lockError } = await supabase.rpc('production_stage_shelf_is_locked', { p_task_id: handoverTask.id });
+      if (lockError) throw lockError;
+      if (locked !== false) {
+        setStageShelfLocked(true);
+        throw new Error('قفسه این مرحله قابل تغییر نیست؛ قبلاً برای آن تحویل ثبت شده است.');
+      }
+      const { data: saved, error } = await supabase.from('tasks')
+        .update({ production_shelf_id: nextShelfId }).eq('id', handoverTask.id).select('id, production_shelf_id').single();
+      if (error) throw error;
+      const applyShelf = (item: any) => String(item?.id) === String(saved.id) ? { ...item, production_shelf_id: saved.production_shelf_id } : item;
+      setTasks((previous) => previous.map(applyShelf));
+      setHandoverTask((previous: any) => previous ? applyShelf(previous) : previous);
+      setHandoverContext((previous) => previous && String(previous.taskId) === String(saved.id) ? {
+        ...previous,
+        targetShelfId: saved.production_shelf_id,
+        sourceShelfId: handoverTrafficType === 'outgoing' ? saved.production_shelf_id : previous.sourceShelfId,
+      } : previous);
+      if (handoverTaskIdRef.current === String(saved.id)) {
+        if (handoverTrafficType === 'outgoing') setHandoverSourceShelfId(saved.production_shelf_id);
+        await loadStageInventoryRows(saved.production_shelf_id, handoverGroups);
+      }
+      message.success('قفسه مرحله ذخیره شد.');
+    } catch (error: any) {
+      if (error?.code === '23514') setStageShelfLocked(true);
+      message.error(error?.message || 'ذخیره قفسه مرحله ناموفق بود.');
+    } finally {
+      setStageShelfSaving(false);
     }
   };
 
@@ -3757,7 +3810,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
                 <div className="mt-1 text-sm font-semibold text-[#1f4534]">
                   تعداد تولید مورد نیاز: {toPersianNumber(String(Math.max(0, toNumber(lines.find((line: any) => String(line.id) === String(handoverContext?.lineId))?.quantity || 0))))}
                 </div>
-                <div className="mt-1 text-xs text-gray-600">قفسه مرحله: {getShelfLabel(handoverTask.production_shelf_id)}</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {taskStatusActions.map((action) => (
@@ -3776,6 +3828,30 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="sm:col-span-2 xl:col-span-4">
+                <div className="mb-1 text-xs font-semibold text-gray-600">قفسه مرحله</div>
+                <SmartFieldRenderer
+                  field={{
+                    key: 'production_shelf_id', type: FieldType.RELATION,
+                    labels: { fa: 'قفسه مرحله' },
+                    relationConfig: { targetModule: 'shelves', targetField: 'name' },
+                    readonly: handoverLoading || readOnly || stageShelfLocked || stageShelfSaving,
+                  } as any}
+                  value={handoverTask.production_shelf_id || null}
+                  onChange={(value) => { void handleStageShelfChange(value); }}
+                  options={productionShelfOptions}
+                  forceEditMode={!handoverLoading && !readOnly && !stageShelfLocked && !stageShelfSaving}
+                  compactMode moduleId="production_orders"
+                  popupContainer={typeof document !== 'undefined' ? document.body : null}
+                  popupZIndex={14000}
+                />
+                <div className="mt-1 text-xs text-gray-600" role="status">
+                  {handoverLoading ? 'در حال بررسی سابقه تحویل…' : stageShelfSaving ? 'در حال ذخیره قفسه…'
+                    : stageShelfCheckFailed ? 'بررسی سابقه تحویل ممکن نشد؛ برای تلاش دوباره، فعالیت را باز کنید.' : stageShelfLocked
+                    ? (readOnly ? 'ویرایش اطلاعات فعالیت برای شما فعال نیست.' : 'پس از ثبت تحویل به این مرحله، قفسه قابل تغییر نیست.')
+                    : 'تا پیش از اولین تحویل به این مرحله، می‌توانید قفسه را تغییر دهید.'}
+                </div>
+              </div>
               <div>
                 <div className="mb-1 text-xs font-semibold text-gray-600">مسئول فعالیت</div>
                 <Select

@@ -22,6 +22,7 @@ import { BlockDefinition } from '../types';
 import { supabase } from '../supabaseClient';
 import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
 import { getDeliveryMainQuantity, normalizeProductionDeliverySnapshot, normalizeDraftTargetBundle } from '../utils/productionDeliveryRows';
+import { isProductionOrderPanelExpanded } from '../utils/productionOrderPanels';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { applyProductionMoves, syncProductStock } from '../utils/productionWorkflow';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
@@ -392,9 +393,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
   const isOrderPanelExpanded = useCallback(
     (stepKey: 'materials' | 'lines' | 'progress', orderId: string) => {
-      return orderPanelsExpanded[orderPanelKey(stepKey, orderId)] === true;
+      return isProductionOrderPanelExpanded(stepKey, orderId, selectedOrderRows.length, orderPanelsExpanded);
     },
-    [orderPanelKey, orderPanelsExpanded]
+    [orderPanelsExpanded, selectedOrderRows.length]
   );
 
   const setOrderPanelExpanded = useCallback(
@@ -1097,23 +1098,6 @@ const ProductionGroupOrderWizard: React.FC = () => {
     if (!initialized) return;
     void loadSelectedOrders(selectedOrderIds, false);
   }, [initialized, selectedOrderIds, loadSelectedOrders]);
-
-  useEffect(() => {
-    if (!selectedOrderRows.length) return;
-    setOrderPanelsExpanded((prev) => {
-      const next = { ...prev };
-      selectedOrderRows.forEach((order) => {
-        const oid = String(order.id);
-        const materialsKey = orderPanelKey('materials', oid);
-        const linesKey = orderPanelKey('lines', oid);
-        const progressKey = orderPanelKey('progress', oid);
-        if (!(materialsKey in next)) next[materialsKey] = false;
-        if (!(linesKey in next)) next[linesKey] = false;
-        if (!(progressKey in next)) next[progressKey] = false;
-      });
-      return next;
-    });
-  }, [orderPanelKey, selectedOrderRows]);
 
   useEffect(() => {
     if (!groupId) return;

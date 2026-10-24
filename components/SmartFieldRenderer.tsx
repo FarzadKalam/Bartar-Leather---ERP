@@ -1014,6 +1014,7 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
                 <QrScanPopover
                   label=""
                   buttonClassName="shrink-0"
+                  buttonProps={{ disabled: !forceEditMode || isReadonly }}
                   popupContainer={resolvedModalContainer}
                   popupZIndex={resolvedPopupZIndex + 40}
                   onScan={({ raw, moduleId, recordId }) => {

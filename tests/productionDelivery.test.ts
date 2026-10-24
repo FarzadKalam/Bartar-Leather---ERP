@@ -2,6 +2,7 @@ import * as assert from 'node:assert/strict';
 import { getDeliveryMainQuantity, normalizeDraftTargetBundle, normalizeProductionDeliverySnapshot } from '../utils/productionDeliveryRows';
 import { buildGroupStartMaterials, sumDeliveredRows } from '../utils/productionGroupOrders';
 import { CREATE_NEW_BUNDLE_VALUE } from '../utils/productionBundles';
+import { isProductionOrderPanelExpanded } from '../utils/productionOrderPanels';
 
 // Regression: the recorded measurement is 14 ft², not the area of two sample pieces.
 const recorded = {
@@ -44,4 +45,11 @@ assert.ok(1393545.6 / required.totalUsage > 0.77 && 1393545.6 / required.totalUs
 assert.ok(1393545.6 + 929030.4 > required.totalUsage);
 const [oldRequired] = buildGroupStartMaterials({ ...params, orderQuantityMap: { order: 10 } });
 assert.ok(Math.abs(oldRequired.totalUsage - 1204582.94) < 0.00001);
+for (const step of ['lines', 'progress'] as const) {
+  for (const count of [1, 2, 3]) assert.equal(isProductionOrderPanelExpanded(step, 'order', count, {}), true);
+  for (const count of [4, 20]) assert.equal(isProductionOrderPanelExpanded(step, 'order', count, {}), false);
+  assert.equal(isProductionOrderPanelExpanded(step, 'order', 1, { [`${step}:order`]: false }), false);
+  assert.equal(isProductionOrderPanelExpanded(step, 'order', 4, { [`${step}:order`]: true }), true);
+}
+assert.equal(isProductionOrderPanelExpanded('materials', 'order', 1, {}), false);
 console.log('Production delivery regressions passed: recorded amounts, bundle routing, legacy rows, drafts, current requirements and units.');
