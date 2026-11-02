@@ -1,3 +1,4 @@
+import ResizableTable from '../components/ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { App, Badge, Button, Empty, Table } from 'antd';
@@ -147,7 +148,7 @@ const ProductionGroupOrdersList: React.FC = () => {
             <Empty description="سفارش گروهی ثبت نشده است." />
           </div>
         ) : (
-          <Table<GroupOrderRow>
+          <ResizableTable<GroupOrderRow>
             rowKey="id"
             loading={loading}
             columns={columns}

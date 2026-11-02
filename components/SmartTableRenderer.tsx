@@ -1,3 +1,4 @@
+import ResizableTable from './ResizableTable';
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Table, Tag, Avatar, Input, Button, Space, Popover, Select } from 'antd';
 import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
@@ -596,7 +597,7 @@ const SmartTableRenderer: React.FC<SmartTableRendererProps> = ({
 
   return (
     <div className={["custom-erp-table", containerClassName].filter(Boolean).join(' ')}>
-      <Table 
+      <ResizableTable
           columns={columns} 
           dataSource={sortedData} 
           rowKey="id" 

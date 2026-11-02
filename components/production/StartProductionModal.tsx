@@ -1,4 +1,5 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import ResizableTable from '../ResizableTable';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Drawer, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
 import { CalculatorOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
@@ -508,7 +509,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               </div>
                               {requirementExpanded ? (
                                 <>
-                                  <Table
+                                  <ResizableTable
                                     size="small"
                                     pagination={false}
                                     dataSource={requirement.pieces || []}
@@ -639,7 +640,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               </div>
                               {summaryExpanded ? (
                                 <>
-                                  <Table
+                                  <ResizableTable
                                     size="small"
                                     pagination={false}
                                     dataSource={group.pieces}
@@ -789,7 +790,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                             <div className="text-[11px] text-blue-800 mb-1">
                               مقادیر تحویل‌شده قبلی (غیرقابل تغییر)
                             </div>
-                            <Table
+                            <ResizableTable
                               size="small"
                               pagination={false}
                               dataSource={previousDeliveryRows}
@@ -898,7 +899,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                           </Button>
                         </div>
 
-                        <Table
+                        <ResizableTable
                           size={isMobile ? 'middle' : 'small'}
                           pagination={false}
                           dataSource={group.deliveryRows || []}

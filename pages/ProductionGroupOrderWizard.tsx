@@ -1,3 +1,4 @@
+import ResizableTable from '../components/ResizableTable';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { App, Badge, Button, Card, Empty, Input, Select, Spin, Table, Tag } from 'antd';
@@ -2540,7 +2541,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
             getPopupContainer={() => document.body}
           />
         </div>
-        <Table<ProductionOrderRecord>
+        <ResizableTable<ProductionOrderRecord>
           rowKey="id"
           dataSource={filteredAvailableOrders}
           columns={columns}
@@ -2839,7 +2840,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
                 </Button>
               </div>
             </div>
-            <Table
+            <ResizableTable
               rowKey="id"
               size="small"
               loading={startFormsLoading}
@@ -2998,6 +2999,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
                   compact
                   readOnly={!canEditGroup || groupStatus === 'completed'}
                   orderStatus={order.status || null}
+                  draftStages={Array.isArray((order as any).production_stages_draft) ? (order as any).production_stages_draft : []}
+                  onDraftStagesChange={(stages) => saveOrderDraftStages(order.id, stages)}
+                  draftStagesPersistedByParent
                 />
               </div>
             ) : null}

@@ -1,3 +1,4 @@
+import ResizableTable from '../ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Modal, Table, Tabs, Tag } from 'antd';
 import { DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
@@ -590,7 +591,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
             onChange={setTabKey}
             items={summaryTabs.map((tab) => ({ key: tab.key, label: tab.label }))}
           />
-          <Table
+          <ResizableTable
             size="small"
             pagination={false}
             rowKey={(row: any) => String(row?.productId || 'product')}
@@ -608,7 +609,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
               },
               rowExpandable: (record: any) => Array.isArray(record?.pieceDetails) && record.pieceDetails.length > 0,
               expandedRowRender: (record: any) => (
-                <Table
+                <ResizableTable
                   size="small"
                   pagination={false}
                   rowKey={(piece: StageHandoverPieceDetail) => String(piece?.key || `${record?.productId || 'product'}_piece`)}
@@ -647,7 +648,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
               <Empty description="فرمی برای این مرحله ثبت نشده است." />
             </div>
           ) : (
-            <Table
+            <ResizableTable
               size="small"
               rowKey={(record: StageHandoverFormListRow) => `${record.ownerTaskId}:${record.id}:${record.direction}`}
               pagination={false}

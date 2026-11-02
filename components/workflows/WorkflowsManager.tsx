@@ -1,3 +1,4 @@
+import ResizableTable from '../ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { App, Button, Empty, Modal, Popconfirm, Select, Space, Spin, Switch, Table, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
@@ -289,7 +290,7 @@ const WorkflowsManager: React.FC<WorkflowsManagerProps> = ({
           <Spin size="large" />
         </div>
       ) : (
-        <Table
+        <ResizableTable
           rowKey="id"
           columns={columns as any}
           dataSource={records}

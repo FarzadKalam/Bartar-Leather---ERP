@@ -1,4 +1,5 @@
-﻿
+import ResizableTable from '../ResizableTable';
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   App,
@@ -1934,7 +1935,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           <Checkbox checked={saveCustomMapping} onChange={(event) => setSaveCustomMapping(event.target.checked)} />
         </div>
 
-        <Table<MappingRow>
+        <ResizableTable<MappingRow>
           rowKey="sourceColumn"
           pagination={false}
           dataSource={mappingRows}

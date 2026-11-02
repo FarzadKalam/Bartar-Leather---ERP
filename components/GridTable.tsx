@@ -1,3 +1,4 @@
+import ResizableTable from './ResizableTable';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Table, Typography, message } from 'antd';
 import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined, CalculatorOutlined } from '@ant-design/icons';
@@ -1717,7 +1718,7 @@ const GridTable: React.FC<GridTableProps> = ({
                   )}
 
                   <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden">
-                    <Table
+                    <ResizableTable
                       dataSource={row.pieces || []}
                       rowKey={(record: any) => String(record?.key || record?.id)}
                       pagination={false}
@@ -2234,7 +2235,7 @@ const ProductsPreview: React.FC<{
           {partialMessage}
         </div>
       ) : null}
-      <Table
+      <ResizableTable
         dataSource={rows}
         rowKey="id"
         pagination={{ pageSize: 5, size: 'small' }}

@@ -1,4 +1,5 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import ResizableTable from '../components/ResizableTable';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   App,
   Badge,
@@ -967,7 +968,7 @@ const HRPage: React.FC = () => {
                   isMobile ? (
                     <div>{selectedEmployeeSummary.detailRows.map(renderTaskMobileCard)}</div>
                   ) : (
-                    <Table
+                    <ResizableTable
                       rowKey="key"
                       columns={detailColumns}
                       dataSource={selectedEmployeeSummary.detailRows}
@@ -1064,7 +1065,7 @@ const HRPage: React.FC = () => {
               isMobile ? (
                 <div>{visibleSummaries.map(renderSummaryMobileCard)}</div>
               ) : (
-                <Table
+                <ResizableTable
                   rowKey="key"
                   columns={summaryColumns}
                   dataSource={visibleSummaries}

@@ -1,3 +1,4 @@
+import ResizableTable from './ResizableTable';
 import React, { useEffect, useState } from 'react';
 import { App, Table, Button, Space, Empty, Typography, Spin, Select, Tooltip } from 'antd';
 import { CalculatorOutlined, EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined, CopyOutlined } from '@ant-design/icons';
@@ -1919,7 +1920,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       </div>
 
       {!isCollapsed && (
-        <Table
+        <ResizableTable
           dataSource={getActiveRows()}
           columns={columns}
           pagination={false}

@@ -1,3 +1,4 @@
+import ResizableTable from '../../components/ResizableTable';
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Select, message, Switch, Avatar, Drawer, Form, Input, Upload } from 'antd';
 import { UserOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
@@ -269,7 +270,7 @@ const UsersTab: React.FC = () => {
         </div>
 
         <div className="overflow-x-auto">
-            <Table
+            <ResizableTable
                 dataSource={users}
                 columns={columns}
                 rowKey="id"

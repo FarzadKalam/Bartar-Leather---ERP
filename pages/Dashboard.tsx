@@ -1,3 +1,4 @@
+import ResizableTable from '../components/ResizableTable';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Avatar, Card, Row, Col, Button, Dropdown, Statistic, Table, Timeline, Empty, Select, Switch, Tag } from 'antd';
 import {
@@ -1007,7 +1008,7 @@ const Dashboard: React.FC = () => {
               </Button>
             }
           >
-            <Table
+            <ResizableTable
               dataSource={stats.latestInvoices}
               columns={invoiceColumns}
               pagination={false}
@@ -1046,7 +1047,7 @@ const Dashboard: React.FC = () => {
               </Button>
             }
           >
-            <Table
+            <ResizableTable
               dataSource={stats.latestProductionOrders}
               columns={productionOrderColumns}
               pagination={false}
