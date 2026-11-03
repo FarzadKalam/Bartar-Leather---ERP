@@ -1,6 +1,6 @@
 import ResizableTable from './ResizableTable';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Table, Typography, message } from 'antd';
+import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Typography, message } from 'antd';
 import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { BlockDefinition, FieldType } from '../types';

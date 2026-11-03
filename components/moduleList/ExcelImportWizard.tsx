@@ -10,7 +10,6 @@ import {
   Modal,
   Select,
   Spin,
-  Table,
   Tag,
   Upload,
 } from "antd";

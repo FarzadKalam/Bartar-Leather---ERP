@@ -1,6 +1,6 @@
 import ResizableTable from '../ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { App, Button, Empty, Modal, Popconfirm, Select, Space, Spin, Switch, Table, Tag } from 'antd';
+import { App, Button, Empty, Modal, Popconfirm, Select, Space, Spin, Switch, Tag } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import { MODULES } from '../../moduleRegistry';
 import { supabase } from '../../supabaseClient';

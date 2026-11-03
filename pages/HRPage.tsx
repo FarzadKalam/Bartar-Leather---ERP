@@ -15,7 +15,6 @@ import {
   Select,
   Space,
   Spin,
-  Table,
   Tag,
   Typography,
 } from 'antd';

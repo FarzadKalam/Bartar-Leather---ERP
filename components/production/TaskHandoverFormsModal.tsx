@@ -1,6 +1,6 @@
 import ResizableTable from '../ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Modal, Table, Tabs, Tag } from 'antd';
+import { Button, Empty, Modal, Tabs, Tag } from 'antd';
 import { DownOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
@@ -658,7 +658,12 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
                 String(record.id) === String(selectedFormId) ? 'bg-leather-50 cursor-pointer' : 'cursor-pointer'
               }
               onRow={(record) => ({
-                onClick: () => {
+                onClick: (event) => {
+                  // The modal can be rendered from a clickable production card.
+                  // Stop the event here so opening a form never bubbles back to
+                  // the card/row navigation and replaces the delivery modal.
+                  event.preventDefault();
+                  event.stopPropagation();
                   onSelectForm(record.id);
                   onOpenForm(record.id, record.ownerTaskId);
                 },

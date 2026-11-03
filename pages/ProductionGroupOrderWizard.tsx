@@ -1,7 +1,7 @@
 import ResizableTable from '../components/ResizableTable';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { App, Badge, Button, Card, Empty, Input, Select, Spin, Table, Tag } from 'antd';
+import { App, Badge, Button, Card, Empty, Input, Select, Spin, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { LeftOutlined, PlusOutlined, ReloadOutlined, RightOutlined, SaveOutlined } from '@ant-design/icons';
 import GridTable from '../components/GridTable';
@@ -287,6 +287,16 @@ const ProductionGroupOrderWizard: React.FC = () => {
     ],
     []
   );
+
+  // Deep-link from dashboard: opening a grouped production order should land
+  // on the final progress step, while preserving the wizard's normal state.
+  useEffect(() => {
+    if (!initialized || !routeGroupId) return;
+    const requestedStep = Number(new URLSearchParams(location.search).get('step'));
+    if (!Number.isFinite(requestedStep)) return;
+    const boundedStep = Math.max(0, Math.min(steps.length - 1, requestedStep - 1));
+    setCurrentStep((previous) => previous === boundedStep ? previous : boundedStep);
+  }, [initialized, location.search, routeGroupId, steps.length]);
 
   const gridBlock = useMemo(() => {
     const moduleConfig = MODULES.production_orders;
@@ -1675,7 +1685,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const shelfInfo = shelfMap.get(shelfId);
       const productUnit = productUnits.get(productId);
       const unitSuffix = productUnit ? ` ${productUnit}` : '';
-      const label = `${shelfInfo?.label || shelfId} (موجودی: ${toPersianNumber(stock)}${unitSuffix})`;
+      const label = `${shelfInfo?.label || 'اطلاعات قفسه در دسترس نیست'} (موجودی: ${toPersianNumber(stock)}${unitSuffix})`;
       if (!shelfInfo?.isProductionWarehouse) {
         if (!nextOptions[productId]) nextOptions[productId] = [];
         if (!nextOptions[productId].some((item) => item.value === shelfId)) {
@@ -1686,7 +1696,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const bundleId = String(row.bundle_id);
       const bucketByBundle = bundleRowsByProduct.get(productId) || new Map();
       const bundleRows = bucketByBundle.get(bundleId) || [];
-      bundleRows.push({ shelfId, shelfLabel: shelfInfo?.label || shelfId, stock, isProductionWarehouse: Boolean(shelfInfo?.isProductionWarehouse) });
+      bundleRows.push({ shelfId, shelfLabel: shelfInfo?.label || 'اطلاعات قفسه در دسترس نیست', stock, isProductionWarehouse: Boolean(shelfInfo?.isProductionWarehouse) });
       bucketByBundle.set(bundleId, bundleRows);
       bundleRowsByProduct.set(productId, bucketByBundle);
     });
@@ -1728,7 +1738,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         const totalStock = bundleRows.reduce((sum, item) => sum + item.stock, 0);
         const bundleNumber = ((inventoryRows || []).find((row: any) => String(row?.bundle_id || '') === bundleId) as any)?.product_bundles?.bundle_number || bundleId;
         const hasSingleShelf = shelfIds.length === 1;
-        const shelfLabel = hasSingleShelf ? bundleRows[0]?.shelfLabel || shelfIds[0] : null;
+        const shelfLabel = hasSingleShelf ? bundleRows[0]?.shelfLabel || 'اطلاعات قفسه در دسترس نیست' : null;
         return {
           value: bundleId,
           label: hasSingleShelf

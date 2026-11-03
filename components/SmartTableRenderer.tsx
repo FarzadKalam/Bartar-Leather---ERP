@@ -1,6 +1,6 @@
 import ResizableTable from './ResizableTable';
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Table, Tag, Avatar, Input, Button, Space, Popover, Select } from 'antd';
+import { Tag, Avatar, Input, Button, Space, Popover, Select } from 'antd';
 import { AppstoreOutlined, SearchOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { ModuleDefinition, FieldType } from '../types';
 import { getSingleOptionLabel } from '../utils/optionHelpers';

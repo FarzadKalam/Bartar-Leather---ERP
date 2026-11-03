@@ -1,6 +1,6 @@
 import ResizableTable from '../ResizableTable';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { Button, Drawer, Input, InputNumber, Modal, Popover, Select } from 'antd';
 import { CalculatorOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';

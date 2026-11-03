@@ -1,6 +1,6 @@
 import ResizableTable from '../components/ResizableTable';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Avatar, Card, Row, Col, Button, Dropdown, Statistic, Table, Timeline, Empty, Select, Switch, Tag } from 'antd';
+import { Avatar, Card, Row, Col, Button, Dropdown, Statistic, Timeline, Empty, Select, Switch, Tag } from 'antd';
 import {
   MoreOutlined,
   FileTextOutlined,
@@ -54,7 +54,7 @@ type ProductionWorkflowGroup = {
   id: string;
   name: string;
   status: string;
-  orders: Array<{ id: string; name: string; status: string; stages: ProductionWorkflowStage[] }>;
+  orders: Array<{ id: string; name: string; status: string; groupId: string | null; stages: ProductionWorkflowStage[] }>;
 };
 
 const Dashboard: React.FC = () => {
@@ -202,6 +202,7 @@ const Dashboard: React.FC = () => {
             id: orderId,
             name: String(row?.production_order_name || 'سفارش تولید'),
             status: String(row?.production_order_status || 'draft'),
+            groupId: groupId === '__ungrouped__' ? null : groupId,
             stages: [],
           };
           current.orders.push(order);
@@ -822,7 +823,13 @@ const Dashboard: React.FC = () => {
                           type="button"
                           key={order.id}
                           className="w-full text-right rounded-lg border border-gray-100 p-3 hover:border-leather-300 hover:bg-leather-50/40 transition-colors"
-                          onClick={() => navigate(`/production_orders/${order.id}`)}
+                          onClick={() => {
+                            if (order.groupId) {
+                              navigate(`/production_group_orders/${order.groupId}?step=5`);
+                              return;
+                            }
+                            navigate(`/production_orders/${order.id}`);
+                          }}
                         >
                           <div className="flex items-center justify-between gap-2 mb-3">
                             <span className="font-semibold text-gray-800">{order.name}</span>

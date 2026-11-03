@@ -1,6 +1,6 @@
 import ResizableTable from '../ResizableTable';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Input, InputNumber, Modal, Popover, Select, Table } from 'antd';
+import { Button, Input, InputNumber, Modal, Popover, Select } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, CalculatorOutlined, CheckOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';

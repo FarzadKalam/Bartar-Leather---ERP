@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toPersianNumber } from './persianNumberFormatter';
+import { formatProductionShelfLabel } from './productionShelfLabel';
 
 export type DestinationBundleOption = {
   value: string;
@@ -39,11 +40,7 @@ export const loadDestinationBundleOptions = async (
       .in('id', shelfIds);
     if (shelfError) throw shelfError;
     (shelves || []).forEach((shelf: any) => {
-      const warehouseName = String(shelf?.warehouses?.name || '');
-      shelfLabelById.set(
-        String(shelf.id),
-        `${String(shelf?.shelf_number || shelf?.name || shelf.id)}${warehouseName ? ` - ${warehouseName}` : ''}`
-      );
+      shelfLabelById.set(String(shelf.id), formatProductionShelfLabel(shelf));
     });
   }
 
@@ -59,7 +56,7 @@ export const loadDestinationBundleOptions = async (
     const occupiedShelfIds = Array.from(new Set(rows.map((row: any) => String(row.shelf_id))));
     const hasSingleShelf = occupiedShelfIds.length <= 1;
     const shelfId = occupiedShelfIds[0] || null;
-    const shelfLabel = shelfId ? (shelfLabelById.get(shelfId) || shelfId) : null;
+    const shelfLabel = shelfId ? (shelfLabelById.get(shelfId) || 'اطلاعات قفسه در دسترس نیست') : null;
     const stock = rows.reduce((sum: number, row: any) => sum + toNumber(row?.stock), 0);
     const bundleNumber = String(bundle?.bundle_number || bundleId);
     return {

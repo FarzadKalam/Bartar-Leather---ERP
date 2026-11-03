@@ -52,6 +52,7 @@ interface ProductionStagesFieldProps {
   showWageSummary?: boolean;
   focusedTaskId?: string | null;
   focusedTaskAction?: 'popover' | 'handover-forms' | null;
+  focusedHandoverFormId?: string | null;
   onFocusedTaskHandled?: () => void;
 }
 
@@ -107,7 +108,7 @@ type OpenHandoverOptions = {
   sourceOverrideTask?: any | null;
 };
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false, focusedTaskId = null, focusedTaskAction = null, onFocusedTaskHandled }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false, focusedTaskId = null, focusedTaskAction = null, focusedHandoverFormId = null, onFocusedTaskHandled }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -904,7 +905,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         if (!productId || !bundleId) return;
         const shelfId = row?.shelf_id ? String(row.shelf_id) : null;
         const shelfLabel = shelfId
-          ? (allShelfOptions.find((item) => String(item.value) === shelfId)?.label || shelfId)
+          ? (allShelfOptions.find((item) => String(item.value) === shelfId)?.label || 'اطلاعات قفسه در دسترس نیست')
           : 'قفسه تعیین نشده';
         const bundleNumber = String(row?.product_bundles?.bundle_number || bundleId);
         const option: StageHandoverBundleOption = {
@@ -2251,15 +2252,19 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     const task = tasks.find((item: any) => String(item?.id) === String(focusedTaskId));
     if (!task) return;
 
-    const actionKey = `${focusedTaskAction}:${String(focusedTaskId)}`;
+    const actionKey = `${focusedTaskAction}:${String(focusedTaskId)}:${String(focusedHandoverFormId || '')}`;
     if (handledFocusedTaskRef.current === actionKey) return;
     handledFocusedTaskRef.current = actionKey;
 
     void (async () => {
-      await openTaskHandoverModal(task, tasks);
+      if (focusedTaskAction === 'handover-forms' && focusedHandoverFormId) {
+        await openTaskHandoverModalWithOptions(task, tasks, { openFormId: focusedHandoverFormId, openEditor: true });
+      } else {
+        await openTaskHandoverModal(task, tasks);
+      }
       onFocusedTaskHandled?.();
     })();
-  }, [focusedTaskAction, focusedTaskId, isBom, onFocusedTaskHandled, openTaskHandoverModal, tasks]);
+  }, [focusedHandoverFormId, focusedTaskAction, focusedTaskId, isBom, onFocusedTaskHandled, openTaskHandoverModal, openTaskHandoverModalWithOptions, tasks]);
 
   const handleOpenHandoverForm = useCallback((formId: string, ownerTaskId: string) => {
     if (!formId || !ownerTaskId) return;

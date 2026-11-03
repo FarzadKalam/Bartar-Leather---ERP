@@ -1,6 +1,6 @@
 import ResizableTable from '../../components/ResizableTable';
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Select, message, Switch, Avatar, Drawer, Form, Input, Upload } from 'antd';
+import { Button, Select, message, Switch, Avatar, Drawer, Form, Input, Upload } from 'antd';
 import { UserOutlined, PlusOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
 import { createClient } from '@supabase/supabase-js';

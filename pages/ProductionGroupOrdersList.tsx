@@ -1,7 +1,7 @@
 import ResizableTable from '../components/ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { App, Badge, Button, Empty, Table } from 'antd';
+import { App, Badge, Button, Empty } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';

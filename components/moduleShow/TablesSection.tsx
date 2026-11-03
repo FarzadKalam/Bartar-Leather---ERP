@@ -20,6 +20,7 @@ interface TablesSectionProps {
   onDataUpdate?: (patch: Record<string, any>) => void;
   focusedTaskId?: string | null;
   focusedTaskAction?: 'popover' | 'handover-forms' | null;
+  focusedHandoverFormId?: string | null;
   onFocusedTaskHandled?: () => void;
 }
 
@@ -37,6 +38,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
   onDataUpdate,
   focusedTaskId = null,
   focusedTaskAction = null,
+  focusedHandoverFormId = null,
   onFocusedTaskHandled,
 }) => {
   if (!module || !data) return null;
@@ -113,6 +115,7 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               showWageSummary={module.id === 'production_orders'}
               focusedTaskId={focusedTaskId}
               focusedTaskAction={focusedTaskAction}
+              focusedHandoverFormId={focusedHandoverFormId}
               onFocusedTaskHandled={onFocusedTaskHandled}
             />
         </div>

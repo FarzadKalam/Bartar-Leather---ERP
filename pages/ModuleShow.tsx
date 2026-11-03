@@ -3099,10 +3099,15 @@ const ModuleShow: React.FC = () => {
       ? 'handover-forms'
       : 'popover';
   }, [focusedTaskId, location.search]);
+  const focusedHandoverFormId = useMemo(() => {
+    if (moduleId !== 'production_orders') return null;
+    return new URLSearchParams(location.search).get('handoverForm');
+  }, [location.search, moduleId]);
   const clearFocusedTask = useCallback(() => {
     const params = new URLSearchParams(location.search);
     params.delete('stage');
     params.delete('handover');
+    params.delete('handoverForm');
     const nextSearch = params.toString();
     navigate({ pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' }, { replace: true });
   }, [location.pathname, location.search, navigate]);
@@ -3416,6 +3421,7 @@ const ModuleShow: React.FC = () => {
         onDataUpdate={handleRecordPatch}
         focusedTaskId={focusedTaskId}
         focusedTaskAction={focusedTaskAction}
+        focusedHandoverFormId={focusedHandoverFormId}
         onFocusedTaskHandled={clearFocusedTask}
       />
 

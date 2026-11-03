@@ -32,7 +32,7 @@ const ResizeHandle: React.FC<{
   width: number;
   onResize: (key: string, width: number) => void;
 }> = ({ columnKey: key, width, onResize }) => {
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const dragRef = useRef<{ startX: number; startWidth: number; direction: 'ltr' | 'rtl' } | null>(null);
 
   const stopDragging = useCallback(() => {
     dragRef.current = null;
@@ -43,7 +43,9 @@ const ResizeHandle: React.FC<{
   useEffect(() => {
     const move = (event: PointerEvent) => {
       if (!dragRef.current) return;
-      onResize(key, dragRef.current.startWidth + event.clientX - dragRef.current.startX);
+      const deltaX = event.clientX - dragRef.current.startX;
+      const signedDelta = dragRef.current.direction === 'rtl' ? -deltaX : deltaX;
+      onResize(key, dragRef.current.startWidth + signedDelta);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stopDragging);
@@ -68,7 +70,9 @@ const ResizeHandle: React.FC<{
       onPointerDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
-        dragRef.current = { startX: event.clientX, startWidth: width };
+        const table = event.currentTarget.closest('table');
+        const direction = table && window.getComputedStyle(table).direction === 'rtl' ? 'rtl' : 'ltr';
+        dragRef.current = { startX: event.clientX, startWidth: width, direction };
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
       }}
@@ -76,7 +80,9 @@ const ResizeHandle: React.FC<{
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
         event.preventDefault();
         const step = event.shiftKey ? 32 : 8;
-        onResize(key, width + (event.key === 'ArrowRight' ? step : -step));
+        const direction = window.getComputedStyle(event.currentTarget.closest('table') || document.documentElement).direction;
+        const increase = direction === 'rtl' ? event.key === 'ArrowLeft' : event.key === 'ArrowRight';
+        onResize(key, width + (increase ? step : -step));
       }}
     />
   );

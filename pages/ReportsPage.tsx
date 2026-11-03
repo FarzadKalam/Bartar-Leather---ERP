@@ -1,6 +1,6 @@
 import ResizableTable from '../components/ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { App, Button, Card, Empty, Input, InputNumber, Select, Spin, Statistic, Table, Tag } from 'antd';
+import { App, Button, Card, Empty, Input, InputNumber, Select, Spin, Statistic, Tag } from 'antd';
 import type { ColumnType, ColumnsType } from 'antd/es/table';
 import { FilterOutlined, PrinterOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom';
