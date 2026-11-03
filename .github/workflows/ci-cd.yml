@@ -59,24 +59,24 @@ jobs:
 
       - name: Add server host key
         env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST || '212.23.201.161' }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+          SERVER_HOST: 212.23.201.161
+          SERVER_PORT: '22'
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -p "$SERVER_PORT" "$SERVER_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload bundle
         env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST || '212.23.201.161' }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+          SERVER_HOST: 212.23.201.161
+          SERVER_PORT: '22'
           SERVER_USER: ${{ secrets.SERVER_USER || 'deploy' }}
         run: |
           scp -P "$SERVER_PORT" dist.tar.gz "$SERVER_USER@$SERVER_HOST:/tmp/erp-mehrbanoo-dist.tar.gz"
 
       - name: Activate release
         env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST || '212.23.201.161' }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT || '22' }}
+          SERVER_HOST: 212.23.201.161
+          SERVER_PORT: '22'
           SERVER_USER: ${{ secrets.SERVER_USER || 'deploy' }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/var/www/erp-mehrbanoo' }}
         run: |
