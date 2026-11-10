@@ -21,10 +21,14 @@ import PrintSection from '../components/moduleShow/PrintSection';
 import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece, type StartMaterialDeliveryRow } from '../components/production/StartProductionModal';
 import {
   type DeliveryType,
+  adaptDeliveryRowForTargetGroup,
+  applyDeliveryRowFieldUpdate,
   calculatePieceQuantity,
+  computeConvertedSubQuantity,
   getDeliveryMainQuantity,
   inferGroupDefaultDeliveryType,
   resolveDeliveryType,
+  switchGroupDeliveryTypeRows,
 } from '../utils/productionDeliveryRows';
 import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
@@ -285,7 +289,7 @@ const ModuleShow: React.FC = () => {
     const resolvedType = inferGroupDefaultDeliveryType(pieces, group.deliveryType ?? (group as any)?.delivery_type, group.deliveryRows);
     const deliveryRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
       ...row,
-      deliveryType: row.deliveryType || resolvedType,
+      deliveryType: resolvedType,
       deliveredQty: getDeliveryMainQuantity(row, resolvedType),
     }));
     return {
@@ -451,10 +455,11 @@ const ModuleShow: React.FC = () => {
       const next = [...prev];
       const group = next[groupIndex];
       if (!group) return prev;
-      const deliveryRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
-        ...row,
-        deliveryType,
-      }));
+      const deliveryRows = switchGroupDeliveryTypeRows(
+        group.deliveryRows || [],
+        resolveDeliveryType(group),
+        deliveryType
+      );
       next[groupIndex] = recalcStartGroup({
         ...group,
         deliveryType,
@@ -473,15 +478,28 @@ const ModuleShow: React.FC = () => {
       const availablePieces = Array.isArray(group.pieces) ? group.pieces : [];
       if (!availablePieces.length) return prev;
 
-      const existingRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).filter(
-        (r) => toNumber(r.mainQuantity) > 0 || String(r.name || '').trim() !== ''
+      const existingRows = switchGroupDeliveryTypeRows(
+        (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).filter(
+          (r) => getDeliveryMainQuantity(r, resolveDeliveryType(group)) > 0 || String(r.name || '').trim() !== ''
+        ),
+        resolveDeliveryType(group),
+        'piece'
       );
       const existingNames = new Set(existingRows.map((r) => String(r.name || '').trim()).filter(Boolean));
       const newRows = availablePieces
         .filter((p) => !existingNames.has(String(p.name || '').trim()))
         .map((piece) => {
-          const qtyCount = toNumber(piece.totalQuantity) || toNumber(piece.quantity) || 1;
+          const hasDims = toNumber(piece.length) > 0 && toNumber(piece.width) > 0;
+          const qtyCount = toNumber(piece.totalQuantity) || toNumber(piece.quantity) || (hasDims ? 1 : 0);
           const pieceQty = calculatePieceQuantity(piece.length, piece.width, qtyCount, piece.totalUsage);
+          const fallbackSub = toNumber(piece.subUsage);
+          const convertedSub = computeConvertedSubQuantity({
+            mainQuantity: pieceQty,
+            subQuantity: fallbackSub,
+            mainUnit: piece.mainUnit,
+            subUnit: piece.subUnit,
+            productWidthMm: group.productWidthMm,
+          });
           return normalizeDeliveryRow({ ...group, deliveryType: 'piece' }, {
             deliveryType: 'piece',
             pieceKey: piece.key,
@@ -493,11 +511,11 @@ const ModuleShow: React.FC = () => {
             subUnit: piece.subUnit,
             mainQuantity: pieceQty,
             deliveredQty: pieceQty,
-            subQuantity: toNumber(piece.subUsage),
+            subQuantity: convertedSub !== null ? convertedSub : fallbackSub,
           });
         });
 
-      const mergedRows = [...existingRows.map((r) => ({ ...r, deliveryType: 'piece' as DeliveryType })), ...newRows];
+      const mergedRows = [...existingRows, ...newRows];
       next[groupIndex] = recalcStartGroup({
         ...group,
         deliveryType: 'piece',
@@ -541,11 +559,10 @@ const ModuleShow: React.FC = () => {
       if (!selectedRows.length) return prev;
 
       const copiedRows = selectedRows.map((row) =>
-        normalizeDeliveryRow(targetGroup, {
-          ...row,
-          key: buildDeliveryRowKey(),
-          pieceKey: undefined,
-        })
+        normalizeDeliveryRow(
+          targetGroup,
+          adaptDeliveryRowForTargetGroup(row, sourceGroup, targetGroup, buildDeliveryRowKey())
+        )
       );
 
       const nextTargetRows = [...(targetGroup.deliveryRows || []), ...copiedRows];
@@ -582,22 +599,7 @@ const ModuleShow: React.FC = () => {
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = [
-        'length',
-        'width',
-        'conversionWidthMm',
-        'quantity',
-        'mainQuantity',
-        'subQuantity',
-      ];
-      const nextValue = numericFields.includes(field)
-        ? Math.max(0, toNumber(value))
-        : (value == null ? '' : String(value));
-      const updatedRow = { ...currentRow, [field]: nextValue };
-      deliveryRows[rowIndex] = {
-        ...updatedRow,
-        deliveredQty: getDeliveryMainQuantity(updatedRow, resolveDeliveryType(group)),
-      };
+      deliveryRows[rowIndex] = applyDeliveryRowFieldUpdate(currentRow, group, String(field), value);
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
     });
@@ -760,10 +762,10 @@ const ModuleShow: React.FC = () => {
             );
             if (!productId) return;
             if (deliveryRows.length > 0) {
+              const groupDeliveryType = resolveDeliveryType(group);
               deliveryRows.forEach((row: any) => {
-                const explicitQty = parseFloat(row?.mainQuantity ?? row?.deliveredQty ?? row?.delivered_qty);
-                const calculatedQty = (parseFloat(row?.length) || 0) * (parseFloat(row?.width) || 0) * (parseFloat(row?.quantity) || 0);
-                const quantity = Number.isFinite(explicitQty) && explicitQty > 0 ? explicitQty : calculatedQty;
+                const rowType = row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : groupDeliveryType;
+                const quantity = getDeliveryMainQuantity(row, rowType);
                 if (!quantity || quantity <= 0) return;
                 finalMoves.push({
                   product_id: productId,
@@ -2811,7 +2813,7 @@ const ModuleShow: React.FC = () => {
       msg.error('برای این محصول، محصول انتخاب‌شده مشخص نیست.');
       return;
     }
-    const rowsWithQty = (group.deliveryRows || []).filter((row) => calcDeliveredQty(row) > 0);
+    const rowsWithQty = (group.deliveryRows || []).filter((row) => calcDeliveredQty(row, resolveDeliveryType(group)) > 0);
     if (!rowsWithQty.length || rowsWithQty.some((row) => !row.sourceBundleId || !row.sourceShelfId)) {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را انتخاب کنید.');
       return;

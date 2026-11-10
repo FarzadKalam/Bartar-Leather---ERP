@@ -7,7 +7,13 @@ import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from '../../utils/productionBundles';
 import DeliveryProgressBar from './DeliveryProgressBar';
-import { type DeliveryType, getDeliveryMainQuantity, resolveDeliveryType, calculatePieceQuantity } from '../../utils/productionDeliveryRows';
+import {
+  type DeliveryType,
+  calculatePieceQuantity,
+  computeConvertedSubQuantity,
+  getDeliveryMainQuantity,
+  resolveDeliveryType,
+} from '../../utils/productionDeliveryRows';
 import UnitCalculatorButton from './UnitCalculatorButton';
 import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
 
@@ -385,9 +391,16 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
             const deliveryUnitLabel = getUnitSummaryLabel((group.deliveryRows || []).map((row) => row.mainUnit)) || consumptionUnitLabel;
             const hasDeliveryRows = Array.isArray(group.deliveryRows) && group.deliveryRows.length > 0;
             const previousDeliveryRows = Array.isArray(group.previousDeliveryRows) ? group.previousDeliveryRows : [];
+            const groupDeliveryType = resolveDeliveryType(group);
             const previousDeliveredQty = Math.max(
               0,
-              parseNumberInput(group.previousDeliveredQty ?? previousDeliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0))
+              parseNumberInput(
+                group.previousDeliveredQty
+                  ?? previousDeliveryRows.reduce(
+                    (sum, row) => sum + calcDeliveredQty(row, row?.deliveryType ? resolveDeliveryType(row) : groupDeliveryType),
+                    0
+                  )
+              )
             );
             const totalDeliveredWithHistory = previousDeliveredQty + Math.max(0, parseNumberInput(group.totalDeliveredQty));
             const currentSubQuantity = (group.deliveryRows || []).reduce(
@@ -898,7 +911,9 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   key: 'mainQuantity',
                                   width: 120,
                                   render: (_value: number, record: StartMaterialDeliveryRow) => (
-                                    <span className="font-semibold text-[#17372a]">{formatQty(calcDeliveredQty(record))}</span>
+                                    <span className="font-semibold text-[#17372a]">
+                                      {formatQty(calcDeliveredQty(record, record?.deliveryType ? resolveDeliveryType(record) : groupDeliveryType))}
+                                    </span>
                                   ),
                                 },
                               ]}
@@ -994,18 +1009,31 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                       const found = uniquePieces.find((p) => p.name === pieceName);
                                       onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', pieceName || '');
                                       if (found) {
-                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'pieceKey', found.key);
-                                        if (found.length) onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', found.length);
-                                        if (found.width) onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', found.width);
                                         const pieceCount = found.totalQuantity || found.quantity || 1;
-                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', pieceCount);
+                                        const resolvedMainUnit = found.mainUnit || record.mainUnit;
+                                        const resolvedSubUnit = found.subUnit || record.subUnit;
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'pieceKey', found.key);
                                         if (found.mainUnit) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainUnit', found.mainUnit);
                                         if (found.subUnit) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subUnit', found.subUnit);
-                                        if (found.subUsage) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', found.subUsage);
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', found.length || 0);
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', found.width || 0);
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', pieceCount);
                                         const pQty = calculatePieceQuantity(found.length, found.width, pieceCount, found.totalUsage);
-                                        if (pQty > 0) {
-                                          onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', pQty);
-                                        }
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', pQty);
+                                        const convertedSub = computeConvertedSubQuantity({
+                                          mainQuantity: pQty,
+                                          subQuantity: found.subUsage ?? record.subQuantity,
+                                          mainUnit: resolvedMainUnit,
+                                          subUnit: resolvedSubUnit,
+                                          conversionWidthMm: record.conversionWidthMm,
+                                          productWidthMm: group.productWidthMm,
+                                        });
+                                        onDeliveryRowFieldChange(
+                                          groupIndex,
+                                          String(record.key),
+                                          'subQuantity',
+                                          convertedSub !== null ? convertedSub : (Number(found.subUsage) || 0)
+                                        );
                                       }
                                     }}
                                   />
@@ -1024,11 +1052,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   stringMode
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
-                                  onChange={(nextVal) => {
-                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextVal);
-                                    const nextQty = calculatePieceQuantity(nextVal, record.width, record.quantity);
-                                    if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
-                                  }}
+                                  onChange={(nextVal) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextVal)}
                                   onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 />
                               ),
@@ -1045,11 +1069,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   stringMode
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
-                                  onChange={(nextVal) => {
-                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextVal);
-                                    const nextQty = calculatePieceQuantity(record.length, nextVal, record.quantity);
-                                    if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
-                                  }}
+                                  onChange={(nextVal) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextVal)}
                                   onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 />
                               ),
@@ -1066,11 +1086,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   stringMode
                                   formatter={(v) => formatGroupedInput(v)}
                                   parser={(v) => parseNumberInput(v)}
-                                  onChange={(nextVal) => {
-                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextVal);
-                                    const nextQty = calculatePieceQuantity(record.length, record.width, nextVal);
-                                    if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
-                                  }}
+                                  onChange={(nextVal) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextVal)}
                                   onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 />
                               ),
@@ -1235,7 +1251,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   ? productionStageOptions?.find((option) => String(option.value) === String(record.targetStageTaskId || ''))?.shelfId
                                   : targetShelfId;
                                 const sourceBundleOption = sourceBundleOptions.find((option) => String(option.value) === String(record.sourceBundleId || ''));
-                                const isPartialSourceBundle = Number(sourceBundleOption?.stock || 0) > calcDeliveredQty(record) + 0.000001;
+                                const isPartialSourceBundle = Number(sourceBundleOption?.stock || 0) > calcDeliveredQty(record, groupDeliveryType) + 0.000001;
                                 const options = [
                                   { label: 'ساخت بسته جدید', value: CREATE_NEW_BUNDLE_VALUE },
                                   {
@@ -1493,8 +1509,10 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
           white-space: nowrap !important;
         }
         .start-production-delivery-table .ant-table-cell {
-          overflow: hidden;
           padding: 12px 10px !important;
+        }
+        .start-production-delivery-table tbody .ant-table-cell {
+          overflow: hidden;
         }
         .start-production-row-actions .ant-btn .anticon {
           font-size: 12px;

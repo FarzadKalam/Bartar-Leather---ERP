@@ -29,7 +29,6 @@ import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelect
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { MODULES } from '../moduleRegistry';
 import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
-import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 import { resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils/durableDraft';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
@@ -39,12 +38,16 @@ import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
 import {
   type DeliveryType,
   type RemainderMode,
+  adaptDeliveryRowForTargetGroup,
+  applyDeliveryRowFieldUpdate,
   calculatePieceQuantity,
+  computeConvertedSubQuantity,
   getDeliveryMainQuantity,
   inferGroupDefaultDeliveryType,
   normalizeProductionDeliverySnapshot,
   resolveDeliveryType,
   resolveStageRemainderState,
+  switchGroupDeliveryTypeRows,
 } from '../utils/productionDeliveryRows';
 
 interface ProductionStagesFieldProps {
@@ -696,6 +699,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const totalUsage = toNumber(piece?.total_usage);
       const fallback = totalUsage > 0 ? totalUsage : (finalUsage > 0 ? finalUsage * orderQty : 0);
       const sourceQty = useDeliveredQty && deliveredQty !== null ? deliveredQty : fallback;
+      const rawSubPerItem = toNumber(piece?.qty_sub);
+      const baseSubUsage = rawSubPerItem > 0 ? rawSubPerItem * orderQty : 0;
+      const subUsage = useDeliveredQty && deliveredQty !== null && fallback > 0
+        ? baseSubUsage * (sourceQty / fallback)
+        : baseSubUsage;
       return {
         key: `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`,
         name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
@@ -705,7 +713,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         totalQuantity: toNumber(piece?.quantity) * orderQty,
         mainUnit: String(piece?.main_unit || row?.main_unit || ''),
         subUnit: String(piece?.sub_unit || ''),
-        subUsage: toNumber(piece?.qty_sub),
+        subUsage,
         sourceQty,
         handoverQty: sourceQty,
       } as any;
@@ -852,6 +860,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           ? String(group?.targetShelfId || group?.target_shelf_id)
           : null,
         deliveryType: defaultDeliveryType,
+        productWidthMm: group?.productWidthMm ?? null,
         pieces,
         orderPieces: Array.isArray(group?.orderPieces) ? group.orderPieces : [],
         deliveryRows,
@@ -995,9 +1004,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       (inventorySourceRows || []).forEach((row: any) => {
         const productId = String(row?.product_id || '').trim();
         if (!productId) return;
+        const prev = stockByProduct.get(productId) || { mainQty: 0, subQty: 0 };
         stockByProduct.set(productId, {
-          mainQty: toNumber(row?.stock),
-          subQty: 0,
+          mainQty: prev.mainQty + toNumber(row?.stock),
+          subQty: prev.subQty,
         });
       });
     } else {
@@ -1136,7 +1146,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ? buildGroupsFromPreviousStage(previousHandover?.groups || [])
         : orderGroups;
 
-      const withOrderGroups = baseGroups.map((group, index) => {
+      const baseWithOrderGroups = baseGroups.map((group, index) => {
         const byKey = orderByKey.get(String(group.key));
         const byProductCategory = orderByProductCategory.get(
           `${String(group.selectedProductId || '')}|${String(group.categoryLabel || '')}`
@@ -1147,9 +1157,37 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         return recalcHandoverGroup({
           ...group,
           categoryLabel: resolveCategoryLabel(group.categoryLabel),
+          productWidthMm: group.productWidthMm ?? matched?.productWidthMm ?? null,
           orderPieces,
         });
       });
+
+      const missingWidthIds = Array.from(
+        new Set(
+          baseWithOrderGroups
+            .filter((group) => group.selectedProductId && !group.productWidthMm)
+            .map((group) => String(group.selectedProductId))
+        )
+      );
+      const widthByProductId = new Map<string, number>();
+      if (missingWidthIds.length > 0) {
+        const { data: widthRows } = await supabase
+          .from('products')
+          .select('id, category, leather_width, lining_width, accessory_width')
+          .in('id', missingWidthIds);
+        (widthRows || []).forEach((row: any) => {
+          const widthMm = resolveUnitConversionWidthMm({ record: row });
+          if (widthMm && row?.id) {
+            widthByProductId.set(String(row.id), widthMm);
+          }
+        });
+      }
+      const withOrderGroups = baseWithOrderGroups.map((group) => ({
+        ...group,
+        productWidthMm:
+          group.productWidthMm
+          ?? (group.selectedProductId ? widthByProductId.get(String(group.selectedProductId)) ?? null : null),
+      }));
 
       const mergedGroups = mergeSavedGroups(withOrderGroups, currentHandover?.groups || []).map((group) =>
         recalcHandoverGroup({
@@ -1453,19 +1491,20 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const next = [...prev];
       const group = next[groupIndex];
       if (!group) return prev;
-      const deliveryRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
-        ...row,
-        deliveryType,
-      }));
+      const nextGroup = { ...group, deliveryType };
+      const deliveryRows = switchGroupDeliveryTypeRows(
+        group.deliveryRows || [],
+        resolveDeliveryType(group),
+        deliveryType
+      ).map((row) => normalizeHandoverDeliveryRow(nextGroup, row));
       next[groupIndex] = recalcHandoverGroup({
-        ...group,
-        deliveryType,
+        ...nextGroup,
         deliveryRows,
         isConfirmed: false,
       });
       return next;
     });
-  }, [recalcHandoverGroup]);
+  }, [normalizeHandoverDeliveryRow, recalcHandoverGroup]);
 
   const changeHandoverRemainder = useCallback((
     groupIndex: number,
@@ -1492,31 +1531,45 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const next = [...prev];
       const group = next[groupIndex];
       if (!group) return prev;
-      const availablePieces = Array.isArray(group.pieces) && group.pieces.length > 0
+      const hasStageNamedPieces = Array.isArray(group.pieces) && group.pieces.some(
+        (piece) => (toNumber(piece?.length) > 0 || toNumber(piece?.width) > 0)
+          || (String(piece?.name || '').trim() !== '' && String(piece?.name || '').trim() !== 'تحویل فله‌ای')
+      );
+      const availablePieces = hasStageNamedPieces
         ? group.pieces
-        : (Array.isArray(group.orderPieces) ? group.orderPieces : []);
+        : (Array.isArray(group.orderPieces) && group.orderPieces.length > 0 ? group.orderPieces : (group.pieces || []));
       if (!availablePieces.length) return prev;
 
       const existingRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).filter(
-        (r) => toNumber(r.mainQuantity) > 0 || String(r.name || '').trim() !== ''
+        (r) => getDeliveryMainQuantity(r, resolveDeliveryType(group)) > 0 || String(r.name || '').trim() !== ''
       );
       const existingNames = new Set(existingRows.map((r) => String(r.name || '').trim()).filter(Boolean));
       const newRows = availablePieces
         .filter((p) => !existingNames.has(String(p.name || '').trim()))
         .map((piece) => {
-          const pieceQty = calculatePieceQuantity(piece.length, piece.width, piece.quantity, (piece as any)?.handoverQty ?? piece?.sourceQty);
+          const hasDims = toNumber(piece.length) > 0 && toNumber(piece.width) > 0;
+          const qtyCount = toNumber((piece as any).totalQuantity) || toNumber(piece.quantity) || (hasDims ? 1 : 0);
+          const pieceQty = calculatePieceQuantity(piece.length, piece.width, qtyCount, (piece as any)?.handoverQty ?? piece?.sourceQty);
+          const fallbackSub = toNumber((piece as any)?.subUsage ?? 0);
+          const convertedSub = computeConvertedSubQuantity({
+            mainQuantity: pieceQty,
+            subQuantity: fallbackSub,
+            mainUnit: piece.mainUnit,
+            subUnit: piece.subUnit,
+            productWidthMm: group.productWidthMm,
+          });
           return normalizeHandoverDeliveryRow({ ...group, deliveryType: 'piece' }, {
             deliveryType: 'piece',
             pieceKey: piece.key,
             name: piece.name,
             length: piece.length,
             width: piece.width,
-            quantity: piece.quantity,
+            quantity: qtyCount,
             mainUnit: piece.mainUnit,
             subUnit: piece.subUnit,
             mainQuantity: pieceQty,
             deliveredQty: pieceQty,
-            subQuantity: toNumber((piece as any)?.subUsage ?? 0),
+            subQuantity: convertedSub !== null ? convertedSub : fallbackSub,
           });
         });
 
@@ -1564,11 +1617,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       if (!selectedRows.length) return prev;
 
       const copiedRows = selectedRows.map((row) =>
-        normalizeHandoverDeliveryRow(targetGroup, {
-          ...row,
-          key: buildHandoverRowKey(),
-          pieceKey: undefined,
-        })
+        normalizeHandoverDeliveryRow(
+          targetGroup,
+          adaptDeliveryRowForTargetGroup(row, sourceGroup, targetGroup, buildHandoverRowKey())
+        )
       );
 
       const nextTargetRows = [...(targetGroup.deliveryRows || []), ...copiedRows];
@@ -1605,46 +1657,22 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'conversionWidthMm', 'quantity', 'mainQuantity', 'subQuantity'];
-      const nextValue = numericFields.includes(field)
-        ? Math.max(0, toNumber(value))
-        : (value == null ? '' : String(value));
-      const updatedRow: StageHandoverDeliveryRow = { ...currentRow, [field]: nextValue };
+      let updatedRow = applyDeliveryRowFieldUpdate(currentRow, group, String(field), value);
       if (field === 'sourceBundleId') {
         const productId = String(group?.selectedProductId || '').trim();
         const bundleOption = (handoverBundleOptionsByProduct[productId] || [])
-          .find((option) => String(option.value) === String(nextValue || ''));
-        updatedRow.sourceShelfId = bundleOption?.shelfId || null;
-        updatedRow.sourceBundleLabel = bundleOption?.label || null;
+          .find((option) => String(option.value) === String(updatedRow.sourceBundleId || ''));
+        updatedRow = {
+          ...updatedRow,
+          sourceShelfId: bundleOption?.shelfId || null,
+          sourceBundleLabel: bundleOption?.label || null,
+        };
       }
-      const isPieceGroup = resolveDeliveryType(group) === 'piece';
-      if (isPieceGroup && ['length', 'width', 'quantity'].includes(String(field))) {
-        updatedRow.mainQuantity = calculatePieceQuantity(updatedRow.length, updatedRow.width, updatedRow.quantity);
-        const conversion = getUnitQuantityConversion('mainQuantity', {
-          availableKeys: ['mainQuantity', 'subQuantity'],
-        });
-        if (conversion) {
-          try {
-            updatedRow.subQuantity = calculateUnitQuantity({
-              mainQuantity: updatedRow.mainQuantity,
-              subQuantity: updatedRow.subQuantity,
-              main_unit: updatedRow.mainUnit,
-              sub_unit: updatedRow.subUnit,
-              widthMm: updatedRow.conversionWidthMm || updatedRow.width,
-            }, conversion);
-          } catch {
-            // اگر واحدها هنوز قابل تبدیل نباشند، مقدار فعلی واحد فرعی حفظ می‌شود.
-          }
-        }
-      }
-      deliveryRows[rowIndex] = {
-        ...updatedRow,
-        deliveredQty: getDeliveryMainQuantity(updatedRow, resolveDeliveryType(group)),
-      };
+      deliveryRows[rowIndex] = updatedRow;
       next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
     });
-  }, [handoverBundleOptionsByProduct, recalcHandoverGroup, toNumber]);
+  }, [handoverBundleOptionsByProduct, recalcHandoverGroup]);
 
   const confirmHandoverGroup = useCallback((groupIndex: number) => {
     const group = handoverGroups[groupIndex];
@@ -1657,7 +1685,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       message.error('برای این محصول، مقدار تحویل شده معتبر نیست.');
       return;
     }
-    const rowsWithQuantity = (group.deliveryRows || []).filter((row) => toNumber(row.mainQuantity ?? row.deliveredQty) > 0);
+    const rowsWithQuantity = (group.deliveryRows || []).filter((row) => getDeliveryMainQuantity(row, resolveDeliveryType(group)) > 0);
     if (rowsWithQuantity.some((row) => !row.sourceBundleId || !row.sourceShelfId)) {
       message.error('برای همه ردیف‌های تحویل، بسته برداشت را مشخص کنید.');
       return;
@@ -3234,21 +3262,28 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       groups.forEach((group: any, groupIndex: number) => {
         const groupKey = buildHandoverGroupHistoryKey(group, groupIndex);
         if (!groupKey) return;
+        const groupDeliveryType = resolveDeliveryType(group);
         const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
-        const normalizedRows = rows.map((row: any, rowIndex: number) => ({
-          ...normalizeProductionDeliverySnapshot(row, group),
-          key: String(row?.key || `${String(form?.id || 'form')}_${groupIndex}_${rowIndex}`),
-          pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
-          name: String(row?.name || ''),
-          length: Math.max(0, toNumber(row?.length)),
-          width: Math.max(0, toNumber(row?.width)),
-          quantity: Math.max(0, toNumber(row?.quantity)),
-          mainUnit: String(row?.mainUnit || row?.main_unit || ''),
-          subUnit: String(row?.subUnit || row?.sub_unit || ''),
-          mainQuantity: Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
-          subQuantity: Math.max(0, toNumber(row?.subQuantity ?? 0)),
-          deliveredQty: Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
-        }));
+        const normalizedRows = rows.map((row: any, rowIndex: number) => {
+          const snapshot = normalizeProductionDeliverySnapshot(row, group);
+          const rowType = row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : groupDeliveryType;
+          const mainQty = getDeliveryMainQuantity(row, rowType);
+          return {
+            ...snapshot,
+            deliveryType: rowType,
+            key: String(row?.key || `${String(form?.id || 'form')}_${groupIndex}_${rowIndex}`),
+            pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
+            name: snapshot.name ?? '',
+            length: snapshot.length ?? 0,
+            width: snapshot.width ?? 0,
+            quantity: snapshot.quantity ?? 0,
+            mainUnit: snapshot.mainUnit,
+            subUnit: snapshot.subUnit,
+            mainQuantity: mainQty,
+            subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity ?? 0)),
+            deliveredQty: mainQty,
+          };
+        });
         if (!normalizedRows.length) return;
         map[groupKey] = [...(map[groupKey] || []), ...normalizedRows];
       });
@@ -3271,11 +3306,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     return (handoverGroups || []).map((group, groupIndex) => {
       const groupKey = buildHandoverGroupHistoryKey(group, groupIndex);
       const previousRows = handoverPreviousRowsByGroupKey[groupKey] || [];
-      const previousDeliveredQty = previousRows.reduce((sum, row) => {
-        const explicitQty = toNumber((row as any)?.deliveredQty);
-        if (explicitQty > 0) return sum + explicitQty;
-        return sum + (Math.max(0, toNumber((row as any)?.length)) * Math.max(0, toNumber((row as any)?.width)) * Math.max(0, toNumber((row as any)?.quantity)));
-      }, 0);
+      const groupType = resolveDeliveryType(group);
+      const previousDeliveredQty = previousRows.reduce(
+        (sum, row) => sum + getDeliveryMainQuantity(row, row?.deliveryType ? resolveDeliveryType(row) : groupType),
+        0
+      );
       const pid = String(group?.selectedProductId || '').trim();
       return {
         ...group,

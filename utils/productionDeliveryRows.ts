@@ -1,4 +1,5 @@
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from './productionBundles';
+import { calculateUnitQuantity, getUnitQuantityConversion } from './unitQuantityConversion';
 
 export type DeliveryType = 'bulk' | 'piece';
 
@@ -53,14 +54,17 @@ export const inferGroupDefaultDeliveryType = (pieces: any[], savedDeliveryType?:
 export const calculatePieceQuantity = (length: unknown, width: unknown, quantity: unknown, fallbackQty?: unknown): number => {
   const l = asNumber(length);
   const w = asNumber(width);
+  const hasExplicitQuantity = quantity !== undefined && quantity !== null && String(quantity).trim() !== '';
   const q = asNumber(quantity);
   if (l > 0 && w > 0) {
-    return l * w * (q > 0 ? q : 1);
+    return l * w * (hasExplicitQuantity ? q : 1);
   }
-  if (q > 0) {
-    return q;
+  if (l > 0 || w > 0) {
+    return hasExplicitQuantity && q === 0 ? 0 : asNumber(fallbackQty);
   }
-  return asNumber(fallbackQty);
+  const fb = asNumber(fallbackQty);
+  if (fb > 0) return fb;
+  return q;
 };
 
 /** A recorded quantity is authoritative, including zero. Dimensions are only a fallback for piece deliveries. */
@@ -73,6 +77,158 @@ export const getDeliveryMainQuantity = (row: any, explicitType?: DeliveryType): 
     return calculatePieceQuantity(row?.length, row?.width, row?.quantity);
   }
   return 0;
+};
+
+const NUMERIC_DELIVERY_FIELDS = new Set([
+  'length',
+  'width',
+  'conversionWidthMm',
+  'quantity',
+  'mainQuantity',
+  'subQuantity',
+]);
+
+/** محاسبه خودکار مقدار واحد فرعی بر اساس مقدار اصلی و عرض رول/تبدیل (نه عرض برش قطعه). */
+export const computeConvertedSubQuantity = (params: {
+  mainQuantity: unknown;
+  subQuantity?: unknown;
+  mainUnit?: string | null;
+  subUnit?: string | null;
+  conversionWidthMm?: unknown;
+  productWidthMm?: unknown;
+}): number | null => {
+  const mainQty = asNumber(params.mainQuantity);
+  const mainUnit = String(params.mainUnit ?? '').trim();
+  const subUnit = String(params.subUnit ?? '').trim();
+  if (!mainUnit || !subUnit) return null;
+  if (mainQty <= 0) return 0;
+  const conversion = getUnitQuantityConversion('mainQuantity', {
+    availableKeys: ['mainQuantity', 'subQuantity'],
+  });
+  if (!conversion) return null;
+  const resolvedWidthMm = asNumber(params.conversionWidthMm) || asNumber(params.productWidthMm) || undefined;
+  try {
+    const converted = calculateUnitQuantity(
+      {
+        mainQuantity: mainQty,
+        subQuantity: asNumber(params.subQuantity),
+        main_unit: mainUnit,
+        sub_unit: subUnit,
+        ...(resolvedWidthMm ? { conversionWidthMm: resolvedWidthMm, widthMm: resolvedWidthMm } : {}),
+      },
+      conversion
+    );
+    return Number.isFinite(converted) ? Number(converted.toPrecision(12)) : null;
+  } catch {
+    return null;
+  }
+};
+
+/** اعمال یکپارچه تغییر فیلد روی ردیف تحویل (شامل محاسبه ابعاد و صفر شدن مقدار فرعی در تعداد ۰). */
+export const applyDeliveryRowFieldUpdate = <T extends Record<string, any>>(
+  row: T,
+  group: { deliveryType?: DeliveryType; delivery_type?: DeliveryType; productWidthMm?: number | null; deliveryRows?: any[]; pieces?: any[] },
+  field: string,
+  value: unknown
+): T => {
+  const nextValue = NUMERIC_DELIVERY_FIELDS.has(field)
+    ? asNumber(value)
+    : (value == null ? '' : String(value));
+  const updatedRow: Record<string, any> = { ...row, [field]: nextValue };
+  const effectiveType = resolveDeliveryType(group);
+
+  if (effectiveType === 'piece' && (field === 'length' || field === 'width' || field === 'quantity')) {
+    updatedRow.mainQuantity = calculatePieceQuantity(updatedRow.length, updatedRow.width, updatedRow.quantity);
+    if (updatedRow.mainQuantity <= 0) {
+      updatedRow.subQuantity = 0;
+    } else {
+      const convertedSub = computeConvertedSubQuantity({
+        mainQuantity: updatedRow.mainQuantity,
+        subQuantity: updatedRow.subQuantity,
+        mainUnit: updatedRow.mainUnit,
+        subUnit: updatedRow.subUnit,
+        conversionWidthMm: updatedRow.conversionWidthMm,
+        productWidthMm: group?.productWidthMm,
+      });
+      if (convertedSub !== null) {
+        updatedRow.subQuantity = convertedSub;
+      }
+    }
+  }
+
+  updatedRow.deliveryType = effectiveType;
+  updatedRow.deliveredQty = getDeliveryMainQuantity(updatedRow, effectiveType);
+  return updatedRow as T;
+};
+
+/** تغییر نوع تحویل گروه با حفظ مقدار فیزیکی ردیف‌های موجود. */
+export const switchGroupDeliveryTypeRows = <T extends Record<string, any>>(
+  rows: T[],
+  previousGroupType: DeliveryType,
+  nextDeliveryType: DeliveryType
+): Array<T & {
+  deliveryType: DeliveryType;
+  delivery_type: DeliveryType;
+  mainQuantity: number;
+  deliveredQty: number;
+}> => (
+  (Array.isArray(rows) ? rows : []).map((row) => {
+    const rowType = row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : previousGroupType;
+    const preservedQty = getDeliveryMainQuantity(row, rowType);
+    return {
+      ...row,
+      deliveryType: nextDeliveryType,
+      delivery_type: nextDeliveryType,
+      mainQuantity: preservedQty,
+      deliveredQty: preservedQty,
+    };
+  })
+);
+
+/** تطبیق ردیف تحویل هنگام کپی یا جابجایی بین گروه‌های فله‌ای/قطعه‌ای یا کالاهای متفاوت. */
+export const adaptDeliveryRowForTargetGroup = (
+  row: any,
+  sourceGroup: any,
+  targetGroup: any,
+  newKey: string
+) => {
+  const sourceGroupType = resolveDeliveryType(sourceGroup);
+  const rowSourceType = row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : sourceGroupType;
+  const targetType = resolveDeliveryType(targetGroup);
+  const preservedQty = getDeliveryMainQuantity(row, rowSourceType);
+  const subQty = asNumber(row?.subQuantity ?? row?.sub_quantity);
+  const sourceProductId = String(sourceGroup?.selectedProductId || '').trim();
+  const targetProductId = String(targetGroup?.selectedProductId || '').trim();
+  const sameProduct = Boolean(sourceProductId && targetProductId && sourceProductId === targetProductId)
+    || sourceGroup === targetGroup;
+  const targetFirstPiece = Array.isArray(targetGroup?.pieces) && targetGroup.pieces.length > 0 ? targetGroup.pieces[0] : null;
+  const requestedTargetBundle = row?.targetBundleId ?? row?.target_bundle_id;
+  const nextTargetBundleId = !sameProduct && requestedTargetBundle === USE_SOURCE_BUNDLE_VALUE
+    ? CREATE_NEW_BUNDLE_VALUE
+    : requestedTargetBundle;
+
+  return {
+    ...row,
+    key: newKey,
+    pieceKey: undefined,
+    deliveryType: targetType,
+    delivery_type: targetType,
+    name: targetType === 'piece' ? String(row?.name ?? '') : '',
+    length: targetType === 'piece' ? asNumber(row?.length) : 0,
+    width: targetType === 'piece' ? asNumber(row?.width) : 0,
+    quantity: targetType === 'piece' ? asNumber(row?.quantity) : 0,
+    mainUnit: sameProduct ? String(row?.mainUnit ?? '') : String(targetFirstPiece?.mainUnit || row?.mainUnit || ''),
+    subUnit: sameProduct ? String(row?.subUnit ?? '') : String(targetFirstPiece?.subUnit || row?.subUnit || ''),
+    mainQuantity: preservedQty,
+    deliveredQty: preservedQty,
+    subQuantity: subQty,
+    sourceBundleId: sameProduct ? (row?.sourceBundleId || row?.source_bundle_id || null) : null,
+    sourceShelfId: sameProduct ? (row?.sourceShelfId || row?.source_shelf_id || null) : null,
+    sourceBundleLabel: sameProduct ? (row?.sourceBundleLabel || row?.source_bundle_label || null) : null,
+    targetBundleId: nextTargetBundleId,
+    targetBundleLabel: (!sameProduct && requestedTargetBundle === USE_SOURCE_BUNDLE_VALUE) ? null : (row?.targetBundleLabel || row?.target_bundle_label || null),
+    ...(sameProduct ? {} : { targetStageTaskId: targetGroup?.targetStageTaskId ?? null }),
+  };
 };
 
 /** Preserve inventory routing and measured amounts when forms become read-only or history. */

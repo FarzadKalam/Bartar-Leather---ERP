@@ -1,17 +1,21 @@
 import * as assert from 'node:assert/strict';
 import {
+  adaptDeliveryRowForTargetGroup,
+  applyDeliveryRowFieldUpdate,
   calculatePieceQuantity,
+  computeConvertedSubQuantity,
   getDeliveryMainQuantity,
   inferGroupDefaultDeliveryType,
   normalizeDraftTargetBundle,
   normalizeProductionDeliverySnapshot,
   resolveDeliveryType,
   resolveStageRemainderState,
+  switchGroupDeliveryTypeRows,
 } from '../utils/productionDeliveryRows';
 import { convertBetweenUnits } from '../utils/unitConversions';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 import { buildGroupStartMaterials, sumDeliveredRows } from '../utils/productionGroupOrders';
-import { CREATE_NEW_BUNDLE_VALUE } from '../utils/productionBundles';
+import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from '../utils/productionBundles';
 import { isProductionOrderPanelExpanded } from '../utils/productionOrderPanels';
 
 // Regression: the recorded measurement is 14 ft², not the area of two sample pieces.
@@ -202,4 +206,156 @@ assert.equal(clampedWasteState.remainingAvailable, 8);
 assert.equal(clampedWasteState.wasteQty, 8);
 assert.equal(clampedWasteState.remainingStageStock, 0);
 
-console.log('Production delivery regressions passed: recorded amounts, bundle routing, legacy rows, bulk/piece delivery types, bidirectional conversions, remainder/waste math, and current requirements.');
+// Zero-quantity piece calculation & atomic field update regressions:
+assert.equal(calculatePieceQuantity(20, 10, 0), 0);
+assert.equal(calculatePieceQuantity(0, 10, 5), 0);
+assert.equal(calculatePieceQuantity(0, 0, 5), 5);
+assert.equal(calculatePieceQuantity(20, 10, undefined), 200);
+assert.equal(calculatePieceQuantity(20, 10, ''), 200);
+assert.equal(calculatePieceQuantity(20, 0, 0, 500), 0);
+
+const pieceGroupWithWidth = { deliveryType: 'piece' as const, productWidthMm: 1400 };
+const zeroedRow = applyDeliveryRowFieldUpdate(
+  {
+    key: 'r1',
+    deliveryType: 'piece',
+    length: 100,
+    width: 50,
+    quantity: 2,
+    mainUnit: 'میلیمتر مربع',
+    subUnit: 'فوت مربع',
+    mainQuantity: 92903.04,
+    subQuantity: 1,
+    deliveredQty: 92903.04,
+  },
+  pieceGroupWithWidth,
+  'quantity',
+  0
+);
+assert.equal(zeroedRow.mainQuantity, 0);
+assert.equal(zeroedRow.subQuantity, 0);
+assert.equal(zeroedRow.deliveredQty, 0);
+
+const convertedByProductWidth = applyDeliveryRowFieldUpdate(
+  {
+    key: 'r2',
+    deliveryType: 'piece',
+    length: 0.08,
+    width: 25,
+    quantity: 1,
+    mainUnit: 'متر طول',
+    subUnit: 'میلیمتر مربع',
+    mainQuantity: 0,
+    subQuantity: 0,
+    deliveredQty: 0,
+  },
+  pieceGroupWithWidth,
+  'quantity',
+  1
+);
+assert.equal(convertedByProductWidth.mainQuantity, 2);
+assert.equal(convertedByProductWidth.subQuantity, 2800000);
+
+const unconvertibleWithoutRollWidth = applyDeliveryRowFieldUpdate(
+  {
+    key: 'r3',
+    deliveryType: 'piece',
+    length: 0,
+    width: 25,
+    quantity: 1,
+    mainUnit: 'متر طول',
+    subUnit: 'میلیمتر مربع',
+    mainQuantity: 0,
+    subQuantity: 99,
+    deliveredQty: 0,
+  },
+  { deliveryType: 'piece', productWidthMm: null },
+  'length',
+  2
+);
+assert.equal(unconvertibleWithoutRollWidth.mainQuantity, 50);
+assert.equal(unconvertibleWithoutRollWidth.subQuantity, 99);
+assert.equal(
+  computeConvertedSubQuantity({
+    mainQuantity: 0,
+    subQuantity: 12,
+    mainUnit: 'متر طول',
+    subUnit: 'میلیمتر مربع',
+    productWidthMm: 1400,
+  }),
+  0
+);
+
+// Type switching without losing calculated physical quantities:
+const switchedToBulk = switchGroupDeliveryTypeRows(
+  [{ key: 's1', length: 20, width: 10, quantity: 5 }],
+  'piece',
+  'bulk'
+);
+assert.equal(switchedToBulk[0].deliveryType, 'bulk');
+assert.equal((switchedToBulk[0] as any).delivery_type, 'bulk');
+assert.equal(switchedToBulk[0].mainQuantity, 1000);
+assert.equal(switchedToBulk[0].deliveredQty, 1000);
+assert.equal(getDeliveryMainQuantity(switchedToBulk[0], 'bulk'), 1000);
+
+// Cross-group copy/move adaptation:
+const adaptedPieceToBulkSameProduct = adaptDeliveryRowForTargetGroup(
+  {
+    key: 'old-key',
+    pieceKey: 'p-key',
+    deliveryType: 'piece',
+    name: 'جلوی کیف',
+    length: 20,
+    width: 10,
+    quantity: 5,
+    mainUnit: 'میلیمتر مربع',
+    subUnit: 'فوت مربع',
+    mainQuantity: 1000,
+    subQuantity: 1.5,
+    sourceBundleId: 'b1',
+    sourceShelfId: 's1',
+    sourceBundleLabel: 'BND-1',
+    targetBundleId: USE_SOURCE_BUNDLE_VALUE,
+  },
+  { selectedProductId: 'prod-a', deliveryType: 'piece' },
+  { selectedProductId: 'prod-a', deliveryType: 'bulk', targetStageTaskId: 'task-2' },
+  'new-key'
+);
+assert.equal(adaptedPieceToBulkSameProduct.key, 'new-key');
+assert.equal(adaptedPieceToBulkSameProduct.deliveryType, 'bulk');
+assert.equal(adaptedPieceToBulkSameProduct.name, '');
+assert.equal(adaptedPieceToBulkSameProduct.length, 0);
+assert.equal(adaptedPieceToBulkSameProduct.width, 0);
+assert.equal(adaptedPieceToBulkSameProduct.quantity, 0);
+assert.equal(adaptedPieceToBulkSameProduct.mainQuantity, 1000);
+assert.equal(adaptedPieceToBulkSameProduct.subQuantity, 1.5);
+assert.equal(adaptedPieceToBulkSameProduct.sourceBundleId, 'b1');
+assert.equal(adaptedPieceToBulkSameProduct.targetBundleId, USE_SOURCE_BUNDLE_VALUE);
+
+const adaptedAcrossDifferentProducts = adaptDeliveryRowForTargetGroup(
+  {
+    key: 'old-key-2',
+    deliveryType: 'bulk',
+    mainQuantity: 50,
+    subQuantity: 2,
+    mainUnit: 'متر',
+    subUnit: '',
+    sourceBundleId: 'b1',
+    sourceShelfId: 's1',
+    sourceBundleLabel: 'BND-1',
+    targetBundleId: USE_SOURCE_BUNDLE_VALUE,
+  },
+  { selectedProductId: 'prod-a', deliveryType: 'bulk' },
+  { selectedProductId: 'prod-b', deliveryType: 'piece', targetStageTaskId: 'task-b', pieces: [{ mainUnit: 'عدد', subUnit: 'بسته' }] },
+  'new-key-2'
+);
+assert.equal(adaptedAcrossDifferentProducts.deliveryType, 'piece');
+assert.equal(adaptedAcrossDifferentProducts.sourceBundleId, null);
+assert.equal(adaptedAcrossDifferentProducts.sourceShelfId, null);
+assert.equal(adaptedAcrossDifferentProducts.sourceBundleLabel, null);
+assert.equal(adaptedAcrossDifferentProducts.targetBundleId, CREATE_NEW_BUNDLE_VALUE);
+assert.equal(adaptedAcrossDifferentProducts.mainUnit, 'عدد');
+assert.equal(adaptedAcrossDifferentProducts.subUnit, 'بسته');
+assert.equal(adaptedAcrossDifferentProducts.targetStageTaskId, 'task-b');
+
+console.log('Production delivery regressions passed: recorded amounts, bundle routing, legacy rows, bulk/piece delivery types, bidirectional conversions, remainder/waste math, atomic piece zeroing, cross-group transfer, and current requirements.');

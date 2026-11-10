@@ -11,7 +11,15 @@ import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, isCreateNewBundleValue } from '../../utils/productionBundles';
 import DeliveryProgressBar from './DeliveryProgressBar';
-import { type DeliveryType, type RemainderMode, getDeliveryMainQuantity, resolveDeliveryType, calculatePieceQuantity, resolveStageRemainderState } from '../../utils/productionDeliveryRows';
+import {
+  type DeliveryType,
+  type RemainderMode,
+  calculatePieceQuantity,
+  computeConvertedSubQuantity,
+  getDeliveryMainQuantity,
+  resolveDeliveryType,
+  resolveStageRemainderState,
+} from '../../utils/productionDeliveryRows';
 import { useDeliveryBundleLabels } from './useDeliveryBundleLabels';
 import UnitCalculatorButton from './UnitCalculatorButton';
 import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
@@ -518,11 +526,18 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             const bundleOptions = group.selectedProductId
               ? (bundleOptionsByProduct[String(group.selectedProductId)] || [])
               : [];
+            const groupDeliveryType = resolveDeliveryType(group);
             const consumptionUnitLabel = getUnitSummaryLabel((group.pieces || []).map((piece) => piece.mainUnit));
             const previousDeliveryRows = Array.isArray(group.previousDeliveryRows) ? group.previousDeliveryRows : [];
             const previousDeliveredQty = Math.max(
               0,
-              parseNumberInput(group.previousDeliveredQty ?? previousDeliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0))
+              parseNumberInput(
+                group.previousDeliveredQty
+                  ?? previousDeliveryRows.reduce(
+                    (sum, row) => sum + calcDeliveredQty(row, row?.deliveryType ? resolveDeliveryType(row) : groupDeliveryType),
+                    0
+                  )
+              )
             );
             const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalHandoverQty));
             const totalDeliveredWithHistory = previousDeliveredQty + currentDeliveredQty;
@@ -721,7 +736,9 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 key: 'mainQuantity',
                                 width: 120,
                                 render: (_value: number, record: StageHandoverDeliveryRow) => (
-                                  <span className="font-semibold text-[#17372a]">{toQty(calcDeliveredQty(record))}</span>
+                                  <span className="font-semibold text-[#17372a]">
+                                    {toQty(calcDeliveredQty(record, record?.deliveryType ? resolveDeliveryType(record) : groupDeliveryType))}
+                                  </span>
                                 ),
                               },
                             ]}
@@ -763,7 +780,13 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
 
                       {(() => {
                         const isPiece = resolveDeliveryType(group) === 'piece';
-                        const availablePieces = group.pieces && group.pieces.length > 0 ? group.pieces : (group.orderPieces || []);
+                        const hasStageNamedPieces = Array.isArray(group.pieces) && group.pieces.some(
+                          (p) => (Number(p?.length) > 0 || Number(p?.width) > 0)
+                            || (String(p?.name || '').trim() !== '' && String(p?.name || '').trim() !== 'تحویل فله‌ای')
+                        );
+                        const availablePieces = hasStageNamedPieces
+                          ? group.pieces
+                          : ((group.orderPieces && group.orderPieces.length > 0) ? group.orderPieces : (group.pieces || []));
 
                         const pieceColumns = [
                           {
@@ -783,6 +806,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                     map.set(k, {
                                       ...existing,
                                       totalQuantity: (existing.totalQuantity || existing.quantity || 0) + (p.totalQuantity || p.quantity || 0),
+                                      subUsage: (existing.subUsage || 0) + (p.subUsage || 0),
                                       sourceQty: (existing.sourceQty || 0) + (p.sourceQty || 0),
                                       handoverQty: (existing.handoverQty || 0) + (p.handoverQty || 0),
                                     });
@@ -815,22 +839,36 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                     const found = uniquePieces.find((p) => p.name === pieceName);
                                     onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', pieceName || '');
                                     if (found) {
-                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'pieceKey', found.key);
-                                      if (found.length) onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', found.length);
-                                      if (found.width) onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', found.width);
                                       const pieceCount = found.totalQuantity || found.quantity || 1;
-                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', pieceCount);
+                                      const resolvedMainUnit = found.mainUnit || record.mainUnit;
+                                      const resolvedSubUnit = found.subUnit || record.subUnit;
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'pieceKey', found.key);
                                       if (found.mainUnit) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainUnit', found.mainUnit);
                                       if (found.subUnit) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subUnit', found.subUnit);
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', found.length || 0);
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', found.width || 0);
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', pieceCount);
                                       const pQty = calculatePieceQuantity(
                                         found.length,
                                         found.width,
                                         pieceCount,
                                         (found as any).totalUsage ?? found.handoverQty ?? found.sourceQty
                                       );
-                                      if (pQty > 0) {
-                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', pQty);
-                                      }
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', pQty);
+                                      const convertedSub = computeConvertedSubQuantity({
+                                        mainQuantity: pQty,
+                                        subQuantity: found.subUsage ?? record.subQuantity,
+                                        mainUnit: resolvedMainUnit,
+                                        subUnit: resolvedSubUnit,
+                                        conversionWidthMm: record.conversionWidthMm,
+                                        productWidthMm: group.productWidthMm,
+                                      });
+                                      onDeliveryRowFieldChange(
+                                        groupIndex,
+                                        String(record.key),
+                                        'subQuantity',
+                                        convertedSub !== null ? convertedSub : (Number(found.subUsage) || 0)
+                                      );
                                     }
                                   }}
                                 />
@@ -849,11 +887,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 stringMode
                                 formatter={(v) => formatGroupedInput(v)}
                                 parser={(v) => parseNumberInput(v)}
-                                onChange={(nextVal) => {
-                                  onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextVal);
-                                  const nextQty = calculatePieceQuantity(nextVal, record.width, record.quantity);
-                                  if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
-                                }}
+                                onChange={(nextVal) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextVal)}
                                 onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
@@ -871,11 +905,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 stringMode
                                 formatter={(v) => formatGroupedInput(v)}
                                 parser={(v) => parseNumberInput(v)}
-                                onChange={(nextVal) => {
-                                  onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextVal);
-                                  const nextQty = calculatePieceQuantity(record.length, nextVal, record.quantity);
-                                  if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
-                                }}
+                                onChange={(nextVal) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextVal)}
                                 onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
@@ -893,11 +923,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 stringMode
                                 formatter={(v) => formatGroupedInput(v)}
                                 parser={(v) => parseNumberInput(v)}
-                                onChange={(nextVal) => {
-                                  onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextVal);
-                                  const nextQty = calculatePieceQuantity(record.length, record.width, nextVal);
-                                  if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
-                                }}
+                                onChange={(nextVal) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextVal)}
                                 onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
                                 disabled={locked}
                               />
@@ -944,7 +970,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 ? USE_SOURCE_BUNDLE_VALUE
                                 : (value || CREATE_NEW_BUNDLE_VALUE);
                               const sourceBundleOption = bundleOptions.find((option) => String(option.value) === String(record.sourceBundleId || ''));
-                              const isPartialSourceBundle = Number(sourceBundleOption?.stock || 0) > calcDeliveredQty(record) + 0.000001;
+                              const isPartialSourceBundle = Number(sourceBundleOption?.stock || 0) > calcDeliveredQty(record, groupDeliveryType) + 0.000001;
                               const destinationOptions = [
                                 { label: 'ساخت بسته جدید', value: CREATE_NEW_BUNDLE_VALUE },
                                 {
@@ -1188,6 +1214,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               selectedRowKeys,
                               columnWidth: isMobile ? 40 : 34,
                               onChange: (keys) => setSelectedRowKeys(group.key, keys.map((k) => String(k))),
+                              getCheckboxProps: () => ({ disabled: locked }),
                             }}
                             columns={activeColumns}
                           />
