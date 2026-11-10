@@ -120,13 +120,18 @@ export const calculateUnitQuantity = (
     throw new Error(`تبدیل واحد "${sourceUnit}" به "${targetUnit}" ممکن نیست.`);
   }
 
-  if (isCrossDimensionUnitConversion(sourceUnit, targetUnit) && !resolveUnitConversionWidthMm({ record: values })) {
+  const widthMm = resolveUnitConversionWidthMm({
+    record: values,
+    widthMm: toUnitQuantityNumber(values?.widthMm ?? values?.conversionWidthMm ?? values?.conversion_width_mm) || null,
+  });
+  if (isCrossDimensionUnitConversion(sourceUnit, targetUnit) && !widthMm) {
     throw new Error('برای تبدیل بین واحد سطح و طول، عرض اختصاصی ماده اولیه باید بر حسب میلیمتر وارد شده باشد.');
   }
 
+  const context = { record: values, widthMm };
   const convertedQuantity = conversion.kind === 'unit_price'
-    ? getUnitConversionFactor(sourceUnit, targetUnit, { record: values })
-    : convertBetweenUnits(sourceQty, sourceUnit, targetUnit, { record: values });
+    ? getUnitConversionFactor(sourceUnit, targetUnit, context)
+    : convertBetweenUnits(sourceQty, sourceUnit, targetUnit, context);
   const converted = conversion.kind === 'unit_price'
     ? sourceQty / convertedQuantity
     : convertedQuantity;

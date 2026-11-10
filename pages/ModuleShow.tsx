@@ -19,10 +19,16 @@ import FieldGroupsTabs from '../components/moduleShow/FieldGroupsTabs';
 import TablesSection from '../components/moduleShow/TablesSection';
 import PrintSection from '../components/moduleShow/PrintSection';
 import StartProductionModal, { type StartMaterialGroup, type StartMaterialPiece, type StartMaterialDeliveryRow } from '../components/production/StartProductionModal';
-import { getDeliveryMainQuantity } from '../utils/productionDeliveryRows';
+import {
+  type DeliveryType,
+  calculatePieceQuantity,
+  getDeliveryMainQuantity,
+  inferGroupDefaultDeliveryType,
+  resolveDeliveryType,
+} from '../utils/productionDeliveryRows';
 import { usePrintManager } from '../utils/printTemplates/usePrintManager';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
-import { convertArea } from '../utils/unitConversions';
+import { convertArea, resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { formatStockPrintValue } from '../utils/stockPrintFormatter';
 import QrScanPopover from '../components/QrScanPopover';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
@@ -228,16 +234,31 @@ const ModuleShow: React.FC = () => {
 
   const calcDeliveredQty = getDeliveryMainQuantity;
 
-  const sumDeliveredRows = (rows: StartMaterialDeliveryRow[]) => {
-    return rows.reduce((sum: number, row: StartMaterialDeliveryRow) => sum + calcDeliveredQty(row), 0);
+  const sumDeliveredRows = (rows: StartMaterialDeliveryRow[], groupDeliveryType?: DeliveryType) => {
+    return rows.reduce((sum: number, row: StartMaterialDeliveryRow) => sum + getDeliveryMainQuantity(row, groupDeliveryType), 0);
   };
 
   const buildDeliveryRowKey = () => `delivery_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 
   const normalizeDeliveryRow = (group: StartMaterialGroup, rawRow?: any): StartMaterialDeliveryRow => {
     const firstPiece = Array.isArray(group.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
+    const groupType = resolveDeliveryType(group);
+    const deliveryType = rawRow?.deliveryType || (rawRow as any)?.delivery_type
+      ? resolveDeliveryType(rawRow)
+      : groupType;
+    const isPiece = deliveryType === 'piece';
+    const isBlankAdd = !rawRow;
+    const length = isBlankAdd ? 0 : toNumber(rawRow?.length ?? (isPiece ? firstPiece?.length : 0) ?? 0);
+    const width = isBlankAdd ? 0 : toNumber(rawRow?.width ?? (isPiece ? firstPiece?.width : 0) ?? 0);
+    const quantity = isBlankAdd
+      ? (isPiece ? 1 : 0)
+      : Math.max(0, toNumber(rawRow?.quantity ?? (isPiece ? firstPiece?.quantity : 0) ?? (isPiece ? 1 : 0)));
+    const mainQty = isBlankAdd
+      ? 0
+      : getDeliveryMainQuantity({ ...(rawRow || {}), length, width, quantity }, deliveryType);
     return {
       key: String(rawRow?.key || buildDeliveryRowKey()),
+      deliveryType,
       pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || null,
       sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || null,
@@ -246,35 +267,34 @@ const ModuleShow: React.FC = () => {
         ? (rawRow?.targetBundleId || rawRow?.target_bundle_id || USE_SOURCE_BUNDLE_VALUE)
         : CREATE_NEW_BUNDLE_VALUE,
       targetBundleLabel: rawRow?.targetBundleLabel || rawRow?.target_bundle_label || null,
-      name: String(rawRow?.name ?? firstPiece?.name ?? ''),
-      length: toNumber(rawRow?.length ?? firstPiece?.length ?? 0),
-      width: toNumber(rawRow?.width ?? firstPiece?.width ?? 0),
-      quantity: toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1),
+      name: isBlankAdd ? '' : (isPiece ? String(rawRow?.name ?? firstPiece?.name ?? '') : String(rawRow?.name ?? '')),
+      length,
+      width,
+      conversionWidthMm: rawRow?.conversionWidthMm ? toNumber(rawRow.conversionWidthMm) : undefined,
+      quantity,
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
-      mainQuantity: toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? 0),
+      mainQuantity: mainQty,
       subQuantity: toNumber(rawRow?.subQuantity ?? 0),
-      deliveredQty: calcDeliveredQty({
-        mainQuantity: rawRow?.mainQuantity ?? rawRow?.deliveredQty,
-        length: rawRow?.length ?? firstPiece?.length ?? 0,
-        width: rawRow?.width ?? firstPiece?.width ?? 0,
-        quantity: rawRow?.quantity ?? firstPiece?.quantity ?? 1,
-      }),
+      deliveredQty: mainQty,
     };
   };
 
   const recalcStartGroup = (group: StartMaterialGroup): StartMaterialGroup => {
     const pieces = Array.isArray(group.pieces) ? group.pieces : [];
+    const resolvedType = inferGroupDefaultDeliveryType(pieces, group.deliveryType ?? (group as any)?.delivery_type, group.deliveryRows);
     const deliveryRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
       ...row,
-      deliveredQty: calcDeliveredQty(row),
+      deliveryType: row.deliveryType || resolvedType,
+      deliveredQty: getDeliveryMainQuantity(row, resolvedType),
     }));
     return {
       ...group,
+      deliveryType: resolvedType,
       deliveryRows,
       totalPerItemUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0),
       totalUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0),
-      totalDeliveredQty: sumDeliveredRows(deliveryRows),
+      totalDeliveredQty: sumDeliveredRows(deliveryRows, resolvedType),
     };
   };
 
@@ -373,6 +393,7 @@ const ModuleShow: React.FC = () => {
           sourceShelfId: sourceShelfId ? String(sourceShelfId) : null,
           sourceBundleId: sourceBundleId ? String(sourceBundleId) : null,
           productionShelfId: order?.production_shelf_id || null,
+          deliveryType: inferGroupDefaultDeliveryType(pieces, row?.delivery_type ?? row?.deliveryType),
           pieces,
           deliveryRows: [],
           totalPerItemUsage,
@@ -421,6 +442,68 @@ const ModuleShow: React.FC = () => {
       const deliveryRows = Array.isArray(group.deliveryRows) ? [...group.deliveryRows] : [];
       deliveryRows.push(normalizeDeliveryRow(group));
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
+      return next;
+    });
+  }, []);
+
+  const changeStartDeliveryType = useCallback((groupIndex: number, deliveryType: DeliveryType) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const deliveryRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
+        ...row,
+        deliveryType,
+      }));
+      next[groupIndex] = recalcStartGroup({
+        ...group,
+        deliveryType,
+        deliveryRows,
+        isConfirmed: false,
+      });
+      return next;
+    });
+  }, []);
+
+  const addAllBomPiecesToStartDelivery = useCallback((groupIndex: number) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const availablePieces = Array.isArray(group.pieces) ? group.pieces : [];
+      if (!availablePieces.length) return prev;
+
+      const existingRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).filter(
+        (r) => toNumber(r.mainQuantity) > 0 || String(r.name || '').trim() !== ''
+      );
+      const existingNames = new Set(existingRows.map((r) => String(r.name || '').trim()).filter(Boolean));
+      const newRows = availablePieces
+        .filter((p) => !existingNames.has(String(p.name || '').trim()))
+        .map((piece) => {
+          const qtyCount = toNumber(piece.totalQuantity) || toNumber(piece.quantity) || 1;
+          const pieceQty = calculatePieceQuantity(piece.length, piece.width, qtyCount, piece.totalUsage);
+          return normalizeDeliveryRow({ ...group, deliveryType: 'piece' }, {
+            deliveryType: 'piece',
+            pieceKey: piece.key,
+            name: piece.name,
+            length: piece.length,
+            width: piece.width,
+            quantity: qtyCount,
+            mainUnit: piece.mainUnit,
+            subUnit: piece.subUnit,
+            mainQuantity: pieceQty,
+            deliveredQty: pieceQty,
+            subQuantity: toNumber(piece.subUsage),
+          });
+        });
+
+      const mergedRows = [...existingRows.map((r) => ({ ...r, deliveryType: 'piece' as DeliveryType })), ...newRows];
+      next[groupIndex] = recalcStartGroup({
+        ...group,
+        deliveryType: 'piece',
+        deliveryRows: mergedRows,
+        isConfirmed: false,
+      });
       return next;
     });
   }, []);
@@ -499,12 +582,22 @@ const ModuleShow: React.FC = () => {
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['mainQuantity', 'subQuantity'];
+      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = [
+        'length',
+        'width',
+        'conversionWidthMm',
+        'quantity',
+        'mainQuantity',
+        'subQuantity',
+      ];
       const nextValue = numericFields.includes(field)
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
       const updatedRow = { ...currentRow, [field]: nextValue };
-      deliveryRows[rowIndex] = { ...updatedRow, deliveredQty: calcDeliveredQty(updatedRow) };
+      deliveryRows[rowIndex] = {
+        ...updatedRow,
+        deliveredQty: getDeliveryMainQuantity(updatedRow, resolveDeliveryType(group)),
+      };
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
     });
@@ -1206,16 +1299,17 @@ const ModuleShow: React.FC = () => {
             .filter((value): value is string => !!value)
         )
       );
-      const fetchedProductMeta = new Map<string, { name: string; system_code: string }>();
+      const fetchedProductMeta = new Map<string, { name: string; system_code: string; productWidthMm: number | null }>();
       if (selectedProductIds.length > 0) {
         const { data: products } = await supabase
           .from('products')
-          .select('id, name, system_code')
+          .select('id, name, system_code, category, leather_width, lining_width, accessory_width')
           .in('id', selectedProductIds);
         (products || []).forEach((product: any) => {
           fetchedProductMeta.set(String(product.id), {
             name: String(product.name || ''),
             system_code: String(product.system_code || ''),
+            productWidthMm: resolveUnitConversionWidthMm({ record: product }),
           });
         });
       }
@@ -1225,20 +1319,28 @@ const ModuleShow: React.FC = () => {
         const selectedMeta = group.selectedProductId
           ? (fetchedProductMeta.get(group.selectedProductId) || productMetaMap.get(group.selectedProductId))
           : null;
+        const fetchedMeta = group.selectedProductId ? fetchedProductMeta.get(group.selectedProductId) : null;
         const savedGroup = draftGroups.find((item: any) => item?.key === group.key);
-        const baseWithMeta = {
+        const baseWithMeta: StartMaterialGroup = {
           ...group,
           selectedProductName: selectedMeta?.name || group.selectedProductName,
           selectedProductCode: selectedMeta?.system_code || group.selectedProductCode,
+          productWidthMm: fetchedMeta?.productWidthMm ?? group.productWidthMm ?? null,
         };
         if (!savedGroup) return baseWithMeta;
         const savedDeliveryRows = Array.isArray(savedGroup?.deliveryRows) ? savedGroup.deliveryRows : [];
-        const deliveryRows: StartMaterialDeliveryRow[] = savedDeliveryRows.map((row: any) =>
-          normalizeDeliveryRow(baseWithMeta, row)
+        const resolvedType = inferGroupDefaultDeliveryType(
+          baseWithMeta.pieces,
+          savedGroup?.deliveryType ?? (savedGroup as any)?.delivery_type ?? baseWithMeta.deliveryType,
+          savedDeliveryRows
         );
-        const totalPerItemUsage = baseWithMeta.pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0);
-        const totalUsage = baseWithMeta.pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0);
-        const totalDeliveredQty = sumDeliveredRows(deliveryRows);
+        const groupWithType = { ...baseWithMeta, deliveryType: resolvedType };
+        const deliveryRows: StartMaterialDeliveryRow[] = savedDeliveryRows.map((row: any) =>
+          normalizeDeliveryRow(groupWithType, row)
+        );
+        const totalPerItemUsage = groupWithType.pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.perItemUsage, 0);
+        const totalUsage = groupWithType.pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + piece.totalUsage, 0);
+        const totalDeliveredQty = sumDeliveredRows(deliveryRows, resolvedType);
         const savedName = typeof savedGroup?.selectedProductName === 'string' && savedGroup.selectedProductName.trim() && savedGroup.selectedProductName !== '-'
           ? savedGroup.selectedProductName
           : null;
@@ -1246,7 +1348,7 @@ const ModuleShow: React.FC = () => {
           ? savedGroup.selectedProductCode
           : null;
         return {
-          ...baseWithMeta,
+          ...groupWithType,
           deliveryRows,
           totalPerItemUsage,
           totalUsage,
@@ -2568,7 +2670,7 @@ const ModuleShow: React.FC = () => {
         return;
       }
       const deliveryRows = materialsWithDelivery.flatMap((group) =>
-        (group.deliveryRows || []).map((row) => ({ group, row, quantity: calcDeliveredQty(row) }))
+        (group.deliveryRows || []).map((row) => ({ group, row, quantity: getDeliveryMainQuantity(row, resolveDeliveryType(group)) }))
       ).filter((item) => item.quantity > 0);
       if (deliveryRows.some(({ row }) => !row.sourceBundleId || !row.sourceShelfId)) {
         msg.error('برای هر ردیف تحویل، بسته محصول برداشت را انتخاب کنید.');
@@ -2659,7 +2761,7 @@ const ModuleShow: React.FC = () => {
           const pieceKey = String(deliveryRow?.pieceKey || '');
           if (!pieceKey) return;
           const current = deliveredByPieceKey.get(pieceKey) || 0;
-          deliveredByPieceKey.set(pieceKey, current + calcDeliveredQty(deliveryRow));
+          deliveredByPieceKey.set(pieceKey, current + getDeliveryMainQuantity(deliveryRow, resolveDeliveryType(group)));
         });
         const nextPieces = rowPieces.map((piece: any, pieceIndex: number) => {
           const normalizedPieceKey = `${String(piece?.key || 'piece')}_${rowIndex}_${pieceIndex}`;
@@ -2677,6 +2779,7 @@ const ModuleShow: React.FC = () => {
           selected_shelf_id: null,
           source_bundle_id: null,
           production_shelf_id: group.productionShelfId || row?.production_shelf_id || null,
+          delivery_type: group.deliveryType || resolveDeliveryType(group),
           delivered_total_qty: group.totalDeliveredQty,
           delivery_rows: group.deliveryRows || [],
           pieces: nextPieces,
@@ -3488,6 +3591,8 @@ const ModuleShow: React.FC = () => {
             onCancel={() => setProductionModal(null)}
             onStart={handleConfirmStartProduction}
             onToggleGroup={setStartMaterialCollapsed}
+            onDeliveryTypeChange={changeStartDeliveryType}
+            onAddAllBomPieces={addAllBomPiecesToStartDelivery}
             onDeliveryRowAdd={addStartDeliveryRow}
             onDeliveryRowsDelete={deleteStartDeliveryRows}
             onDeliveryRowsTransfer={transferStartDeliveryRows}

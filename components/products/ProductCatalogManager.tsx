@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, App, Button, Divider, Input, InputNumber, Modal, Select, Space, Switch, Tag } from 'antd';
-import { CalculatorOutlined, DeleteOutlined, LinkOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
+import { DeleteOutlined, LinkOutlined, PlusOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ModuleField } from '../../types';
 import { FieldType } from '../../types';
 import SmartFieldRenderer from '../SmartFieldRenderer';
+import UnitCalculatorButton from '../production/UnitCalculatorButton';
 import DynamicSelectField from '../DynamicSelectField';
 import { supabase } from '../../supabaseClient';
-import { canConvertUnits } from '../../utils/unitConversions';
-import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
+import { resolveUnitConversionWidthMm } from '../../utils/unitConversions';
+import { getUnitQuantityConversion, toUnitQuantityNumber } from '../../utils/unitQuantityConversion';
 import {
   buildCatalogGroupPrefixedName,
   buildVariantName,
@@ -720,24 +721,7 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
     }));
   };
 
-  const calculateVariationUnit = (index: number, fieldKey: string) => {
-    const conversion = getUnitQuantityConversion(fieldKey, {
-      availableKeys: VARIATION_COMMON_FIELDS.map((field) => String(field.key)),
-    });
-    const variation = variations[index];
-    if (!conversion || !variation) return;
-    try {
-      const converted = calculateUnitQuantity({
-        ...product,
-        ...variation,
-        main_unit: product?.main_unit,
-        sub_unit: product?.sub_unit,
-      }, conversion);
-      updateVariation(index, { [conversion.targetQtyKey]: converted } as Partial<ProductVariationRecord>);
-    } catch (err: any) {
-      message.error(err?.message || 'خطا در محاسبه واحد');
-    }
-  };
+  const [variationWidthOverrideMm, setVariationWidthOverrideMm] = useState<number | null>(null);
 
   const removeVariation = (index: number) => {
     if (variations[index]?.id) {
@@ -1157,12 +1141,24 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                     }
 
                     if (fieldKey === 'waste_rate' || fieldKey === 'main_unit_price' || fieldKey === 'sub_unit_price' || fieldKey === 'buy_price' || fieldKey === 'sub_buy_price' || fieldKey === 'sell_price' || fieldKey === 'opening_stock' || fieldKey === 'opening_sub_stock') {
-                      const openingUnitsConvertible = !!product?.main_unit && !!product?.sub_unit
-                        && (String(product.main_unit) === String(product.sub_unit) || canConvertUnits(product.main_unit, product.sub_unit));
+                      const hasPairedUnits = !!product?.main_unit && !!product?.sub_unit;
                       const isOpeningSubStock = fieldKey === 'opening_sub_stock';
                       const conversion = getUnitQuantityConversion(fieldKey, {
                         availableKeys: VARIATION_COMMON_FIELDS.map((item) => String(item.key)),
                       });
+                      const applyCatalogUnitPatch = (qtyKey: string, converted: number, nextWidthMm?: number) => {
+                        updateVariation(variationIndex, { [qtyKey]: converted } as Partial<ProductVariationRecord>);
+                        if (nextWidthMm) {
+                          setVariationWidthOverrideMm(nextWidthMm);
+                          const cat = String(product?.category || '').trim();
+                          const widthKey = cat === 'lining' || cat === 'آستر'
+                            ? 'lining_width'
+                            : (cat === 'accessory' || cat === 'خرجکار' ? 'accessory_width' : 'leather_width');
+                          if (onProductPatch && !toUnitQuantityNumber(product?.[widthKey])) {
+                            onProductPatch({ [widthKey]: nextWidthMm });
+                          }
+                        }
+                      };
                       return (
                         <div key={`${variation.id || variationIndex}_${field.key}`}>
                           <div className="text-sm font-bold text-gray-700 mb-2">{field.labels?.fa || field.key}</div>
@@ -1170,22 +1166,38 @@ const ProductCatalogManager: React.FC<ProductCatalogManagerProps> = ({
                             <InputNumber
                               className="w-full"
                               controls={false}
-                              disabled={isOpeningSubStock && !openingUnitsConvertible}
+                              disabled={isOpeningSubStock && !hasPairedUnits}
                               value={(variation as any)[field.key]}
                               onChange={(nextValue) => updateVariation(variationIndex, { [field.key]: nextValue } as Partial<ProductVariationRecord>)}
                               placeholder={field.labels?.fa || field.key}
                             />
-                            {conversion && openingUnitsConvertible && (
-                              <Button
-                                size="small"
-                                icon={<CalculatorOutlined />}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  calculateVariationUnit(variationIndex, fieldKey);
-                                }}
-                              />
-                            )}
+                            {conversion && hasPairedUnits && (() => {
+                              const ctx = {
+                                ...product,
+                                ...variation,
+                                main_unit: product?.main_unit,
+                                sub_unit: product?.sub_unit,
+                              };
+                              return (
+                                <UnitCalculatorButton
+                                  sourceQty={toUnitQuantityNumber((variation as any)[conversion.sourceQtyKey])}
+                                  pairedQty={toUnitQuantityNumber((variation as any)[conversion.targetQtyKey])}
+                                  sourceUnit={String((ctx as any)?.[conversion.sourceUnitKey] || '')}
+                                  targetUnit={String((ctx as any)?.[conversion.targetUnitKey] || '')}
+                                  direction={conversion.direction}
+                                  kind={conversion.kind}
+                                  record={ctx}
+                                  widthMm={variationWidthOverrideMm ?? resolveUnitConversionWidthMm({ record: ctx })}
+                                  title={conversion.title}
+                                  onConvert={(converted, nextWidthMm) => {
+                                    applyCatalogUnitPatch(conversion.targetQtyKey, converted, nextWidthMm);
+                                  }}
+                                  onReverseConvert={(converted, nextWidthMm) => {
+                                    applyCatalogUnitPatch(conversion.sourceQtyKey, converted, nextWidthMm);
+                                  }}
+                                />
+                              );
+                            })()}
                           </div>
                         </div>
                       );

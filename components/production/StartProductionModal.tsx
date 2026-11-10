@@ -1,14 +1,14 @@
 import ResizableTable from '../ResizableTable';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Button, Drawer, Input, InputNumber, Modal, Popover, Select } from 'antd';
-import { CalculatorOutlined, CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
+import { Button, Drawer, Input, InputNumber, Modal, Popover, Segmented, Select, Tag } from 'antd';
+import { CopyOutlined, DeleteOutlined, FileTextOutlined, PlusOutlined, RightOutlined, SaveOutlined, SwapOutlined } from '@ant-design/icons';
 import QrScanPopover from '../QrScanPopover';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
-import { calculateUnitQuantity, getUnitQuantityConversion } from '../../utils/unitQuantityConversion';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE } from '../../utils/productionBundles';
 import DeliveryProgressBar from './DeliveryProgressBar';
-import { getDeliveryMainQuantity } from '../../utils/productionDeliveryRows';
+import { type DeliveryType, getDeliveryMainQuantity, resolveDeliveryType, calculatePieceQuantity } from '../../utils/productionDeliveryRows';
+import UnitCalculatorButton from './UnitCalculatorButton';
 import type { DestinationBundleOption } from '../../utils/destinationBundleOptions';
 
 export type StartMaterialPiece = {
@@ -28,6 +28,7 @@ export type StartMaterialPiece = {
 
 export type StartMaterialDeliveryRow = {
   key: string;
+  deliveryType?: DeliveryType;
   pieceKey?: string;
   sourceBundleId?: string | null;
   sourceShelfId?: string | null;
@@ -38,6 +39,7 @@ export type StartMaterialDeliveryRow = {
   name?: string;
   length?: number;
   width?: number;
+  conversionWidthMm?: number;
   quantity?: number;
   mainUnit: string;
   subUnit: string;
@@ -70,6 +72,8 @@ export type StartMaterialGroup = {
   sourceShelfId: string | null;
   sourceBundleId?: string | null;
   productionShelfId: string | null;
+  deliveryType?: DeliveryType;
+  productWidthMm?: number | null;
   pieces: StartMaterialPiece[];
   deliveryRows: StartMaterialDeliveryRow[];
   totalPerItemUsage: number;
@@ -106,6 +110,8 @@ interface StartProductionModalProps {
   onCancel: () => void;
   onStart: () => void;
   onToggleGroup: (groupIndex: number, collapsed: boolean) => void;
+  onDeliveryTypeChange?: (groupIndex: number, deliveryType: DeliveryType) => void;
+  onAddAllBomPieces?: (groupIndex: number) => void;
   onDeliveryRowAdd: (groupIndex: number) => void;
   onDeliveryRowsDelete: (groupIndex: number, rowKeys: string[]) => void;
   onDeliveryRowsTransfer: (
@@ -218,6 +224,8 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
   onCancel,
   onStart,
   onToggleGroup,
+  onDeliveryTypeChange,
+  onAddAllBomPieces,
   onDeliveryRowAdd,
   onDeliveryRowsDelete,
   onDeliveryRowsTransfer,
@@ -785,6 +793,32 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                           از محصول "{group.selectedProductName || '-'}" برای سفارش تولید "{orderName || '-'}" چه مقدار تحویل می دهید؟
                         </div>
 
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-medium text-[#17372a]">نوع تحویل:</span>
+                            <Segmented
+                              size="small"
+                              value={group.deliveryType || 'bulk'}
+                              onChange={(val) => onDeliveryTypeChange?.(groupIndex, val as DeliveryType)}
+                              options={[
+                                { label: 'تحویل فله‌ای', value: 'bulk' },
+                                { label: 'تحویل قطعه‌ای', value: 'piece' },
+                              ]}
+                            />
+                          </div>
+                          {group.deliveryType === 'piece' && (group.pieces || []).length > 0 && onAddAllBomPieces && (
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<PlusOutlined />}
+                              className="!text-[#17372a] hover:!text-[#1f4534] text-xs p-0"
+                              onClick={() => onAddAllBomPieces(groupIndex)}
+                            >
+                              بارگذاری همه قطعات BOM
+                            </Button>
+                          )}
+                        </div>
+
                         {previousDeliveryRows.length > 0 ? (
                           <div className="rounded-lg border border-blue-100 bg-blue-50 p-2">
                             <div className="text-[11px] text-blue-800 mb-1">
@@ -798,59 +832,71 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               scroll={{ x: true }}
                               columns={[
                                 {
+                                  title: 'نوع تحویل',
+                                  key: 'deliveryType',
+                                  width: 90,
+                                  render: (_: any, record: StartMaterialDeliveryRow) => (
+                                    <Tag color={resolveDeliveryType(record) === 'piece' ? 'purple' : 'cyan'}>
+                                      {resolveDeliveryType(record) === 'piece' ? 'قطعه‌ای' : 'فله‌ای'}
+                                    </Tag>
+                                  ),
+                                },
+                                {
                                   title: 'نام قطعه',
                                   dataIndex: 'name',
                                   key: 'name',
-                                  width: 180,
-                                  render: (value: string) => <span className="font-medium">{value || '-'}</span>,
+                                  width: 160,
+                                  render: (value: string, record: StartMaterialDeliveryRow) => (
+                                    <span className="font-medium">{resolveDeliveryType(record) === 'piece' ? (value || '-') : 'تحویل فله‌ای'}</span>
+                                  ),
                                 },
                                 {
                                   title: 'طول',
                                   dataIndex: 'length',
                                   key: 'length',
-                                  width: 90,
-                                  render: (value: number) => formatQty(value),
+                                  width: 80,
+                                  render: (value: number, record: StartMaterialDeliveryRow) => (resolveDeliveryType(record) === 'piece' && value ? formatQty(value) : '-'),
                                 },
                                 {
                                   title: 'عرض',
                                   dataIndex: 'width',
                                   key: 'width',
-                                  width: 90,
-                                  render: (value: number) => formatQty(value),
+                                  width: 80,
+                                  render: (value: number, record: StartMaterialDeliveryRow) => (resolveDeliveryType(record) === 'piece' && value ? formatQty(value) : '-'),
                                 },
                                 {
                                   title: 'تعداد',
                                   dataIndex: 'quantity',
                                   key: 'quantity',
-                                  width: 90,
-                                  render: (value: number) => formatQty(value),
+                                  width: 80,
+                                  render: (value: number, record: StartMaterialDeliveryRow) => (resolveDeliveryType(record) === 'piece' && value ? formatQty(value) : '-'),
                                 },
                                 {
                                   title: 'واحد اصلی',
                                   dataIndex: 'mainUnit',
                                   key: 'mainUnit',
-                                  width: 110,
+                                  width: 100,
                                   render: (value: string) => <span className="text-gray-700">{value || '-'}</span>,
                                 },
                                 {
                                   title: 'واحد فرعی',
                                   dataIndex: 'subUnit',
                                   key: 'subUnit',
-                                  width: 110,
+                                  width: 100,
                                   render: (value: string) => <span className="text-gray-700">{value || '-'}</span>,
                                 },
                                 {
                                   title: 'مقدار واحد فرعی',
                                   dataIndex: 'subQuantity',
                                   key: 'subQuantity',
-                                  width: 140,
+                                  width: 120,
                                   render: (value: number) => <span className="font-semibold text-[#17372a]">{formatQty(value)}</span>,
                                 },
                                 {
                                   title: 'مقدار واحد اصلی',
                                   dataIndex: 'mainQuantity',
                                   key: 'mainQuantity',
-                                  width: 140,
+                                  width: 120,
                                   render: (_value: number, record: StartMaterialDeliveryRow) => (
                                     <span className="font-semibold text-[#17372a]">{formatQty(calcDeliveredQty(record))}</span>
                                   ),
@@ -899,25 +945,268 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                           </Button>
                         </div>
 
-                        <ResizableTable
-                          size={isMobile ? 'middle' : 'small'}
-                          pagination={false}
-                          dataSource={group.deliveryRows || []}
-                          rowKey="key"
-                          className="start-production-delivery-table w-full"
-                          tableLayout="fixed"
-                          scroll={{ x: 'max-content' }}
-                          rowSelection={{
-                            selectedRowKeys,
-                            columnWidth: isMobile ? 40 : 34,
-                            onChange: (keys) => setSelectedRowKeys(group.key, keys.map((k) => String(k))),
-                          }}
-                          columns={[
+                        {(() => {
+                          const isPiece = resolveDeliveryType(group) === 'piece';
+                          const pieceColumns = [
+                            {
+                              title: 'نام قطعه',
+                              dataIndex: 'name',
+                              key: 'name',
+                              width: isMobile ? 180 : 160,
+                              render: (value: string, record: StartMaterialDeliveryRow) => {
+                                const uniquePieces = Array.from(
+                                  (group.pieces || []).reduce((map, p) => {
+                                    const k = String(p.name || p.key || '').trim();
+                                    if (!k) return map;
+                                    const existing = map.get(k);
+                                    if (!existing) {
+                                      map.set(k, { ...p });
+                                    } else {
+                                      map.set(k, {
+                                        ...existing,
+                                        totalQuantity: (existing.totalQuantity || existing.quantity || 0) + (p.totalQuantity || p.quantity || 0),
+                                        totalUsage: (existing.totalUsage || 0) + (p.totalUsage || 0),
+                                        subUsage: (existing.subUsage || 0) + (p.subUsage || 0),
+                                      });
+                                    }
+                                    return map;
+                                  }, new Map<string, StartMaterialPiece>()).values()
+                                );
+                                const pieceOptions = uniquePieces.map((p) => ({
+                                  label: `${p.name} (${formatQty(p.length || 0)}×${formatQty(p.width || 0)})`,
+                                  value: p.name,
+                                }));
+                                return (
+                                  <Select
+                                    value={value || undefined}
+                                    placeholder="انتخاب از قطعات BOM"
+                                    allowClear
+                                    showSearch
+                                    options={pieceOptions}
+                                    className="w-full min-w-0"
+                                    getPopupContainer={() => document.body}
+                                    onSearch={(text) => {
+                                      if (text && !pieceOptions.some((o) => o.value === text)) {
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', text);
+                                      }
+                                    }}
+                                    onChange={(pieceName) => {
+                                      const found = uniquePieces.find((p) => p.name === pieceName);
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'name', pieceName || '');
+                                      if (found) {
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'pieceKey', found.key);
+                                        if (found.length) onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', found.length);
+                                        if (found.width) onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', found.width);
+                                        const pieceCount = found.totalQuantity || found.quantity || 1;
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', pieceCount);
+                                        if (found.mainUnit) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainUnit', found.mainUnit);
+                                        if (found.subUnit) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subUnit', found.subUnit);
+                                        if (found.subUsage) onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', found.subUsage);
+                                        const pQty = calculatePieceQuantity(found.length, found.width, pieceCount, found.totalUsage);
+                                        if (pQty > 0) {
+                                          onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', pQty);
+                                        }
+                                      }
+                                    }}
+                                  />
+                                );
+                              },
+                            },
+                            {
+                              title: 'طول',
+                              dataIndex: 'length',
+                              key: 'length',
+                              width: isMobile ? 110 : 90,
+                              render: (value: number, record: StartMaterialDeliveryRow) => (
+                                <InputNumber
+                                  value={value}
+                                  className="w-full persian-number"
+                                  stringMode
+                                  formatter={(v) => formatGroupedInput(v)}
+                                  parser={(v) => parseNumberInput(v)}
+                                  onChange={(nextVal) => {
+                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'length', nextVal);
+                                    const nextQty = calculatePieceQuantity(nextVal, record.width, record.quantity);
+                                    if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
+                                  }}
+                                  onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
+                                />
+                              ),
+                            },
+                            {
+                              title: 'عرض',
+                              dataIndex: 'width',
+                              key: 'width',
+                              width: isMobile ? 110 : 90,
+                              render: (value: number, record: StartMaterialDeliveryRow) => (
+                                <InputNumber
+                                  value={value}
+                                  className="w-full persian-number"
+                                  stringMode
+                                  formatter={(v) => formatGroupedInput(v)}
+                                  parser={(v) => parseNumberInput(v)}
+                                  onChange={(nextVal) => {
+                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'width', nextVal);
+                                    const nextQty = calculatePieceQuantity(record.length, nextVal, record.quantity);
+                                    if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
+                                  }}
+                                  onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
+                                />
+                              ),
+                            },
+                            {
+                              title: 'تعداد قطعه',
+                              dataIndex: 'quantity',
+                              key: 'quantity',
+                              width: isMobile ? 110 : 90,
+                              render: (value: number, record: StartMaterialDeliveryRow) => (
+                                <InputNumber
+                                  value={value}
+                                  className="w-full persian-number"
+                                  stringMode
+                                  formatter={(v) => formatGroupedInput(v)}
+                                  parser={(v) => parseNumberInput(v)}
+                                  onChange={(nextVal) => {
+                                    onDeliveryRowFieldChange(groupIndex, String(record.key), 'quantity', nextVal);
+                                    const nextQty = calculatePieceQuantity(record.length, record.width, nextVal);
+                                    if (nextQty > 0) onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextQty);
+                                  }}
+                                  onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
+                                />
+                              ),
+                            },
+                          ];
+
+                          const commonColumns = [
+                            {
+                              title: 'واحد اصلی',
+                              dataIndex: 'mainUnit',
+                              key: 'mainUnit',
+                              width: isMobile ? 180 : 130,
+                              render: (value: string, record: StartMaterialDeliveryRow) => (
+                                readonlyUnitFields ? (
+                                  <span className="font-semibold text-[#17372a]">{value || '-'}</span>
+                                ) : (
+                                  <Select
+                                    value={value || null}
+                                    options={HARD_CODED_UNIT_OPTIONS as any}
+                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainUnit', nextValue)}
+                                    className="w-full"
+                                    getPopupContainer={() => document.body}
+                                  />
+                                )
+                              ),
+                            },
+                            {
+                              title: isPiece ? 'مقدار کل قطعه' : 'مقدار واحد اصلی',
+                              dataIndex: 'mainQuantity',
+                              key: 'mainQuantity',
+                              width: isMobile ? 220 : 190,
+                              render: (value: number, record: StartMaterialDeliveryRow) => (
+                                <div className="flex gap-1 items-center">
+                                  <InputNumber
+                                    value={value}
+                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
+                                    className="w-full persian-number"
+                                    stringMode
+                                    formatter={(v) => formatGroupedInput(v)}
+                                    parser={(v) => parseNumberInput(v)}
+                                    onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
+                                  />
+                                  <UnitCalculatorButton
+                                    sourceQty={record.mainQuantity}
+                                    pairedQty={record.subQuantity}
+                                    sourceUnit={record.mainUnit}
+                                    targetUnit={record.subUnit}
+                                    direction="main_to_sub"
+                                    record={{
+                                      ...record,
+                                      conversion_width_mm: record.conversionWidthMm ?? group.productWidthMm ?? null,
+                                    }}
+                                    widthMm={record.conversionWidthMm ?? group.productWidthMm ?? null}
+                                    onConvert={(converted, nextW) => {
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', converted);
+                                      if (nextW) {
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'conversionWidthMm', nextW);
+                                      }
+                                    }}
+                                    onReverseConvert={(converted, nextW) => {
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', converted);
+                                      if (nextW) {
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'conversionWidthMm', nextW);
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              ),
+                            },
+                            {
+                              title: 'واحد فرعی',
+                              dataIndex: 'subUnit',
+                              key: 'subUnit',
+                              width: isMobile ? 180 : 130,
+                              render: (value: string, record: StartMaterialDeliveryRow) => (
+                                readonlyUnitFields ? (
+                                  <span className="font-semibold text-[#17372a]">{value || '-'}</span>
+                                ) : (
+                                  <Select
+                                    value={value || null}
+                                    options={HARD_CODED_UNIT_OPTIONS as any}
+                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subUnit', nextValue)}
+                                    className="w-full"
+                                    getPopupContainer={() => document.body}
+                                  />
+                                )
+                              ),
+                            },
+                            {
+                              title: 'مقدار واحد فرعی',
+                              dataIndex: 'subQuantity',
+                              key: 'subQuantity',
+                              width: isMobile ? 220 : 190,
+                              render: (value: number, record: StartMaterialDeliveryRow) => (
+                                <div className="flex gap-1 items-center">
+                                  <InputNumber
+                                    value={value}
+                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)}
+                                    className="w-full persian-number"
+                                    stringMode
+                                    formatter={(v) => formatGroupedInput(v)}
+                                    parser={(v) => parseNumberInput(v)}
+                                    onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)}
+                                  />
+                                  <UnitCalculatorButton
+                                    sourceQty={record.subQuantity}
+                                    pairedQty={record.mainQuantity}
+                                    sourceUnit={record.subUnit}
+                                    targetUnit={record.mainUnit}
+                                    direction="sub_to_main"
+                                    record={{
+                                      ...record,
+                                      conversion_width_mm: record.conversionWidthMm ?? group.productWidthMm ?? null,
+                                    }}
+                                    widthMm={record.conversionWidthMm ?? group.productWidthMm ?? null}
+                                    onConvert={(converted, nextW) => {
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', converted);
+                                      if (nextW) {
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'conversionWidthMm', nextW);
+                                      }
+                                    }}
+                                    onReverseConvert={(converted, nextW) => {
+                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', converted);
+                                      if (nextW) {
+                                        onDeliveryRowFieldChange(groupIndex, String(record.key), 'conversionWidthMm', nextW);
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              ),
+                            },
                             {
                               title: 'بسته برداشت',
                               dataIndex: 'sourceBundleId',
                               key: 'sourceBundleId',
-                              width: isMobile ? 260 : 240,
+                              width: isMobile ? 240 : 210,
                               render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
                                 <Select
                                   value={value || undefined}
@@ -940,7 +1229,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                               title: 'بسته تحویل مقصد',
                               dataIndex: 'targetBundleId',
                               key: 'targetBundleId',
-                              width: isMobile ? 280 : 250,
+                              width: isMobile ? 260 : 220,
                               render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => {
                                 const rowTargetShelfId = productionTargetType === 'stage'
                                   ? productionStageOptions?.find((option) => String(option.value) === String(record.targetStageTaskId || ''))?.shelfId
@@ -980,104 +1269,28 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 );
                               },
                             },
-                            {
-                              title: 'واحد اصلی',
-                              dataIndex: 'mainUnit',
-                              key: 'mainUnit',
-                              width: isMobile ? 200 : 140,
-                              render: (value: string, record: StartMaterialDeliveryRow) => (
-                                readonlyUnitFields ? (
-                                  <span className="font-semibold text-[#17372a]">{value || '-'}</span>
-                                ) : (
-                                  <Select
-                                    value={value || null}
-                                    options={HARD_CODED_UNIT_OPTIONS as any}
-                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainUnit', nextValue)}
-                                    className="w-full"
-                                    getPopupContainer={() => document.body}
-                                  />
-                                )
-                              ),
-                            },
-                            {
-                              title: 'مقدار واحد اصلی',
-                              dataIndex: 'mainQuantity',
-                              key: 'mainQuantity',
-                              width: isMobile ? 240 : 220,
-                              render: (value: number, record: StartMaterialDeliveryRow) => (
-                                <div className="flex gap-1">
-                                  <InputNumber value={value}
-                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', nextValue)}
-                                    className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />
-                                  <Button type="text" size="small" title="محاسبه مقدار واحد فرعی" icon={<CalculatorOutlined />} onClick={() => {
-                                    const conversion = getUnitQuantityConversion('mainQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
-                                    if (!conversion) return;
-                                    try {
-                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
-                                    } catch { /* تبدیل فقط وقتی واحدها و مقدار مبدا معتبر باشند انجام می‌شود. */ }
-                                  }} />
-                                </div>
-                              ),
-                            },
-                            {
-                              title: 'واحد فرعی',
-                              dataIndex: 'subUnit',
-                              key: 'subUnit',
-                              width: isMobile ? 200 : 140,
-                              render: (value: string, record: StartMaterialDeliveryRow) => (
-                                readonlyUnitFields ? (
-                                  <span className="font-semibold text-[#17372a]">{value || '-'}</span>
-                                ) : (
-                                  <Select
-                                    value={value || null}
-                                    options={HARD_CODED_UNIT_OPTIONS as any}
-                                    onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subUnit', nextValue)}
-                                    className="w-full"
-                                    getPopupContainer={() => document.body}
-                                  />
-                                )
-                              ),
-                            },
-                            {
-                              title: 'مقدار واحد فرعی',
-                              dataIndex: 'subQuantity',
-                              key: 'subQuantity',
-                              width: isMobile ? 240 : 220,
-                              render: (value: number, record: StartMaterialDeliveryRow) => (
-                                <div className="flex gap-1">
-                                  <InputNumber value={value} onChange={(nextValue) => onDeliveryRowFieldChange(groupIndex, String(record.key), 'subQuantity', nextValue)} className="w-full persian-number" stringMode formatter={(v) => formatGroupedInput(v)} parser={(v) => parseNumberInput(v)} onKeyDown={(e) => handleDeliveryNumericKeyDown(e, groupIndex)} />
-                                  <Button type="text" size="small" title="محاسبه مقدار واحد اصلی" icon={<CalculatorOutlined />} onClick={() => {
-                                    const conversion = getUnitQuantityConversion('subQuantity', { availableKeys: ['mainQuantity', 'subQuantity'] });
-                                    if (!conversion) return;
-                                    try {
-                                      onDeliveryRowFieldChange(groupIndex, String(record.key), 'mainQuantity', calculateUnitQuantity({ mainQuantity: record.mainQuantity, subQuantity: record.subQuantity, main_unit: record.mainUnit, sub_unit: record.subUnit, widthMm: record.width || group.pieces?.[0]?.width }, conversion));
-                                    } catch { /* اعتبارسنجی تبدیل هنگام ورود واحدها انجام می‌شود. */ }
-                                  }} />
-                                </div>
-                              ),
-                            },
                             ...(productionTargetType === 'stage' ? [{
                               title: 'مرحله مقصد',
                               dataIndex: 'targetStageTaskId',
                               key: 'targetStageTaskId',
-                              width: isMobile ? 320 : 360,
+                              width: isMobile ? 280 : 300,
                               render: (value: string | null | undefined, record: StartMaterialDeliveryRow) => (
                                 <div>
-                                <Select
-                                  value={value || undefined}
-                                  placeholder="انتخاب مرحله"
-                                  options={productionStageOptions}
-                                  optionRender={(option) => <div className="whitespace-normal leading-6">{option.label}</div>}
-                                  title={productionStageOptions.find((option) => option.value === value)?.label}
-                                  showSearch
-                                  optionFilterProp="label"
-                                  className="w-full"
-                                  getPopupContainer={() => document.body}
-                                  onChange={(stageTaskId) => onProductionStageChange?.(groupIndex, String(record.key), stageTaskId || null)}
-                                />
-                                {record.sourceShelfId && productionStageOptions.find((option) => option.value === value)?.shelfId === record.sourceShelfId ? (
-                                  <div role="alert" className="mt-1 text-xs font-medium text-amber-700">قفسه مبدأ و مقصد یکسان است؛ مرحله یا قفسه مقصد را تغییر دهید.</div>
-                                ) : null}
+                                  <Select
+                                    value={value || undefined}
+                                    placeholder="انتخاب مرحله"
+                                    options={productionStageOptions}
+                                    optionRender={(option) => <div className="whitespace-normal leading-6">{option.label}</div>}
+                                    title={productionStageOptions.find((option) => option.value === value)?.label}
+                                    showSearch
+                                    optionFilterProp="label"
+                                    className="w-full"
+                                    getPopupContainer={() => document.body}
+                                    onChange={(stageTaskId) => onProductionStageChange?.(groupIndex, String(record.key), stageTaskId || null)}
+                                  />
+                                  {record.sourceShelfId && productionStageOptions.find((option) => option.value === value)?.shelfId === record.sourceShelfId ? (
+                                    <div role="alert" className="mt-1 text-xs font-medium text-amber-700">قفسه مبدأ و مقصد یکسان است؛ مرحله یا قفسه مقصد را تغییر دهید.</div>
+                                  ) : null}
                                 </div>
                               ),
                             }] : []),
@@ -1133,8 +1346,28 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 </div>
                               ),
                             },
-                          ]}
-                        />
+                          ];
+
+                          const activeColumns = isPiece ? [...pieceColumns, ...commonColumns] : commonColumns;
+
+                          return (
+                            <ResizableTable
+                              size={isMobile ? 'middle' : 'small'}
+                              pagination={false}
+                              dataSource={group.deliveryRows || []}
+                              rowKey="key"
+                              className="start-production-delivery-table w-full"
+                              tableLayout="fixed"
+                              scroll={{ x: 'max-content' }}
+                              rowSelection={{
+                                selectedRowKeys,
+                                columnWidth: isMobile ? 40 : 34,
+                                onChange: (keys) => setSelectedRowKeys(group.key, keys.map((k) => String(k))),
+                              }}
+                              columns={activeColumns}
+                            />
+                          );
+                        })()}
 
                         {(() => {
                           const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalDeliveredQty));
@@ -1187,6 +1420,14 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   <span className="mr-1">{subUnitLabel}</span>
                                 </span>
                               ) : null}
+                              <span>
+                                حالت تحویل:{' '}
+                                <span className="font-semibold text-[#17372a]">
+                                  {resolveDeliveryType(group) === 'piece'
+                                    ? `قطعه‌ای (${toPersianNumber((group.deliveryRows || []).reduce((s, r) => s + (Number(r.quantity) || 0), 0))} قطعه)`
+                                    : 'فله‌ای'}
+                                </span>
+                              </span>
                             </div>
                           );
                         })()}

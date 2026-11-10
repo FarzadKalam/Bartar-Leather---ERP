@@ -1,12 +1,12 @@
 import ResizableTable from './ResizableTable';
 import React, { useEffect, useState } from 'react';
 import { App, Table, Button, Space, Empty, Typography, Spin, Select, Tooltip } from 'antd';
-import { CalculatorOutlined, EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined, CopyOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, PlusOutlined, SaveOutlined, CloseOutlined, CloseCircleOutlined, RightOutlined, CopyOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { FieldType, ModuleField } from '../types';
 import { calculateRow } from '../utils/calculations';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
-import { canConvertUnits, convertArea, normalizeUnitValue } from '../utils/unitConversions';
+import { convertArea, normalizeUnitValue, resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
 import {
   calculateUnitQuantity,
@@ -14,6 +14,7 @@ import {
 } from '../utils/unitQuantityConversion';
 import SmartFieldRenderer from './SmartFieldRenderer';
 import SmartTableRenderer from './SmartTableRenderer';
+import UnitCalculatorButton from './production/UnitCalculatorButton';
 import QrScanPopover from './QrScanPopover';
 import { dedupeOptionsByLabel } from './editableTable/tableUtils';
 import { insertChangelog } from './editableTable/changelogHelpers';
@@ -159,6 +160,7 @@ const EditableTable: React.FC<EditableTableProps> = ({
       : { zIndex: 4000, minWidth: desktopMinWidth, maxWidth: 'calc(100vw - 48px)' }
   );
 
+  const [unitWidthByRowKey, setUnitWidthByRowKey] = useState<Record<string, number>>({});
   const getActiveRows = () => (mode === 'local' ? data : (isEditing ? tempData : data));
   const getTableUnitConversion = (fieldKey: string) => getUnitQuantityConversion(fieldKey, {
     availableKeys: (block.tableColumns || []).map((col: any) => String(col?.key || '')),
@@ -195,17 +197,11 @@ const EditableTable: React.FC<EditableTableProps> = ({
     }
   };
 
-  const applyManualUnitConversion = (index: number, fieldKey: string) => {
-    const conversion = getTableUnitConversion(fieldKey);
-    if (!conversion) return;
-    const source = getActiveRows();
-    const row = source[index] || {};
-    try {
-      const converted = calculateUnitQuantity(row, conversion);
-      updateRow(index, conversion.targetQtyKey, converted);
-    } catch (err: any) {
-      message.error(err?.message || 'خطا در محاسبه واحد');
+  const applyManualUnitConversionResult = (index: number, rowKey: string, targetQtyKey: string, converted: number, nextWidthMm?: number) => {
+    if (nextWidthMm) {
+      setUnitWidthByRowKey((prev) => ({ ...prev, [rowKey]: nextWidthMm }));
     }
+    updateRow(index, targetQtyKey, converted);
   };
   const applyDefaultUnitsToRow = (row: any) => {
     if (!row) return row;
@@ -1671,10 +1667,10 @@ const EditableTable: React.FC<EditableTableProps> = ({
           : text;
         const rowMainUnit = String((record as any)?.main_unit || '').trim();
         const rowSubUnit = String((record as any)?.sub_unit || '').trim();
-        const canEditSubQuantity = !!rowMainUnit && !!rowSubUnit && (rowMainUnit === rowSubUnit || canConvertUnits(rowMainUnit, rowSubUnit));
+        const hasPairedUnits = !!rowMainUnit && !!rowSubUnit;
         const dynamicSubQuantityReadonly =
-          ((isAnyInvoiceItems || isProductStockMovements || isBundleContents) && col.key === 'sub_quantity' && !canEditSubQuantity)
-          || ((isProductInventory || isShelfInventory) && col.key === 'sub_stock' && !canEditSubQuantity);
+          ((isAnyInvoiceItems || isProductStockMovements || isBundleContents) && col.key === 'sub_quantity' && !hasPairedUnits)
+          || ((isProductInventory || isShelfInventory) && col.key === 'sub_stock' && !hasPairedUnits);
 
         const fieldConfig: ModuleField = {
           key: col.key,
@@ -1804,19 +1800,24 @@ const EditableTable: React.FC<EditableTableProps> = ({
               </Button>
             )}
             {showUnitConversionButton && unitConversion && (
-              <Tooltip title={unitConversion.title}>
-                <Button
-                  size="small"
-                  type="text"
-                  className="px-1 text-[10px] whitespace-nowrap shrink-0"
-                  icon={<CalculatorOutlined />}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    applyManualUnitConversion(index, col.key);
-                  }}
-                />
-              </Tooltip>
+              <UnitCalculatorButton
+                sourceQty={toPositiveNumber((record as any)?.[unitConversion.sourceQtyKey])}
+                pairedQty={toPositiveNumber((record as any)?.[unitConversion.targetQtyKey])}
+                sourceUnit={String((record as any)?.[unitConversion.sourceUnitKey] || '')}
+                targetUnit={String((record as any)?.[unitConversion.targetUnitKey] || '')}
+                direction={unitConversion.direction}
+                kind={unitConversion.kind}
+                record={record}
+                widthMm={unitWidthByRowKey[rowKey] ?? resolveUnitConversionWidthMm({ record })}
+                title={unitConversion.title}
+                className="px-1 text-[10px]"
+                onConvert={(converted, nextWidthMm) => {
+                  applyManualUnitConversionResult(index, rowKey, unitConversion.targetQtyKey, converted, nextWidthMm);
+                }}
+                onReverseConvert={(converted, nextWidthMm) => {
+                  applyManualUnitConversionResult(index, rowKey, unitConversion.sourceQtyKey, converted, nextWidthMm);
+                }}
+              />
             )}
           </div>
         );

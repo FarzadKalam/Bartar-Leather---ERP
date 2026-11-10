@@ -104,9 +104,12 @@ const getWidthFieldCandidates = (record?: UnitConversionRecord | null) => {
     : [];
 
   return [
-    ...preferred,
     'conversion_width_mm',
+    'conversionWidthMm',
     'material_width_mm',
+    'widthMm',
+    'width_mm',
+    ...preferred,
     'leather_width',
     'lining_width',
     'accessory_width',

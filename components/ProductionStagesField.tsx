@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Avatar, Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
 import { PlusOutlined, UserOutlined, DownOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined, WarningOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -30,12 +30,22 @@ import { loadDestinationBundleOptions, type DestinationBundleOption } from '../u
 import { MODULES } from '../moduleRegistry';
 import { buildTaskStatusUpdatePayload } from '../utils/taskCompletion';
 import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
+import { resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { clearDurableDraft, readDurableDraft, writeDurableDraft } from '../utils/durableDraft';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 import { formatGroupedNumberInput, parseGroupedNumberInput } from '../utils/groupedNumberInput';
 import { FieldType } from '../types';
 import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
-import { getDeliveryMainQuantity, normalizeProductionDeliverySnapshot } from '../utils/productionDeliveryRows';
+import {
+  type DeliveryType,
+  type RemainderMode,
+  calculatePieceQuantity,
+  getDeliveryMainQuantity,
+  inferGroupDefaultDeliveryType,
+  normalizeProductionDeliverySnapshot,
+  resolveDeliveryType,
+  resolveStageRemainderState,
+} from '../utils/productionDeliveryRows';
 
 interface ProductionStagesFieldProps {
   recordId?: string;
@@ -79,6 +89,7 @@ type StageHandoverContext = {
   receiverConfirmation: StageHandoverConfirm;
   previousTotalsByProduct: Record<string, number>;
   previousWasteByProduct: Record<string, number>;
+  previousWasteBundleByProduct?: Record<string, string | null>;
   sourceTotalsByProduct: Record<string, number>;
   orderTotalsByProduct: Record<string, number>;
 };
@@ -95,6 +106,7 @@ type StageHandoverForm = {
   receiver: StageAssignee;
   groups: StageHandoverGroup[];
   wasteByProduct: Record<string, number>;
+  wasteBundleByProduct?: Record<string, string | null>;
   giverConfirmation: StageHandoverConfirm;
   receiverConfirmation: StageHandoverConfirm;
   createdAt?: string | null;
@@ -283,21 +295,34 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   const normalizeHandoverDeliveryRow = useCallback((group: StageHandoverGroup, rawRow?: any): StageHandoverDeliveryRow => {
     const firstPiece = Array.isArray(group?.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
     const firstDeliveryRow = Array.isArray(group?.deliveryRows) && group.deliveryRows.length > 0 ? group.deliveryRows[0] : null;
-    const length = Math.max(0, toNumber(rawRow?.length ?? firstPiece?.length ?? 0));
-    const width = Math.max(0, toNumber(rawRow?.width ?? firstPiece?.width ?? 0));
-    const quantity = Math.max(0, toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1));
+    const groupType = resolveDeliveryType(group);
+    const deliveryType = rawRow?.deliveryType || (rawRow as any)?.delivery_type
+      ? resolveDeliveryType(rawRow)
+      : groupType;
+    const isPiece = deliveryType === 'piece';
+    const isBlankAdd = !rawRow;
+    const length = isBlankAdd ? 0 : Math.max(0, toNumber(rawRow?.length ?? (isPiece ? firstPiece?.length : 0) ?? 0));
+    const width = isBlankAdd ? 0 : Math.max(0, toNumber(rawRow?.width ?? (isPiece ? firstPiece?.width : 0) ?? 0));
+    const quantity = isBlankAdd
+      ? (isPiece ? 1 : 0)
+      : Math.max(0, toNumber(rawRow?.quantity ?? (isPiece ? firstPiece?.quantity : 0) ?? (isPiece ? 1 : 0)));
+    const resolvedQty = isBlankAdd
+      ? 0
+      : getDeliveryMainQuantity({ ...(rawRow || {}), length, width, quantity }, deliveryType);
     return {
       key: String(rawRow?.key || buildHandoverRowKey()),
+      deliveryType,
       pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
-      name: String(rawRow?.name ?? firstPiece?.name ?? ''),
+      name: isBlankAdd ? '' : (isPiece ? String(rawRow?.name ?? firstPiece?.name ?? '') : String(rawRow?.name ?? '')),
       length,
       width,
+      conversionWidthMm: rawRow?.conversionWidthMm ? Math.max(0, toNumber(rawRow.conversionWidthMm)) : undefined,
       quantity,
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
-      mainQuantity: getDeliveryMainQuantity({ length, width, quantity, ...rawRow }),
+      mainQuantity: resolvedQty,
       subQuantity: Math.max(0, toNumber(rawRow?.subQuantity ?? 0)),
-      deliveredQty: getDeliveryMainQuantity({ length, width, quantity, ...rawRow }),
+      deliveredQty: resolvedQty,
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || rawRow?.bundle_id || firstDeliveryRow?.sourceBundleId || (firstDeliveryRow as any)?.source_bundle_id || (firstDeliveryRow as any)?.bundle_id || group?.sourceBundleId || (group as any)?.source_bundle_id || (group as any)?.bundle_id || null,
       sourceBundleLabel: rawRow?.sourceBundleLabel || rawRow?.source_bundle_label || null,
       targetBundleId: rawRow
@@ -309,18 +334,20 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     };
   }, [buildHandoverRowKey, toNumber]);
 
-  const sumDeliveredRows = useCallback((rows: StageHandoverDeliveryRow[]) => {
+  const sumDeliveredRows = useCallback((rows: StageHandoverDeliveryRow[], groupDeliveryType?: DeliveryType) => {
     return rows.reduce(
-      (sum, row) => sum + Math.max(0, toNumber((row as any)?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
+      (sum, row) => sum + getDeliveryMainQuantity(row, groupDeliveryType),
       0
     );
-  }, [toNumber]);
+  }, []);
 
   const recalcHandoverGroup = useCallback((group: StageHandoverGroup): StageHandoverGroup => {
     const pieces = Array.isArray(group?.pieces) ? group.pieces : [];
     const orderPieces = Array.isArray(group?.orderPieces) ? group.orderPieces : [];
+    const resolvedType = inferGroupDefaultDeliveryType(pieces, group?.deliveryType ?? (group as any)?.delivery_type, group?.deliveryRows);
+    const groupWithType = { ...group, deliveryType: resolvedType };
     const deliveryRows = Array.isArray(group?.deliveryRows)
-      ? group.deliveryRows.map((row) => normalizeHandoverDeliveryRow(group, row))
+      ? group.deliveryRows.map((row) => normalizeHandoverDeliveryRow(groupWithType, row))
       : [];
     const totalSourceQty = pieces.reduce((sum, row) => sum + Math.max(0, toNumber(row?.sourceQty)), 0);
     const totalOrderQty = orderPieces.reduce((sum, row) => sum + Math.max(0, toNumber(row?.sourceQty)), 0);
@@ -328,9 +355,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       (sum, row) => sum + Math.max(0, toNumber((row as any)?.handoverQty ?? row?.sourceQty)),
       0
     );
-    const totalHandoverQty = deliveryRows.length > 0 ? sumDeliveredRows(deliveryRows) : fallbackTotal;
+    const totalHandoverQty = deliveryRows.length > 0 ? sumDeliveredRows(deliveryRows, resolvedType) : fallbackTotal;
     return {
-      ...group,
+      ...groupWithType,
       pieces,
       orderPieces,
       deliveryRows,
@@ -536,9 +563,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const normalizedProductId = productId ? String(productId) : '';
       if (!normalizedProductId) return;
       const deliveryRows = Array.isArray(anyGroup?.deliveryRows) ? anyGroup.deliveryRows : [];
+      const groupDeliveryType = resolveDeliveryType(anyGroup);
       const qty = deliveryRows.length > 0
         ? deliveryRows.reduce(
-            (sum: number, row: any) => sum + Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
+            (sum: number, row: any) => sum + getDeliveryMainQuantity(row, groupDeliveryType),
             0
           )
         : (Array.isArray(anyGroup?.pieces) ? anyGroup.pieces : []).reduce(
@@ -573,7 +601,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         mainUnit: pickedPiece?.mainUnit || pickedPiece?.main_unit || null,
       }];
       sourceRows.forEach((row: any) => {
-        const quantity = Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity))));
+        const quantity = getDeliveryMainQuantity(row, resolveDeliveryType(group));
         if (!quantity) return;
         const bundleId = row?.sourceBundleId || row?.source_bundle_id || row?.bundle_id || group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id || null;
         const normalizedBundleId = bundleId ? String(bundleId) : null;
@@ -612,7 +640,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const qty = deliveryRows.length > 0
         ? deliveryRows.reduce((sum: number, row: any) => {
             const quantity = Math.max(0, toNumber(row?.quantity || 0));
-            const base = toNumber(row?.subQty ?? row?.sub_qty);
+            const base = toNumber(row?.subQuantity ?? row?.sub_quantity ?? row?.subQty ?? row?.sub_qty);
             const usage = toNumber(row?.subUsage ?? row?.sub_usage ?? row?.qty_sub);
             const resolved = base > 0 ? base : (usage > 0 ? usage * (quantity || 1) : 0);
             return sum + Math.max(0, resolved);
@@ -717,18 +745,24 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         || selectedPiece?.product_code
         || '';
       const categoryLabel = resolveCategoryLabel(header?.category_label || header?.category);
+      const productWidthMm = resolveUnitConversionWidthMm({
+        record: { ...(row?.specs || {}), category: header?.category || null },
+      });
       const pieces = buildPiecesFromOrderRow(row, rowIndex, orderQty, true);
       const orderPieces = buildPiecesFromOrderRow(row, rowIndex, orderQty, false);
+      const defaultDeliveryType = inferGroupDefaultDeliveryType(pieces);
       const deliveryRows = pieces.map((piece: any) => normalizeHandoverDeliveryRow(
-        { pieces } as StageHandoverGroup,
+        { pieces, deliveryType: defaultDeliveryType } as StageHandoverGroup,
         {
+          deliveryType: defaultDeliveryType,
           pieceKey: piece.key,
-          name: piece.name,
-          length: piece.length,
-          width: piece.width,
-          quantity: piece.quantity,
+          name: defaultDeliveryType === 'piece' ? piece.name : '',
+          length: defaultDeliveryType === 'piece' ? piece.length : 0,
+          width: defaultDeliveryType === 'piece' ? piece.width : 0,
+          quantity: defaultDeliveryType === 'piece' ? piece.quantity : 0,
           mainUnit: piece.mainUnit,
           subUnit: piece.subUnit,
+          mainQuantity: piece.sourceQty,
           deliveredQty: piece.sourceQty,
         }
       ));
@@ -743,6 +777,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         sourceShelfId: null,
         sourceBundleId: row?.source_bundle_id || row?.bundle_id ? String(row?.source_bundle_id || row?.bundle_id) : null,
         targetShelfId: null,
+        deliveryType: defaultDeliveryType,
+        productWidthMm,
         pieces,
         orderPieces,
         deliveryRows,
@@ -779,18 +815,21 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         };
       });
       const savedDeliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+      const defaultDeliveryType = inferGroupDefaultDeliveryType(pieces, group?.deliveryType ?? group?.delivery_type, savedDeliveryRows);
       const deliveryRows = savedDeliveryRows.length > 0
-        ? savedDeliveryRows.map((row: any) => normalizeHandoverDeliveryRow({ pieces } as StageHandoverGroup, row))
+        ? savedDeliveryRows.map((row: any) => normalizeHandoverDeliveryRow({ pieces, deliveryType: defaultDeliveryType } as StageHandoverGroup, row))
         : pieces.map((piece: any) => normalizeHandoverDeliveryRow(
-            { pieces } as StageHandoverGroup,
+            { pieces, deliveryType: defaultDeliveryType } as StageHandoverGroup,
             {
+              deliveryType: defaultDeliveryType,
               pieceKey: piece.key,
-              name: piece.name,
-              length: piece.length,
-              width: piece.width,
-              quantity: piece.quantity,
+              name: defaultDeliveryType === 'piece' ? piece.name : '',
+              length: defaultDeliveryType === 'piece' ? piece.length : 0,
+              width: defaultDeliveryType === 'piece' ? piece.width : 0,
+              quantity: defaultDeliveryType === 'piece' ? piece.quantity : 0,
               mainUnit: piece.mainUnit,
               subUnit: piece.subUnit,
+              mainQuantity: toNumber(piece?.handoverQty ?? piece?.sourceQty),
               deliveredQty: toNumber(piece?.handoverQty ?? piece?.sourceQty),
             }
           ));
@@ -812,6 +851,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         targetShelfId: (group?.targetShelfId || group?.target_shelf_id)
           ? String(group?.targetShelfId || group?.target_shelf_id)
           : null,
+        deliveryType: defaultDeliveryType,
         pieces,
         orderPieces: Array.isArray(group?.orderPieces) ? group.orderPieces : [],
         deliveryRows,
@@ -846,27 +886,35 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         };
       });
 
+      const defaultDeliveryType = inferGroupDefaultDeliveryType(
+        pieces,
+        savedGroup?.deliveryType ?? savedGroup?.delivery_type ?? group?.deliveryType,
+        savedGroup?.deliveryRows
+      );
+      const groupWithType = { ...group, deliveryType: defaultDeliveryType };
       let deliveryRows = Array.isArray(savedGroup?.deliveryRows)
-        ? savedGroup.deliveryRows.map((row: any) => normalizeHandoverDeliveryRow(group, row))
+        ? savedGroup.deliveryRows.map((row: any) => normalizeHandoverDeliveryRow(groupWithType, row))
         : [];
       if (!deliveryRows.length) {
         deliveryRows = pieces.map((piece: any) => {
           const savedPiece = savedPieces.get(String(piece.key));
-          return normalizeHandoverDeliveryRow(group, {
+          return normalizeHandoverDeliveryRow(groupWithType, {
+            deliveryType: defaultDeliveryType,
             pieceKey: piece.key,
-            name: piece.name,
-            length: piece.length,
-            width: piece.width,
-            quantity: piece.quantity,
+            name: defaultDeliveryType === 'piece' ? piece.name : '',
+            length: defaultDeliveryType === 'piece' ? piece.length : 0,
+            width: defaultDeliveryType === 'piece' ? piece.width : 0,
+            quantity: defaultDeliveryType === 'piece' ? piece.quantity : 0,
             mainUnit: piece.mainUnit,
             subUnit: piece.subUnit,
+            mainQuantity: toNumber(savedPiece?.handoverQty ?? piece?.sourceQty),
             deliveredQty: toNumber(savedPiece?.handoverQty ?? piece?.sourceQty),
           });
         });
       }
 
       return recalcHandoverGroup({
-        ...group,
+        ...groupWithType,
         categoryLabel: resolveCategoryLabel(savedGroup?.categoryLabel || group.categoryLabel),
         sourceBundleId: savedGroup?.sourceBundleId || savedGroup?.source_bundle_id || savedGroup?.bundle_id || group.sourceBundleId || null,
         targetShelfId: savedGroup?.targetShelfId ? String(savedGroup.targetShelfId) : group.targetShelfId,
@@ -874,6 +922,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         deliveryRows,
         collapsed: typeof savedGroup?.collapsed === 'boolean' ? savedGroup.collapsed : group.collapsed,
         isConfirmed: savedGroup?.isConfirmed === true,
+        remainderMode: (savedGroup?.remainderMode === 'waste' ? 'waste' : 'keep') as RemainderMode,
+        wasteQty: savedGroup?.wasteQty !== undefined ? Math.max(0, toNumber(savedGroup.wasteQty)) : 0,
+        wasteBundleId: savedGroup?.wasteBundleId ? String(savedGroup.wasteBundleId) : null,
       });
     });
   }, [normalizeHandoverDeliveryRow, recalcHandoverGroup, resolveCategoryLabel, toNumber]);
@@ -1017,6 +1068,13 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     setHandoverStageInventoryRows(inventoryRows);
   }, [allShelfOptions, toNumber]);
 
+  const buildHandoverGroupHistoryKey = useCallback((group: any, fallbackIndex: number) => {
+    const categoryLabel = String(group?.categoryLabel || '').trim();
+    const productId = String(group?.selectedProductId || '').trim();
+    if (categoryLabel || productId) return `${categoryLabel}::${productId}`;
+    return String(group?.key || `group_${fallbackIndex}`);
+  }, []);
+
   const openTaskHandoverModal = useCallback(async (task: any, providedTasks?: any[]) => {
     if (!task?.id || !recordId || isBom) return;
     try {
@@ -1134,9 +1192,37 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           : (derivedDirection === 'outgoing'
             ? String(currentTask?.id || '')
             : (previousTask?.id ? String(previousTask.id) : null));
-        const mergedFormGroups = mergeSavedGroups(withOrderGroups, rawForm?.groups || []).map((group) =>
-          recalcHandoverGroup({
+        const rawWasteByProduct = rawForm?.wasteByProduct && typeof rawForm.wasteByProduct === 'object'
+          ? (rawForm.wasteByProduct as Record<string, number>)
+          : {};
+        const rawWasteBundleByProduct = rawForm?.wasteBundleByProduct && typeof rawForm.wasteBundleByProduct === 'object'
+          ? (rawForm.wasteBundleByProduct as Record<string, string | null>)
+          : {};
+        const restoredWasteAssigned = new Set<string>();
+        const savedRawGroupsMap = new Map<string, any>(
+          (Array.isArray(rawForm?.groups) ? rawForm.groups : []).map((g: any) => [String(g?.key || ''), g])
+        );
+        const mergedFormGroups = mergeSavedGroups(withOrderGroups, rawForm?.groups || []).map((group, gIdx) => {
+          const savedRawGroup = savedRawGroupsMap.get(String(group?.key || ''))
+            ?? (Array.isArray(rawForm?.groups) ? rawForm.groups[gIdx] : null);
+          const pid = String(group?.selectedProductId || '').trim();
+          let remainderMode: RemainderMode = group.remainderMode === 'waste' ? 'waste' : 'keep';
+          let wasteQty = toNumber(group.wasteQty);
+          let wasteBundleId = group.wasteBundleId || null;
+          if (!savedRawGroup?.remainderMode && pid && !restoredWasteAssigned.has(pid)) {
+            const legacyWaste = Math.max(0, toNumber(rawWasteByProduct[pid]));
+            if (legacyWaste > 0) {
+              remainderMode = 'waste';
+              wasteQty = legacyWaste;
+              wasteBundleId = rawWasteBundleByProduct[pid] || wasteBundleId;
+              restoredWasteAssigned.add(pid);
+            }
+          }
+          return recalcHandoverGroup({
             ...group,
+            remainderMode,
+            wasteQty,
+            wasteBundleId,
             sourceShelfId: derivedDirection === 'incoming'
               ? (sourceShelfId ? String(sourceShelfId) : null)
               : (targetShelfId ? String(targetShelfId) : null),
@@ -1145,8 +1231,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               : (derivedDirection === 'outgoing'
                 ? (destinationShelfId || null)
                 : (targetShelfId ? String(targetShelfId) : null)),
-          })
-        );
+          });
+        });
         return {
           id: formId,
           direction: derivedDirection,
@@ -1170,9 +1256,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           giver: rawForm?.giver && typeof rawForm.giver === 'object' ? rawForm.giver : defaultGiver,
           receiver: rawForm?.receiver && typeof rawForm.receiver === 'object' ? rawForm.receiver : defaultReceiver,
           groups: mergedFormGroups,
-          wasteByProduct: rawForm?.wasteByProduct && typeof rawForm.wasteByProduct === 'object'
-            ? rawForm.wasteByProduct
-            : {},
+          wasteByProduct: rawWasteByProduct,
+          wasteBundleByProduct: rawWasteBundleByProduct,
           giverConfirmation: rawForm?.giverConfirmation?.confirmed
             ? rawForm.giverConfirmation
             : { confirmed: false },
@@ -1287,6 +1372,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         receiverConfirmation: activeForm?.receiverConfirmation || { confirmed: false },
         previousTotalsByProduct: toGroupTotals((activeForm?.groups || []) as any),
         previousWasteByProduct: activeForm?.wasteByProduct || {},
+        previousWasteBundleByProduct: activeForm?.wasteBundleByProduct || {},
         sourceTotalsByProduct,
         orderTotalsByProduct,
       });
@@ -1362,6 +1448,89 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     });
   }, [normalizeHandoverDeliveryRow, recalcHandoverGroup]);
 
+  const changeHandoverDeliveryType = useCallback((groupIndex: number, deliveryType: DeliveryType) => {
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const deliveryRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
+        ...row,
+        deliveryType,
+      }));
+      next[groupIndex] = recalcHandoverGroup({
+        ...group,
+        deliveryType,
+        deliveryRows,
+        isConfirmed: false,
+      });
+      return next;
+    });
+  }, [recalcHandoverGroup]);
+
+  const changeHandoverRemainder = useCallback((
+    groupIndex: number,
+    patch: Partial<Pick<StageHandoverGroup, 'remainderMode' | 'wasteQty' | 'wasteBundleId'>>
+  ) => {
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const nextMode = patch.remainderMode ?? group.remainderMode ?? 'keep';
+      next[groupIndex] = {
+        ...group,
+        remainderMode: nextMode,
+        wasteQty: patch.wasteQty !== undefined ? Math.max(0, toNumber(patch.wasteQty)) : (nextMode === 'keep' ? 0 : group.wasteQty),
+        wasteBundleId: patch.wasteBundleId !== undefined ? patch.wasteBundleId : (nextMode === 'keep' ? null : group.wasteBundleId),
+        isConfirmed: false,
+      };
+      return next;
+    });
+  }, [toNumber]);
+
+  const addAllBomPiecesToHandover = useCallback((groupIndex: number) => {
+    setHandoverGroups((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const availablePieces = Array.isArray(group.pieces) && group.pieces.length > 0
+        ? group.pieces
+        : (Array.isArray(group.orderPieces) ? group.orderPieces : []);
+      if (!availablePieces.length) return prev;
+
+      const existingRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).filter(
+        (r) => toNumber(r.mainQuantity) > 0 || String(r.name || '').trim() !== ''
+      );
+      const existingNames = new Set(existingRows.map((r) => String(r.name || '').trim()).filter(Boolean));
+      const newRows = availablePieces
+        .filter((p) => !existingNames.has(String(p.name || '').trim()))
+        .map((piece) => {
+          const pieceQty = calculatePieceQuantity(piece.length, piece.width, piece.quantity, (piece as any)?.handoverQty ?? piece?.sourceQty);
+          return normalizeHandoverDeliveryRow({ ...group, deliveryType: 'piece' }, {
+            deliveryType: 'piece',
+            pieceKey: piece.key,
+            name: piece.name,
+            length: piece.length,
+            width: piece.width,
+            quantity: piece.quantity,
+            mainUnit: piece.mainUnit,
+            subUnit: piece.subUnit,
+            mainQuantity: pieceQty,
+            deliveredQty: pieceQty,
+            subQuantity: toNumber((piece as any)?.subUsage ?? 0),
+          });
+        });
+
+      const mergedRows = [...existingRows.map((r) => ({ ...r, deliveryType: 'piece' as DeliveryType })), ...newRows];
+      next[groupIndex] = recalcHandoverGroup({
+        ...group,
+        deliveryType: 'piece',
+        deliveryRows: mergedRows,
+        isConfirmed: false,
+      });
+      return next;
+    });
+  }, [normalizeHandoverDeliveryRow, recalcHandoverGroup, toNumber]);
+
   const deleteHandoverDeliveryRows = useCallback((groupIndex: number, rowKeys: string[]) => {
     if (!rowKeys.length) return;
     const keySet = new Set(rowKeys.map((key) => String(key)));
@@ -1436,7 +1605,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const rowIndex = deliveryRows.findIndex((row) => String(row.key) === String(rowKey));
       if (rowIndex < 0) return prev;
       const currentRow = deliveryRows[rowIndex];
-      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'quantity', 'mainQuantity', 'subQuantity'];
+      const numericFields: Array<keyof Omit<StageHandoverDeliveryRow, 'key'>> = ['length', 'width', 'conversionWidthMm', 'quantity', 'mainQuantity', 'subQuantity'];
       const nextValue = numericFields.includes(field)
         ? Math.max(0, toNumber(value))
         : (value == null ? '' : String(value));
@@ -1448,8 +1617,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         updatedRow.sourceShelfId = bundleOption?.shelfId || null;
         updatedRow.sourceBundleLabel = bundleOption?.label || null;
       }
-      if (['length', 'width', 'quantity'].includes(String(field))) {
-        updatedRow.mainQuantity = Math.max(0, toNumber(updatedRow.length) * toNumber(updatedRow.width) * toNumber(updatedRow.quantity));
+      const isPieceGroup = resolveDeliveryType(group) === 'piece';
+      if (isPieceGroup && ['length', 'width', 'quantity'].includes(String(field))) {
+        updatedRow.mainQuantity = calculatePieceQuantity(updatedRow.length, updatedRow.width, updatedRow.quantity);
         const conversion = getUnitQuantityConversion('mainQuantity', {
           availableKeys: ['mainQuantity', 'subQuantity'],
         });
@@ -1460,7 +1630,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               subQuantity: updatedRow.subQuantity,
               main_unit: updatedRow.mainUnit,
               sub_unit: updatedRow.subUnit,
-              widthMm: updatedRow.width,
+              widthMm: updatedRow.conversionWidthMm || updatedRow.width,
             }, conversion);
           } catch {
             // اگر واحدها هنوز قابل تبدیل نباشند، مقدار فعلی واحد فرعی حفظ می‌شود.
@@ -1469,7 +1639,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       }
       deliveryRows[rowIndex] = {
         ...updatedRow,
-        deliveredQty: Math.max(0, toNumber((updatedRow as any).mainQuantity ?? updatedRow.deliveredQty)),
+        deliveredQty: getDeliveryMainQuantity(updatedRow, resolveDeliveryType(group)),
       };
       next[groupIndex] = recalcHandoverGroup({ ...group, deliveryRows, isConfirmed: false });
       return next;
@@ -1613,6 +1783,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const previousWasteByProduct = existingForm?.wasteByProduct && typeof existingForm.wasteByProduct === 'object'
         ? existingForm.wasteByProduct
         : {};
+      const previousWasteBundleByProduct = existingForm?.wasteBundleByProduct && typeof existingForm.wasteBundleByProduct === 'object'
+        ? existingForm.wasteBundleByProduct
+        : {};
       const hasImmutableConfirmation = Boolean(
         existingForm?.giverConfirmation?.confirmed || existingForm?.receiverConfirmation?.confirmed
       );
@@ -1638,7 +1811,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const hasRowWithoutBundle = effectiveGroups.some((group: any) => {
         const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
         return rows.some((row: any) => (
-          Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))) > 0
+          getDeliveryMainQuantity(row, resolveDeliveryType(group)) > 0
           && !(row?.sourceBundleId || row?.source_bundle_id || row?.bundle_id || group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id)
         ));
       });
@@ -1648,7 +1821,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const hasRowWithoutTargetBundle = effectiveGroups.some((group: any) => {
         const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
         return rows.some((row: any) => (
-          Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))) > 0
+          getDeliveryMainQuantity(row, resolveDeliveryType(group)) > 0
           && !(row?.targetBundleId || row?.target_bundle_id)
         ));
       });
@@ -1659,38 +1832,95 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const previousBundleTotals = toGroupBundleTotals(previousGroups as any);
       const nextBundleTotals = toGroupBundleTotals(effectiveGroups as any);
 
-      const nextWasteByProduct: Record<string, number> = {};
-      effectiveGroups.forEach((group: any) => {
-        const productId = (
-          group.selectedProductId
-          || (group as any)?.selected_product_id
-          || (Array.isArray((group as any)?.pieces)
-            ? ((group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.selectedProductId
-              || (group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.selected_product_id
-              || (group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.product_id)
-            : null)
-        );
-        const normalizedProductId = productId ? String(productId) : '';
-        if (!normalizedProductId) return;
-        const sourceQty = (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
-          (sum: number, piece: any) => sum + toNumber(piece?.sourceQty),
-          0
-        );
-        const deliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
-        const handoverQty = deliveryRows.length > 0
-          ? deliveryRows.reduce(
-              (sum: number, row: any) => sum + Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
-              0
-            )
-          : (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
-              (sum: number, piece: any) => sum + toNumber(piece?.handoverQty),
-              0
-            );
-        const waste = Math.max(0, sourceQty - handoverQty);
-        if (waste > 0) nextWasteByProduct[normalizedProductId] = (nextWasteByProduct[normalizedProductId] || 0) + waste;
+      const otherDeliveredByGroupKey: Record<string, number> = {};
+      const otherWasteByProduct: Record<string, number> = {};
+      existingForms.forEach((otherForm: any) => {
+        if (String(otherForm?.id || '') === formId) return;
+        const otherGroups = Array.isArray(otherForm?.groups) ? otherForm.groups : [];
+        otherGroups.forEach((otherGroup: any, oIdx: number) => {
+          const gKey = buildHandoverGroupHistoryKey(otherGroup, oIdx);
+          if (!gKey) return;
+          const otherRows = Array.isArray(otherGroup?.deliveryRows) ? otherGroup.deliveryRows : [];
+          const otherQty = otherRows.length > 0
+            ? otherRows.reduce(
+                (sum: number, r: any) => sum + getDeliveryMainQuantity(r, resolveDeliveryType(otherGroup)),
+                0
+              )
+            : toNumber(otherGroup?.totalHandoverQty);
+          otherDeliveredByGroupKey[gKey] = (otherDeliveredByGroupKey[gKey] || 0) + Math.max(0, otherQty);
+        });
+        Object.entries(otherForm?.wasteByProduct || {}).forEach(([pid, qty]) => {
+          const normalizedPid = String(pid || '').trim();
+          if (!normalizedPid) return;
+          otherWasteByProduct[normalizedPid] = (otherWasteByProduct[normalizedPid] || 0) + Math.max(0, toNumber(qty));
+        });
       });
 
+      const nextWasteByProduct: Record<string, number> = {};
+      const nextWasteBundleByProduct: Record<string, string | null> = {};
+      if (hasImmutableConfirmation) {
+        Object.assign(nextWasteByProduct, previousWasteByProduct);
+        Object.assign(nextWasteBundleByProduct, previousWasteBundleByProduct);
+      } else {
+        effectiveGroups.forEach((group: any, groupIndex: number) => {
+          const productId = (
+            group.selectedProductId
+            || (group as any)?.selected_product_id
+            || (Array.isArray((group as any)?.pieces)
+              ? ((group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.selectedProductId
+                || (group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.selected_product_id
+                || (group as any).pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id)?.product_id)
+              : null)
+          );
+          const normalizedProductId = productId ? String(productId) : '';
+          if (!normalizedProductId) return;
+          if ((group?.remainderMode || 'keep') !== 'waste') return;
+          const sourceQty = (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
+            (sum: number, piece: any) => sum + toNumber(piece?.sourceQty),
+            0
+          );
+          const deliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+          const handoverQty = deliveryRows.length > 0
+            ? deliveryRows.reduce(
+                (sum: number, row: any) => sum + getDeliveryMainQuantity(row, resolveDeliveryType(group)),
+                0
+              )
+            : (Array.isArray(group?.pieces) ? group.pieces : []).reduce(
+                (sum: number, piece: any) => sum + toNumber(piece?.handoverQty),
+                0
+              );
+          const groupKey = buildHandoverGroupHistoryKey(group, groupIndex);
+          const remainderSummary = resolveStageRemainderState({
+            totalSourceQty: sourceQty,
+            currentDeliveredQty: handoverQty,
+            previousDeliveredQty: otherDeliveredByGroupKey[groupKey] || 0,
+            previousWasteQty: otherWasteByProduct[normalizedProductId] || 0,
+            remainderMode: group?.remainderMode,
+            requestedWasteQty: group?.wasteQty,
+          });
+          if (remainderSummary.wasteQty <= 0) return;
+
+          const bundleOptionsForProduct = handoverBundleOptionsByProduct[normalizedProductId] || [];
+          const explicitWasteBundleId = group?.wasteBundleId ? String(group.wasteBundleId) : null;
+          const rowSourceBundleId = deliveryRows.find((r: any) => r?.sourceBundleId || r?.source_bundle_id || r?.bundle_id)?.sourceBundleId
+            || deliveryRows.find((r: any) => r?.source_bundle_id || r?.bundle_id)?.source_bundle_id
+            || deliveryRows.find((r: any) => r?.bundle_id)?.bundle_id
+            || null;
+          const chosenWasteBundleId = explicitWasteBundleId
+            || (rowSourceBundleId ? String(rowSourceBundleId) : null)
+            || (bundleOptionsForProduct.length === 1 ? String(bundleOptionsForProduct[0].value) : null);
+          if (bundleOptionsForProduct.length > 1 && !chosenWasteBundleId) {
+            throw new Error('برای ثبت ضایعات، بسته برداشت ضایعات را مشخص کنید.');
+          }
+          nextWasteByProduct[normalizedProductId] = (nextWasteByProduct[normalizedProductId] || 0) + remainderSummary.wasteQty;
+          if (chosenWasteBundleId) {
+            nextWasteBundleByProduct[normalizedProductId] = chosenWasteBundleId;
+          }
+        });
+      }
+
       const finalWasteByProduct = nextWasteByProduct;
+      const finalWasteBundleByProduct = nextWasteBundleByProduct;
       const productUnitById = new Map<string, string>();
       effectiveGroups.forEach((group: any) => {
         const productId = group?.selectedProductId ? String(group.selectedProductId) : '';
@@ -1722,7 +1952,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           const productId = String(group?.selectedProductId || group?.selected_product_id || '').trim();
           if (!productId) return;
           (Array.isArray(group?.deliveryRows) ? group.deliveryRows : []).forEach((row: any, rowIndex: number) => {
-            const quantity = Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity))));
+            const quantity = getDeliveryMainQuantity(row, resolveDeliveryType(group));
             const groupKey = String(group?.key || `group_${groupIndex}`);
             const rowKey = String(row?.key || `row_${rowIndex}`);
             result.set(`${groupKey}:${rowKey}`, {
@@ -1890,13 +2120,16 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         if (!wasteDelta || !effectiveSourceShelfId) return;
         const mainUnit = productUnitById.get(productId) || null;
         const bundleIds = Array.from(bundleIdsByProduct.get(productId) || []);
+        const explicitBundleId = wasteDelta > 0
+          ? (finalWasteBundleByProduct[productId] ?? null)
+          : (previousWasteBundleByProduct[productId] ?? finalWasteBundleByProduct[productId] ?? null);
         // ضایعاتِ بسته‌محور باید صراحتاً از همان بسته انتخاب شوند. تا زمانی که
         // انتخاب نشده، موجودی هیچ بسته‌ای را حدسی کم/زیاد نمی‌کنیم.
-        if (bundleIds.length > 1) {
+        if (!explicitBundleId && bundleIds.length > 1) {
           console.warn('Skipping ambiguous multi-bundle waste adjustment', { productId, wasteDelta });
           return;
         }
-        const bundleId = bundleIds[0] ?? null;
+        const bundleId = explicitBundleId ?? bundleIds[0] ?? null;
         if (wasteDelta > 0) {
           deltas.push({ productId, shelfId: String(effectiveSourceShelfId), bundleId, delta: -wasteDelta, unit: mainUnit } as any);
           transferLogs.push({
@@ -1961,6 +2194,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         receiver: handoverContext.receiver,
         groups: persistedGroups as any,
         wasteByProduct: finalWasteByProduct,
+        wasteBundleByProduct: finalWasteBundleByProduct,
         giverConfirmation: nextGiverConfirmation,
         receiverConfirmation: nextReceiverConfirmation,
         createdAt: existingForm?.createdAt || nowIso,
@@ -1989,6 +2223,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         receiver: handoverContext.receiver,
         groups: nextForm.groups,
         wasteByProduct: nextForm.wasteByProduct,
+        wasteBundleByProduct: nextForm.wasteBundleByProduct,
         giverConfirmation: nextForm.giverConfirmation,
         receiverConfirmation: nextForm.receiverConfirmation,
         forms: nextForms,
@@ -2041,6 +2276,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           groups: prev.groups,
           previousTotalsByProduct: nextTotalsByProduct,
           previousWasteByProduct: finalWasteByProduct,
+          previousWasteBundleByProduct: finalWasteBundleByProduct,
           giverConfirmation: nextGiverConfirmation,
           receiverConfirmation: nextReceiverConfirmation,
         };
@@ -2057,8 +2293,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   }, [
     activeHandoverFormId,
     buildHandoverFormId,
+    buildHandoverGroupHistoryKey,
     currentUser.fullName,
     currentUser.id,
+    handoverBundleOptionsByProduct,
     handoverContext,
     handoverDestinationStageId,
     handoverGroups,
@@ -2118,6 +2356,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         receiverConfirmation: form.receiverConfirmation || { confirmed: false },
         previousTotalsByProduct: toGroupTotals((form.groups || []) as any),
         previousWasteByProduct: form.wasteByProduct || {},
+        previousWasteBundleByProduct: form.wasteBundleByProduct || {},
       };
     });
     setHandoverTrafficType(trafficType);
@@ -2150,6 +2389,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         totalHandoverQty: 0,
         isConfirmed: false,
         collapsed: true,
+        remainderMode: 'keep',
+        wasteQty: 0,
+        wasteBundleId: null,
       })
     );
     const nowIso = new Date().toISOString();
@@ -2165,6 +2407,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       receiver: handoverContext.receiver,
       groups: emptyGroups,
       wasteByProduct: {},
+      wasteBundleByProduct: {},
       giverConfirmation: { confirmed: false },
       receiverConfirmation: { confirmed: false },
       createdAt: nowIso,
@@ -2181,6 +2424,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         receiverConfirmation: newForm.receiverConfirmation,
         previousTotalsByProduct: {},
         previousWasteByProduct: {},
+        previousWasteBundleByProduct: {},
       };
     });
     setHandoverTrafficType('incoming');
@@ -2301,6 +2545,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
               receiverConfirmation: fallbackForm.receiverConfirmation || { confirmed: false },
               previousTotalsByProduct: toGroupTotals((fallbackForm.groups || []) as any),
               previousWasteByProduct: fallbackForm.wasteByProduct || {},
+              previousWasteBundleByProduct: fallbackForm.wasteBundleByProduct || {},
             };
           });
         }
@@ -2733,6 +2978,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const subQty = Math.max(0, toNumber(piece?.subQty ?? piece?.subUsage ?? piece?.sub_usage ?? piece?.qty_sub ?? 0));
         return {
           key: String(piece?.key || `${productId}_order_${pieceIndex}`),
+          deliveryType: resolveDeliveryType(piece),
           name: String(piece?.name || `قطعه ${pieceIndex + 1}`),
           length: Math.max(0, toNumber(piece?.length)),
           width: Math.max(0, toNumber(piece?.width)),
@@ -2840,22 +3086,25 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       (Array.isArray(groups) ? groups : []).forEach((group: any, groupIndex: number) => {
         const productId = String(group?.selectedProductId || group?.selected_product_id || '').trim();
         if (!productId) return;
+        const groupDeliveryType = resolveDeliveryType(group);
         const rows = Array.isArray(group?.deliveryRows) && group.deliveryRows.length > 0
           ? group.deliveryRows
           : (Array.isArray(group?.pieces) ? group.pieces : []);
         const mapped = rows.map((row: any, rowIndex: number) => {
+          const rowDeliveryType = row?.deliveryType || row?.delivery_type
+            ? resolveDeliveryType(row)
+            : (Array.isArray(group?.deliveryRows) && group.deliveryRows.length > 0 ? groupDeliveryType : resolveDeliveryType(row));
           const length = Math.max(0, toNumber(row?.length));
           const width = Math.max(0, toNumber(row?.width));
           const quantity = Math.max(0, toNumber(row?.quantity));
-          const mainQty = row?.deliveredQty !== undefined
-            ? Math.max(0, toNumber(row?.deliveredQty))
-            : (length * width * quantity);
-          const baseSubQty = Math.max(0, toNumber(row?.subQty ?? row?.sub_qty));
+          const mainQty = getDeliveryMainQuantity(row, rowDeliveryType);
+          const baseSubQty = Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity ?? row?.subQty ?? row?.sub_qty));
           const subUsage = Math.max(0, toNumber(row?.subUsage ?? row?.sub_usage ?? row?.qty_sub));
           const subQty = baseSubQty > 0 ? baseSubQty : (subUsage > 0 ? subUsage * (quantity || 1) : 0);
           return {
             key: String(row?.key || `${productId}_${groupIndex}_${rowIndex}`),
-            name: String(row?.name || `قطعه ${rowIndex + 1}`),
+            deliveryType: rowDeliveryType,
+            name: String(row?.name || (rowDeliveryType === 'piece' ? `قطعه ${rowIndex + 1}` : 'تحویل فله‌ای')),
             length,
             width,
             quantity,
@@ -2869,6 +3118,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       });
       return result;
     };
+
+    const getDeliveryTypesFromGroups = (groups: any[]): DeliveryType[] =>
+      Array.from(new Set((Array.isArray(groups) ? groups : []).map((group: any) => resolveDeliveryType(group))));
 
     const getSubTotalsFromPieces = (piecesByProduct: Record<string, any[]>) => {
       const totals: Record<string, number> = {};
@@ -2909,6 +3161,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         receiverConfirmed: !!form.receiverConfirmation?.confirmed,
         totalsByProduct: toGroupTotals((form.groups || []) as any),
         totalsSubByProduct: getSubTotalsFromPieces(piecesByProduct),
+        deliveryTypes: getDeliveryTypesFromGroups((form.groups || []) as any),
         piecesByProduct,
       };
     });
@@ -2959,6 +3212,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           receiverConfirmed: !!form?.receiverConfirmation?.confirmed,
           totalsByProduct: toGroupTotals((form?.groups || []) as any),
           totalsSubByProduct: getSubTotalsFromPieces(piecesByProduct),
+          deliveryTypes: getDeliveryTypesFromGroups((form?.groups || []) as any),
           piecesByProduct,
         });
       });
@@ -2970,13 +3224,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       return bTime - aTime;
     });
   }, [assigneeLabelFromIds, getHandoverFromTask, getLineTaskChain, handoverForms, handoverTask, tasks, toGroupTotals, toNumber]);
-
-  const buildHandoverGroupHistoryKey = useCallback((group: any, fallbackIndex: number) => {
-    const categoryLabel = String(group?.categoryLabel || '').trim();
-    const productId = String(group?.selectedProductId || '').trim();
-    if (categoryLabel || productId) return `${categoryLabel}::${productId}`;
-    return String(group?.key || `group_${fallbackIndex}`);
-  }, []);
 
   const handoverPreviousRowsByGroupKey = useMemo<Record<string, StageHandoverDeliveryRow[]>>(() => {
     const map: Record<string, StageHandoverDeliveryRow[]> = {};
@@ -3010,6 +3257,17 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   }, [activeHandoverFormId, buildHandoverGroupHistoryKey, handoverForms, toNumber]);
 
   const handoverEditorGroups = useMemo<StageHandoverGroup[]>(() => {
+    const activeFormId = String(activeHandoverFormId || '').trim();
+    const previousWasteByProduct: Record<string, number> = {};
+    (handoverForms || []).forEach((form) => {
+      if (activeFormId && String(form?.id || '').trim() === activeFormId) return;
+      Object.entries(form?.wasteByProduct || {}).forEach(([pid, qty]) => {
+        const normalizedPid = String(pid || '').trim();
+        if (!normalizedPid) return;
+        previousWasteByProduct[normalizedPid] = (previousWasteByProduct[normalizedPid] || 0) + Math.max(0, toNumber(qty));
+      });
+    });
+
     return (handoverGroups || []).map((group, groupIndex) => {
       const groupKey = buildHandoverGroupHistoryKey(group, groupIndex);
       const previousRows = handoverPreviousRowsByGroupKey[groupKey] || [];
@@ -3018,13 +3276,15 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         if (explicitQty > 0) return sum + explicitQty;
         return sum + (Math.max(0, toNumber((row as any)?.length)) * Math.max(0, toNumber((row as any)?.width)) * Math.max(0, toNumber((row as any)?.quantity)));
       }, 0);
+      const pid = String(group?.selectedProductId || '').trim();
       return {
         ...group,
         previousDeliveryRows: previousRows,
         previousDeliveredQty,
+        previousWasteQty: pid ? (previousWasteByProduct[pid] || 0) : 0,
       };
     });
-  }, [buildHandoverGroupHistoryKey, handoverGroups, handoverPreviousRowsByGroupKey, toNumber]);
+  }, [activeHandoverFormId, buildHandoverGroupHistoryKey, handoverForms, handoverGroups, handoverPreviousRowsByGroupKey, toNumber]);
 
   const renderStageDetails = (stage: any, lineQuantity = 0) => {
     const wage = Math.max(0, toNumber(stage?.wage));
@@ -3988,6 +4248,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         }}
         onDestinationStageChange={(taskId) => setHandoverDestinationStageId(taskId)}
         onToggleGroup={setHandoverGroupCollapsed}
+        onDeliveryTypeChange={changeHandoverDeliveryType}
+        onAddAllBomPieces={addAllBomPiecesToHandover}
+        onRemainderChange={changeHandoverRemainder}
         onConfirmGroup={confirmHandoverGroup}
         onDeliveryRowAdd={addHandoverDeliveryRow}
         onDeliveryRowsDelete={deleteHandoverDeliveryRows}

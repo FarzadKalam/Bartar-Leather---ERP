@@ -1,5 +1,15 @@
 import * as assert from 'node:assert/strict';
-import { getDeliveryMainQuantity, normalizeDraftTargetBundle, normalizeProductionDeliverySnapshot } from '../utils/productionDeliveryRows';
+import {
+  calculatePieceQuantity,
+  getDeliveryMainQuantity,
+  inferGroupDefaultDeliveryType,
+  normalizeDraftTargetBundle,
+  normalizeProductionDeliverySnapshot,
+  resolveDeliveryType,
+  resolveStageRemainderState,
+} from '../utils/productionDeliveryRows';
+import { convertBetweenUnits } from '../utils/unitConversions';
+import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 import { buildGroupStartMaterials, sumDeliveredRows } from '../utils/productionGroupOrders';
 import { CREATE_NEW_BUNDLE_VALUE } from '../utils/productionBundles';
 import { isProductionOrderPanelExpanded } from '../utils/productionOrderPanels';
@@ -52,4 +62,144 @@ for (const step of ['lines', 'progress'] as const) {
   assert.equal(isProductionOrderPanelExpanded(step, 'order', 4, { [`${step}:order`]: true }), true);
 }
 assert.equal(isProductionOrderPanelExpanded('materials', 'order', 1, {}), false);
-console.log('Production delivery regressions passed: recorded amounts, bundle routing, legacy rows, drafts, current requirements and units.');
+
+// Delivery type resolution & unified inventory calculation regressions:
+assert.equal(resolveDeliveryType({ deliveryType: 'bulk', length: 20, width: 10 }), 'bulk');
+assert.equal(resolveDeliveryType({ deliveryType: 'piece' }), 'piece');
+assert.equal(resolveDeliveryType({ length: 20, width: 10, quantity: 3 }), 'piece');
+assert.equal(resolveDeliveryType({ mainQuantity: 500, name: 'تحویل فله‌ای' }), 'bulk');
+assert.equal(inferGroupDefaultDeliveryType([{ length: 10, width: 5 }]), 'piece');
+assert.equal(inferGroupDefaultDeliveryType([{ length: 0, width: 0, quantity: 1 }]), 'bulk');
+
+const bulkRow = {
+  deliveryType: 'bulk' as const,
+  name: 'قطعه الکی قدیمی',
+  length: 20,
+  width: 10,
+  quantity: 2,
+  mainQuantity: 1000,
+  conversionWidthMm: 1400,
+  sourceBundleId: 'src1',
+};
+const pieceQty = calculatePieceQuantity(20, 10, 5);
+assert.equal(pieceQty, 1000);
+const pieceRow = {
+  deliveryType: 'piece' as const,
+  name: 'پشت کیف',
+  length: 20,
+  width: 10,
+  quantity: 5,
+  mainQuantity: pieceQty,
+  sourceBundleId: 'src1',
+};
+assert.equal(getDeliveryMainQuantity(bulkRow, 'bulk'), 1000);
+assert.equal(getDeliveryMainQuantity(pieceRow, 'piece'), 1000);
+assert.equal(sumDeliveredRows([bulkRow, pieceRow] as any), 2000);
+
+const normalizedBulkSnapshot = normalizeProductionDeliverySnapshot(bulkRow);
+assert.equal(normalizedBulkSnapshot.deliveryType, 'bulk');
+assert.equal(normalizedBulkSnapshot.name, undefined);
+assert.equal(normalizedBulkSnapshot.length, undefined);
+assert.equal(normalizedBulkSnapshot.width, undefined);
+assert.equal(normalizedBulkSnapshot.quantity, undefined);
+assert.equal(normalizedBulkSnapshot.conversionWidthMm, 1400);
+assert.equal(normalizedBulkSnapshot.mainQuantity, 1000);
+
+// Linear <-> Area unit conversion regressions:
+assert.equal(convertBetweenUnits(2, 'متر طول', 'میلیمتر مربع', { widthMm: 1400 }), 2800000);
+assert.equal(convertBetweenUnits(2800000, 'میلیمتر مربع', 'متر طول', { widthMm: 1400 }), 2);
+
+const mainToSubConv = getUnitQuantityConversion('mainQuantity', {
+  availableKeys: ['mainQuantity', 'subQuantity'],
+})!;
+assert.equal(
+  calculateUnitQuantity(
+    {
+      mainQuantity: 2,
+      main_unit: 'متر طول',
+      sub_unit: 'میلیمتر مربع',
+      conversionWidthMm: 1400,
+      width: 25, // piece cut width must not override material roll width
+    },
+    mainToSubConv
+  ),
+  2800000
+);
+assert.equal(
+  calculateUnitQuantity(
+    {
+      mainQuantity: 2,
+      main_unit: 'متر طول',
+      sub_unit: 'میلیمتر مربع',
+      category: 'leather',
+      leather_width: '1400',
+      width: 25,
+    },
+    mainToSubConv
+  ),
+  2800000
+);
+assert.throws(
+  () =>
+    calculateUnitQuantity(
+      {
+        mainQuantity: 2,
+        main_unit: 'متر طول',
+        sub_unit: 'میلیمتر مربع',
+        width: 25, // piece cut width alone must prompt popover instead of silent wrong math
+      },
+      mainToSubConv
+    ),
+  /عرض اختصاصی ماده اولیه/
+);
+
+const subToMainConv = getUnitQuantityConversion('subQuantity', {
+  availableKeys: ['mainQuantity', 'subQuantity'],
+})!;
+assert.equal(
+  calculateUnitQuantity(
+    {
+      subQuantity: 2800000,
+      main_unit: 'متر طول',
+      sub_unit: 'میلیمتر مربع',
+      conversionWidthMm: 1400,
+    },
+    subToMainConv
+  ),
+  2
+);
+
+// Stage remainder disposition: keep as stage inventory (default) vs record partial/full waste
+const keepState = resolveStageRemainderState({
+  totalSourceQty: 100,
+  currentDeliveredQty: 80,
+  previousDeliveredQty: 5,
+  remainderMode: 'keep',
+});
+assert.equal(keepState.remainingAvailable, 15);
+assert.equal(keepState.wasteQty, 0);
+assert.equal(keepState.remainingStageStock, 15);
+
+const partialWasteState = resolveStageRemainderState({
+  totalSourceQty: 100,
+  currentDeliveredQty: 80,
+  previousDeliveredQty: 5,
+  previousWasteQty: 3,
+  remainderMode: 'waste',
+  requestedWasteQty: 7,
+});
+assert.equal(partialWasteState.remainingAvailable, 12);
+assert.equal(partialWasteState.wasteQty, 7);
+assert.equal(partialWasteState.remainingStageStock, 5);
+
+const clampedWasteState = resolveStageRemainderState({
+  totalSourceQty: 50,
+  currentDeliveredQty: 42,
+  remainderMode: 'waste',
+  requestedWasteQty: 25,
+});
+assert.equal(clampedWasteState.remainingAvailable, 8);
+assert.equal(clampedWasteState.wasteQty, 8);
+assert.equal(clampedWasteState.remainingStageStock, 0);
+
+console.log('Production delivery regressions passed: recorded amounts, bundle routing, legacy rows, bulk/piece delivery types, bidirectional conversions, remainder/waste math, and current requirements.');

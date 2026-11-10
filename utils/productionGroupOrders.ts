@@ -1,5 +1,5 @@
 import { type StartMaterialDeliveryRow, type StartMaterialGroup, type StartMaterialPiece } from '../components/production/StartProductionModal';
-import { getDeliveryMainQuantity } from './productionDeliveryRows';
+import { type DeliveryType, getDeliveryMainQuantity, inferGroupDefaultDeliveryType } from './productionDeliveryRows';
 import { getUnitConversionFactor } from './unitConversions';
 
 const toNumber = (value: any) => {
@@ -164,6 +164,7 @@ export const buildGroupStartMaterials = ({
   return Array.from(grouped.values()).map((group, index) => ({
     ...group,
     rowIndex: index,
+    deliveryType: inferGroupDefaultDeliveryType(group.pieces),
   }));
 };
 
@@ -237,10 +238,10 @@ export const splitDeliveredAcrossRequirements = (
   });
 };
 
-export const sumDeliveredRows = (rows: StartMaterialDeliveryRow[]) =>
+export const sumDeliveredRows = (rows: StartMaterialDeliveryRow[], explicitType?: DeliveryType) =>
   (Array.isArray(rows) ? rows : []).reduce(
     (sum, row) =>
       sum
-      + getDeliveryMainQuantity(row),
+      + getDeliveryMainQuantity(row, explicitType),
     0
   );

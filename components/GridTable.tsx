@@ -1,15 +1,16 @@
 import ResizableTable from './ResizableTable';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Typography, message } from 'antd';
-import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined, CalculatorOutlined } from '@ant-design/icons';
+import { PlusOutlined, SaveOutlined, EditOutlined, RightOutlined, CloseCircleOutlined, LockOutlined, DeleteOutlined, CloseOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import { BlockDefinition, FieldType } from '../types';
 import { MODULES } from '../moduleRegistry';
-import { convertArea, HARD_CODED_UNIT_OPTIONS } from '../utils/unitConversions';
+import { convertBetweenUnits, HARD_CODED_UNIT_OPTIONS, resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { getSingleOptionLabel } from '../utils/optionHelpers';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
-import { calculateUnitQuantity, getUnitQuantityConversion } from '../utils/unitQuantityConversion';
+import { getUnitQuantityConversion } from '../utils/unitQuantityConversion';
 import SmartFieldRenderer from './SmartFieldRenderer';
+import UnitCalculatorButton from './production/UnitCalculatorButton';
 import QrScanPopover from './QrScanPopover';
 import { buildProductFilters, runProductsQuery } from './editableTable/productionOrderHelpers';
 
@@ -475,13 +476,14 @@ const GridTable: React.FC<GridTableProps> = ({
       const finalUsage = baseUsage * (1 + wasteRate / 100);
       const mainUnit = piece.main_unit || gridRow?.header?.main_unit || null;
       const subUnit = piece.sub_unit || null;
-      const qtySubRaw = convertArea(baseUsage, mainUnit, subUnit, {
+      const qtySubRaw = convertBetweenUnits(baseUsage, mainUnit, subUnit, {
         record: {
           ...(gridRow?.specs || {}),
+          conversion_width_mm: piece?.conversion_width_mm ?? gridRow?.specs?.conversion_width_mm,
           category: gridRow?.header?.category || null,
         },
       });
-      const qtySub = Number.isFinite(qtySubRaw) ? Math.round(qtySubRaw * 100) / 100 : 0;
+      const qtySub = Number.isFinite(qtySubRaw) ? Math.round(qtySubRaw * 100) / 100 : (parseFloat(piece.qty_sub) || 0);
 
       const unitPrice = parseFloat(piece.unit_price ?? piece.main_unit_price ?? gridRow?.header?.selected_product_main_unit_price) || 0;
       const subUnitPrice = parseFloat(piece.sub_unit_price ?? piece.sub_buy_price ?? gridRow?.header?.selected_product_sub_unit_price) || 0;
@@ -540,26 +542,12 @@ const GridTable: React.FC<GridTableProps> = ({
     const row = { ...nextData[rowIndex] };
     const pieces = Array.isArray(row.pieces) ? [...row.pieces] : [];
     pieces[pieceIndex] = { ...pieces[pieceIndex], ...patch };
+    if (patch.conversion_width_mm) {
+      row.specs = { ...(row.specs || {}), conversion_width_mm: patch.conversion_width_mm };
+    }
     row.pieces = pieces;
     nextData[rowIndex] = applyCalculations(row);
     updateGrid(nextData);
-  };
-
-  const applyPieceUnitConversion = (rowIndex: number, pieceIndex: number, fieldKey: string) => {
-    const conversion = getPieceUnitConversion(fieldKey);
-    if (!conversion) return;
-
-    const source = getWorkingData();
-    const row = source[rowIndex];
-    const piece = row?.pieces?.[pieceIndex];
-    if (!row || !piece) return;
-
-    try {
-      const converted = calculateUnitQuantity(buildPieceUnitConversionContext(row, piece), conversion);
-      updatePiece(rowIndex, pieceIndex, { [conversion.targetQtyKey]: converted });
-    } catch (err: any) {
-      message.error(err?.message || 'خطا در محاسبه واحد');
-    }
   };
 
   const addPiece = (rowIndex: number) => {
@@ -1876,20 +1864,41 @@ const GridTable: React.FC<GridTableProps> = ({
                           width: 130,
                           render: (val: any, _record: any, pieceIndex: number) => {
                             const conversion = getPieceUnitConversion('qty_main');
+                            const ctx = buildPieceUnitConversionContext(row, _record);
                             return (
                               <div className="flex items-center gap-1">
                                 <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                                 {conversion ? (
-                                  <Button
-                                    size="small"
-                                    type="text"
-                                    className="px-1 text-[10px] whitespace-nowrap shrink-0"
-                                    icon={<CalculatorOutlined />}
+                                  <UnitCalculatorButton
+                                    sourceQty={parseFloat(_record?.[conversion.sourceQtyKey]) || 0}
+                                    pairedQty={parseFloat(_record?.[conversion.targetQtyKey]) || 0}
+                                    sourceUnit={String(_record?.main_unit || row?.header?.main_unit || '')}
+                                    targetUnit={String(_record?.sub_unit || '')}
+                                    direction={conversion.direction}
+                                    kind={conversion.kind}
+                                    record={ctx}
+                                    widthMm={resolveUnitConversionWidthMm({ record: ctx })}
                                     title={conversion.title}
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      applyPieceUnitConversion(rowIndex, pieceIndex, 'qty_main');
+                                    className="px-1 text-[10px]"
+                                    onConvert={(converted, nextWidthMm) => {
+                                      updatePiece(rowIndex, pieceIndex, {
+                                        [conversion.targetQtyKey]: converted,
+                                        ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                      });
+                                    }}
+                                    onReverseConvert={(converted, nextWidthMm) => {
+                                      const l = parseFloat(_record?.length) || 0;
+                                      const w = parseFloat(_record?.width) || 0;
+                                      const patch: Record<string, any> = {
+                                        [conversion.sourceQtyKey]: converted,
+                                        ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                      };
+                                      if (l > 0 && w > 0) {
+                                        patch.quantity = Math.round((converted / (l * w)) * 1000) / 1000;
+                                      } else {
+                                        patch.quantity = converted;
+                                      }
+                                      updatePiece(rowIndex, pieceIndex, patch);
                                     }}
                                   />
                                 ) : null}
@@ -1904,20 +1913,41 @@ const GridTable: React.FC<GridTableProps> = ({
                           width: 130,
                           render: (val: any, _record: any, pieceIndex: number) => {
                             const conversion = getPieceUnitConversion('qty_sub');
+                            const ctx = buildPieceUnitConversionContext(row, _record);
                             return (
                               <div className="flex items-center gap-1">
                                 <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatQuantity(val)}</Text>
                                 {conversion ? (
-                                  <Button
-                                    size="small"
-                                    type="text"
-                                    className="px-1 text-[10px] whitespace-nowrap shrink-0"
-                                    icon={<CalculatorOutlined />}
+                                  <UnitCalculatorButton
+                                    sourceQty={parseFloat(_record?.[conversion.sourceQtyKey]) || 0}
+                                    pairedQty={parseFloat(_record?.[conversion.targetQtyKey]) || 0}
+                                    sourceUnit={String(_record?.sub_unit || '')}
+                                    targetUnit={String(_record?.main_unit || row?.header?.main_unit || '')}
+                                    direction={conversion.direction}
+                                    kind={conversion.kind}
+                                    record={ctx}
+                                    widthMm={resolveUnitConversionWidthMm({ record: ctx })}
                                     title={conversion.title}
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      applyPieceUnitConversion(rowIndex, pieceIndex, 'qty_sub');
+                                    className="px-1 text-[10px]"
+                                    onConvert={(converted, nextWidthMm) => {
+                                      const l = parseFloat(_record?.length) || 0;
+                                      const w = parseFloat(_record?.width) || 0;
+                                      const patch: Record<string, any> = {
+                                        [conversion.targetQtyKey]: converted,
+                                        ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                      };
+                                      if (l > 0 && w > 0) {
+                                        patch.quantity = Math.round((converted / (l * w)) * 1000) / 1000;
+                                      } else {
+                                        patch.quantity = converted;
+                                      }
+                                      updatePiece(rowIndex, pieceIndex, patch);
+                                    }}
+                                    onReverseConvert={(converted, nextWidthMm) => {
+                                      updatePiece(rowIndex, pieceIndex, {
+                                        [conversion.sourceQtyKey]: converted,
+                                        ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                      });
                                     }}
                                   />
                                 ) : null}
@@ -1966,6 +1996,7 @@ const GridTable: React.FC<GridTableProps> = ({
                             width: 240,
                             render: (val: any, _record: any, pieceIndex: number) => {
                               const conversion = getPieceUnitConversion('unit_price');
+                              const ctx = buildPieceUnitConversionContext(row, _record);
                               return (
                                 <div className="flex items-center gap-1">
                                   {rowCanEdit
@@ -1982,16 +2013,28 @@ const GridTable: React.FC<GridTableProps> = ({
                                     )
                                     : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>}
                                   {conversion ? (
-                                    <Button
-                                      size="small"
-                                      type="text"
-                                      className="px-1 text-[10px] whitespace-nowrap shrink-0"
-                                      icon={<CalculatorOutlined />}
+                                    <UnitCalculatorButton
+                                      sourceQty={parseFloat(_record?.[conversion.sourceQtyKey]) || 0}
+                                      pairedQty={parseFloat(_record?.[conversion.targetQtyKey]) || 0}
+                                      sourceUnit={String(_record?.main_unit || row?.header?.main_unit || '')}
+                                      targetUnit={String(_record?.sub_unit || '')}
+                                      direction={conversion.direction}
+                                      kind={conversion.kind}
+                                      record={ctx}
+                                      widthMm={resolveUnitConversionWidthMm({ record: ctx })}
                                       title={conversion.title}
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        applyPieceUnitConversion(rowIndex, pieceIndex, 'unit_price');
+                                      className="px-1 text-[10px]"
+                                      onConvert={(converted, nextWidthMm) => {
+                                        updatePiece(rowIndex, pieceIndex, {
+                                          [conversion.targetQtyKey]: converted,
+                                          ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                        });
+                                      }}
+                                      onReverseConvert={(converted, nextWidthMm) => {
+                                        updatePiece(rowIndex, pieceIndex, {
+                                          [conversion.sourceQtyKey]: converted,
+                                          ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                        });
                                       }}
                                     />
                                   ) : null}
@@ -2006,6 +2049,7 @@ const GridTable: React.FC<GridTableProps> = ({
                             width: 240,
                             render: (val: any, _record: any, pieceIndex: number) => {
                               const conversion = getPieceUnitConversion('sub_unit_price');
+                              const ctx = buildPieceUnitConversionContext(row, _record);
                               return (
                                 <div className="flex items-center gap-1">
                                   {rowCanEdit
@@ -2022,16 +2066,28 @@ const GridTable: React.FC<GridTableProps> = ({
                                     )
                                     : <Text className="persian-number font-medium whitespace-nowrap inline-block">{formatPersianPrice(val || 0, true)}</Text>}
                                   {conversion ? (
-                                    <Button
-                                      size="small"
-                                      type="text"
-                                      className="px-1 text-[10px] whitespace-nowrap shrink-0"
-                                      icon={<CalculatorOutlined />}
+                                    <UnitCalculatorButton
+                                      sourceQty={parseFloat(_record?.[conversion.sourceQtyKey]) || 0}
+                                      pairedQty={parseFloat(_record?.[conversion.targetQtyKey]) || 0}
+                                      sourceUnit={String(_record?.sub_unit || '')}
+                                      targetUnit={String(_record?.main_unit || row?.header?.main_unit || '')}
+                                      direction={conversion.direction}
+                                      kind={conversion.kind}
+                                      record={ctx}
+                                      widthMm={resolveUnitConversionWidthMm({ record: ctx })}
                                       title={conversion.title}
-                                      onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        applyPieceUnitConversion(rowIndex, pieceIndex, 'sub_unit_price');
+                                      className="px-1 text-[10px]"
+                                      onConvert={(converted, nextWidthMm) => {
+                                        updatePiece(rowIndex, pieceIndex, {
+                                          [conversion.targetQtyKey]: converted,
+                                          ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                        });
+                                      }}
+                                      onReverseConvert={(converted, nextWidthMm) => {
+                                        updatePiece(rowIndex, pieceIndex, {
+                                          [conversion.sourceQtyKey]: converted,
+                                          ...(nextWidthMm ? { conversion_width_mm: nextWidthMm } : {}),
+                                        });
                                       }}
                                     />
                                   ) : null}

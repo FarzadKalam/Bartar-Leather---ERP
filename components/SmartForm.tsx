@@ -1,18 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { App, Form, Button, Spin, Divider, Select, Space, Checkbox } from 'antd';
-import { CalculatorOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
+import { UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
 import SmartFieldRenderer from './SmartFieldRenderer';
+import UnitCalculatorButton from './production/UnitCalculatorButton';
 import EditableTable from './EditableTable.tsx';
 import GridTable from './GridTable';
 import SummaryCard from './SummaryCard';
 import { calculateSummary } from '../utils/calculations';
 import { ModuleDefinition, FieldLocation, BlockType, LogicOperator, FieldType, SummaryCalculationType, ModuleField } from '../types';
 import {
-  calculateUnitQuantity,
   getUnitQuantityConversion,
+  toUnitQuantityNumber,
 } from '../utils/unitQuantityConversion';
+import { resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import ProductionStagesField from './ProductionStagesField';
 import { normalizeInvoiceItemsForInventory, syncInvoiceInventoryOnSave } from '../utils/invoiceInventoryWorkflow';
@@ -55,6 +57,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   const { message, modal } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>({});
+  const [unitWidthOverrideMm, setUnitWidthOverrideMm] = useState<number | null>(null);
   const [initialRecord, setInitialRecord] = useState<any>(null);
   const watchedValues = Form.useWatch([], form);
   
@@ -640,25 +643,23 @@ const SmartForm: React.FC<SmartFormProps> = ({
     } as ModuleField;
   };
 
-  const applyFormUnitConversion = (fieldKey: string) => {
-    const conversion = getUnitQuantityConversion(fieldKey, {
-      availableKeys: module.fields.map((field) => String(field.key || '')),
-    });
-    if (!conversion) return;
-    const values = {
-      ...formData,
-      ...form.getFieldsValue(true),
-    };
-    try {
-      const converted = calculateUnitQuantity(values, conversion);
-      form.setFieldsValue({ [conversion.targetQtyKey]: converted });
-      setFormData((prev: any) => ({
-        ...prev,
-        [conversion.targetQtyKey]: converted,
-      }));
-    } catch (err: any) {
-      message.error(err?.message || 'خطا در محاسبه واحد');
+  const applyFormUnitConversionResult = (targetQtyKey: string, converted: number, nextWidthMm?: number) => {
+    const valuesPatch: Record<string, any> = { [targetQtyKey]: converted };
+    if (nextWidthMm) {
+      setUnitWidthOverrideMm(nextWidthMm);
+      const categoryVal = String((form.getFieldValue('category') ?? formData?.category) || '').trim();
+      const widthKey = categoryVal === 'lining' || categoryVal === 'آستر'
+        ? 'lining_width'
+        : (categoryVal === 'accessory' || categoryVal === 'خرجکار' ? 'accessory_width' : 'leather_width');
+      if (module.fields.some((f) => f.key === widthKey) && !toUnitQuantityNumber(form.getFieldValue(widthKey) ?? formData?.[widthKey])) {
+        valuesPatch[widthKey] = nextWidthMm;
+      }
     }
+    form.setFieldsValue(valuesPatch);
+    setFormData((prev: any) => ({
+      ...prev,
+      ...valuesPatch,
+    }));
   };
 
   const hydrateStockTransferProductUnits = async (productId: any) => {
@@ -1328,18 +1329,31 @@ const SmartForm: React.FC<SmartFormProps> = ({
                             onRelationOptionsUpdate={mergeRelationOptions}
                           />
                               </div>
-                              {conversion && canShowConversion && !(resolvedField as any).readonly && (
-                                <Button
-                                  size="small"
-                                  className="mt-8 px-2 text-xs"
-                                  icon={<CalculatorOutlined />}
-                                  onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    applyFormUnitConversion(field.key);
-                                  }}
-                                />
-                              )}
+                              {conversion && canShowConversion && !(resolvedField as any).readonly && (() => {
+                                const mergedValues = { ...formData, ...currentValues };
+                                return (
+                                  <div className="mt-8">
+                                    <UnitCalculatorButton
+                                      sourceQty={toUnitQuantityNumber(mergedValues?.[conversion.sourceQtyKey])}
+                                      pairedQty={toUnitQuantityNumber(mergedValues?.[conversion.targetQtyKey])}
+                                      sourceUnit={String(mergedValues?.[conversion.sourceUnitKey] || '')}
+                                      targetUnit={String(mergedValues?.[conversion.targetUnitKey] || '')}
+                                      direction={conversion.direction}
+                                      kind={conversion.kind}
+                                      record={mergedValues}
+                                      widthMm={unitWidthOverrideMm ?? resolveUnitConversionWidthMm({ record: mergedValues })}
+                                      title={conversion.title}
+                                      className="px-2 text-xs"
+                                      onConvert={(converted, nextWidthMm) => {
+                                        applyFormUnitConversionResult(conversion.targetQtyKey, converted, nextWidthMm);
+                                      }}
+                                      onReverseConvert={(converted, nextWidthMm) => {
+                                        applyFormUnitConversionResult(conversion.sourceQtyKey, converted, nextWidthMm);
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })()}
                             </div>
                         </div>
                      );
@@ -1475,18 +1489,31 @@ const SmartForm: React.FC<SmartFormProps> = ({
                                    onRelationOptionsUpdate={mergeRelationOptions}
                                  />
                                 </div>
-                                {conversion && canShowConversion && !(resolvedField as any).readonly && (
-                                  <Button
-                                    size="small"
-                                    className="mt-8 px-2 text-xs"
-                                    icon={<CalculatorOutlined />}
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      applyFormUnitConversion(field.key);
-                                    }}
-                                  />
-                                )}
+                                {conversion && canShowConversion && !(resolvedField as any).readonly && (() => {
+                                  const mergedValues = { ...formData, ...currentValues };
+                                  return (
+                                    <div className="mt-8">
+                                      <UnitCalculatorButton
+                                        sourceQty={toUnitQuantityNumber(mergedValues?.[conversion.sourceQtyKey])}
+                                        pairedQty={toUnitQuantityNumber(mergedValues?.[conversion.targetQtyKey])}
+                                        sourceUnit={String(mergedValues?.[conversion.sourceUnitKey] || '')}
+                                        targetUnit={String(mergedValues?.[conversion.targetUnitKey] || '')}
+                                        direction={conversion.direction}
+                                        kind={conversion.kind}
+                                        record={mergedValues}
+                                        widthMm={unitWidthOverrideMm ?? resolveUnitConversionWidthMm({ record: mergedValues })}
+                                        title={conversion.title}
+                                        className="px-2 text-xs"
+                                        onConvert={(converted, nextWidthMm) => {
+                                          applyFormUnitConversionResult(conversion.targetQtyKey, converted, nextWidthMm);
+                                        }}
+                                        onReverseConvert={(converted, nextWidthMm) => {
+                                          applyFormUnitConversionResult(conversion.sourceQtyKey, converted, nextWidthMm);
+                                        }}
+                                      />
+                                    </div>
+                                  );
+                                })()}
                               </div>
                            );
                         })}

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Form, Input, InputNumber, Select, Switch, Upload, Image, Modal, App, Tag, Button, Alert } from 'antd';
-import { CalculatorOutlined, UploadOutlined, LoadingOutlined, QrcodeOutlined, PlusOutlined } from '@ant-design/icons';
+import { UploadOutlined, LoadingOutlined, QrcodeOutlined, PlusOutlined } from '@ant-design/icons';
 import { ModuleField, FieldType, FieldNature } from '../types';
 import { toPersianNumber, formatPersianPrice } from '../utils/persianNumberFormatter';
 import { supabase } from '../supabaseClient';
@@ -12,6 +12,7 @@ import PersianDatePicker from './PersianDatePicker';
 import RelatedRecordPopover from './RelatedRecordPopover';
 import QrScanPopover from './QrScanPopover';
 import RecordFilesManager from './RecordFilesManager';
+import UnitCalculatorButton from './production/UnitCalculatorButton';
 import DateObject from 'react-date-object';
 import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
@@ -20,9 +21,10 @@ import gregorian_en from 'react-date-object/locales/gregorian_en';
 import { checkFieldDuplicate, findDuplicateUniqueFields, getUniqueFieldMessage, isUniqueField } from '../utils/fieldUniqueness';
 import { normalizeStoragePublicUrl } from '../utils/storageUrls';
 import { fetchRelationOptions } from '../utils/relationOptions';
+import { resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import {
-  calculateUnitQuantity,
   getUnitQuantityConversion,
+  toUnitQuantityNumber,
 } from '../utils/unitQuantityConversion';
 
 const normalizeDigitsToEnglish = (raw: any): string => {
@@ -1395,7 +1397,6 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
   onCancel,
   onOk,
 }) => {
-  const { message: inlineMsg } = App.useApp();
   const watchedValues = Form.useWatch([], form);
   const resolvedPopupZIndex = Math.max(
     popupZIndex ?? 0,
@@ -1413,6 +1414,7 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
     && fields.some((field) => field.key === 'voucher_type')
     && (!!fromShelfField || !!toShelfField);
   const [activeBundleShelfIds, setActiveBundleShelfIds] = useState<string[]>([]);
+  const [unitWidthOverrideMm, setUnitWidthOverrideMm] = useState<number | null>(null);
   const selectedFromShelfId = String((watchedValues as any)?.from_shelf_id || '').trim();
 
   useEffect(() => {
@@ -1549,25 +1551,44 @@ export const RelationQuickCreateInline: React.FC<QuickCreateProps> = ({
                         />
                       </Form.Item>
                     </div>
-                    {conversion && !(field as any).readonly && (
-                      <Button
-                        htmlType="button"
-                        size="small"
-                        className="mt-8"
-                        icon={<CalculatorOutlined />}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          try {
-                            const latestValues = form.getFieldsValue(true) || currentValues;
-                            const converted = calculateUnitQuantity(latestValues, conversion);
-                            form.setFieldsValue({ [conversion.targetQtyKey]: converted });
-                          } catch (err: any) {
-                            inlineMsg.error(err?.message || 'خطا در محاسبه واحد');
+                    {conversion && !(field as any).readonly && (() => {
+                      const latestValues = (form.getFieldsValue(true) || currentValues || {}) as Record<string, any>;
+                      const applyQuickUnitPatch = (qtyKey: string, converted: number, nextWidthMm?: number) => {
+                        const patch: Record<string, any> = { [qtyKey]: converted };
+                        if (nextWidthMm) {
+                          setUnitWidthOverrideMm(nextWidthMm);
+                          const categoryVal = String(latestValues?.category || '').trim();
+                          const widthKey = categoryVal === 'lining' || categoryVal === 'آستر'
+                            ? 'lining_width'
+                            : (categoryVal === 'accessory' || categoryVal === 'خرجکار' ? 'accessory_width' : 'leather_width');
+                          if (fields.some((f) => f.key === widthKey) && !toUnitQuantityNumber(latestValues?.[widthKey])) {
+                            patch[widthKey] = nextWidthMm;
                           }
-                        }}
-                      />
-                    )}
+                        }
+                        form.setFieldsValue(patch);
+                      };
+                      return (
+                        <div className="mt-8">
+                          <UnitCalculatorButton
+                            sourceQty={toUnitQuantityNumber(latestValues?.[conversion.sourceQtyKey])}
+                            pairedQty={toUnitQuantityNumber(latestValues?.[conversion.targetQtyKey])}
+                            sourceUnit={String(latestValues?.[conversion.sourceUnitKey] || '')}
+                            targetUnit={String(latestValues?.[conversion.targetUnitKey] || '')}
+                            direction={conversion.direction}
+                            kind={conversion.kind}
+                            record={latestValues}
+                            widthMm={unitWidthOverrideMm ?? resolveUnitConversionWidthMm({ record: latestValues })}
+                            title={conversion.title}
+                            onConvert={(converted, nextWidthMm) => {
+                              applyQuickUnitPatch(conversion.targetQtyKey, converted, nextWidthMm);
+                            }}
+                            onReverseConvert={(converted, nextWidthMm) => {
+                              applyQuickUnitPatch(conversion.sourceQtyKey, converted, nextWidthMm);
+                            }}
+                          />
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               }}

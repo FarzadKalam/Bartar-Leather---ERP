@@ -22,7 +22,16 @@ import { MODULES } from '../moduleRegistry';
 import { BlockDefinition } from '../types';
 import { supabase } from '../supabaseClient';
 import { formatProductionShelfLabel } from '../utils/productionShelfLabel';
-import { getDeliveryMainQuantity, normalizeProductionDeliverySnapshot, normalizeDraftTargetBundle } from '../utils/productionDeliveryRows';
+import {
+  type DeliveryType,
+  calculatePieceQuantity,
+  getDeliveryMainQuantity,
+  inferGroupDefaultDeliveryType,
+  normalizeProductionDeliverySnapshot,
+  normalizeDraftTargetBundle,
+  resolveDeliveryType,
+} from '../utils/productionDeliveryRows';
+import { resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { isProductionOrderPanelExpanded } from '../utils/productionOrderPanels';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
 import { applyProductionMoves, syncProductStock } from '../utils/productionWorkflow';
@@ -95,6 +104,7 @@ type StartStageFormRow = {
   giverConfirmed?: boolean;
   receiverConfirmed?: boolean;
   totalsByProduct: Record<string, number>;
+  deliveryTypes?: DeliveryType[];
   groups: any[];
 };
 
@@ -146,16 +156,33 @@ const toGroupTotals = (groups: any[]) => {
   (Array.isArray(groups) ? groups : []).forEach((group: any) => {
     const productId = resolveGroupProductId(group);
     if (!productId) return;
+    const deliveryType = resolveDeliveryType(group);
     const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
     const qty = rows.length > 0
       ? rows.reduce(
-          (sum: number, row: any) => sum + Math.max(0, toNumber(row?.mainQuantity ?? row?.deliveredQty ?? (toNumber(row?.length) * toNumber(row?.width) * toNumber(row?.quantity)))),
+          (sum: number, row: any) => sum + getDeliveryMainQuantity(row, deliveryType),
           0
         )
       : Math.max(0, toNumber(group?.totalHandoverQty ?? group?.totalDeliveredQty));
     totals[productId] = (totals[productId] || 0) + qty;
   });
   return totals;
+};
+
+const extractGroupDeliveryTypes = (groups: any[]): DeliveryType[] => {
+  const seen = new Set<DeliveryType>();
+  (Array.isArray(groups) ? groups : []).forEach((group: any) => {
+    const groupType = resolveDeliveryType(group);
+    const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
+    if (rows.length > 0) {
+      rows.forEach((row: any) => {
+        seen.add(row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : groupType);
+      });
+    } else {
+      seen.add(groupType);
+    }
+  });
+  return Array.from(seen);
 };
 
 const buildStartStageFormId = () => `start_stage_form_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -236,6 +263,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
   const [isChangingStep, setIsChangingStep] = useState(false);
   const materialSaveHandlersRef = useRef(new Map<string, () => Promise<boolean>>());
   const [startMaterials, setStartMaterials] = useState<StartMaterialGroup[]>([]);
+  const productWidthMmByProductRef = useRef<Record<string, number | null>>({});
   const [sourceBundleOptionsByProduct, setSourceBundleOptionsByProduct] = useState<Record<string, {
     label: string;
     value: string;
@@ -713,6 +741,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
             giverConfirmed: !!rawForm?.giverConfirmation?.confirmed,
             receiverConfirmed: !!rawForm?.receiverConfirmation?.confirmed,
             totalsByProduct: toGroupTotals(groups),
+            deliveryTypes: extractGroupDeliveryTypes(groups),
             groups,
           });
         });
@@ -736,6 +765,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
     fallbackTargetShelfId: string | null
   ): StageHandoverGroup[] => {
     return (Array.isArray(rawGroups) ? rawGroups : []).map((group: any, groupIndex: number) => {
+      const groupDeliveryType = resolveDeliveryType(group);
       const piecesRaw = Array.isArray(group?.pieces) ? group.pieces : [];
       const pieces = piecesRaw.map((piece: any, pieceIndex: number) => {
         const sourceQty = Math.max(0, toNumber(piece?.sourceQty ?? piece?.source_qty ?? piece?.totalUsage ?? piece?.total_usage ?? piece?.handoverQty ?? piece?.handover_qty));
@@ -773,21 +803,28 @@ const ProductionGroupOrderWizard: React.FC = () => {
       });
 
       const deliveryRowsRaw = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
-      const deliveryRows: StageHandoverDeliveryRow[] = deliveryRowsRaw.map((row: any, rowIndex: number) => ({
-        ...normalizeProductionDeliverySnapshot(row, group),
-        key: String(row?.key || `${String(group?.key || groupIndex)}_delivery_${rowIndex}`),
-        pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
-        name: String(row?.name || ''),
-        length: Math.max(0, toNumber(row?.length)),
-        width: Math.max(0, toNumber(row?.width)),
-        quantity: Math.max(0, toNumber(row?.quantity)),
-        mainUnit: String(row?.mainUnit || row?.main_unit || ''),
-        subUnit: String(row?.subUnit || row?.sub_unit || ''),
-        mainQuantity: calcDeliveredQty(row),
-        subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
-        deliveredQty: calcDeliveredQty(row),
-      }));
-      const totalHandoverQty = deliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row), 0);
+      const deliveryRows: StageHandoverDeliveryRow[] = deliveryRowsRaw.map((row: any, rowIndex: number) => {
+        const snapshot = normalizeProductionDeliverySnapshot(row, group);
+        const rowType = row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : groupDeliveryType;
+        const mainQty = calcDeliveredQty(row, rowType);
+        return {
+          ...snapshot,
+          deliveryType: rowType,
+          key: String(row?.key || `${String(group?.key || groupIndex)}_delivery_${rowIndex}`),
+          pieceKey: snapshot.pieceKey ?? (row?.pieceKey ? String(row.pieceKey) : undefined),
+          name: snapshot.name ?? '',
+          length: snapshot.length ?? 0,
+          width: snapshot.width ?? 0,
+          conversionWidthMm: snapshot.conversionWidthMm,
+          quantity: snapshot.quantity ?? 0,
+          mainUnit: snapshot.mainUnit,
+          subUnit: snapshot.subUnit,
+          mainQuantity: mainQty,
+          subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
+          deliveredQty: mainQty,
+        };
+      });
+      const totalHandoverQty = deliveryRows.reduce((sum, row) => sum + calcDeliveredQty(row, groupDeliveryType), 0);
       const totalSourceQty = Math.max(
         0,
         toNumber(group?.totalSourceQty ?? group?.total_source_qty ?? pieces.reduce((sum: number, piece: any) => sum + toNumber(piece?.sourceQty), 0))
@@ -806,6 +843,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         selectedProductCode: String(group?.selectedProductCode || group?.selected_product_code || ''),
         sourceShelfId: group?.sourceShelfId ? String(group.sourceShelfId) : null,
         targetShelfId: group?.targetShelfId ? String(group.targetShelfId) : fallbackTargetShelfId,
+        deliveryType: groupDeliveryType,
         pieces,
         orderPieces,
         deliveryRows,
@@ -1404,8 +1442,23 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
   const normalizeDeliveryRow = useCallback((group: StartMaterialGroup, rawRow?: any): StartMaterialDeliveryRow => {
     const firstPiece = Array.isArray(group.pieces) && group.pieces.length > 0 ? group.pieces[0] : null;
+    const groupType = resolveDeliveryType(group);
+    const deliveryType = rawRow?.deliveryType || (rawRow as any)?.delivery_type
+      ? resolveDeliveryType(rawRow)
+      : groupType;
+    const isPiece = deliveryType === 'piece';
+    const isBlankAdd = !rawRow;
+    const length = isBlankAdd ? 0 : toNumber(rawRow?.length ?? (isPiece ? firstPiece?.length : 0) ?? 0);
+    const width = isBlankAdd ? 0 : toNumber(rawRow?.width ?? (isPiece ? firstPiece?.width : 0) ?? 0);
+    const quantity = isBlankAdd
+      ? (isPiece ? 1 : 0)
+      : Math.max(0, toNumber(rawRow?.quantity ?? (isPiece ? firstPiece?.quantity : 0) ?? (isPiece ? 1 : 0)));
+    const mainQty = isBlankAdd
+      ? 0
+      : getDeliveryMainQuantity({ ...(rawRow || {}), length, width, quantity }, deliveryType);
     return {
       key: String(rawRow?.key || buildDeliveryRowKey()),
+      deliveryType,
       pieceKey: rawRow?.pieceKey ? String(rawRow.pieceKey) : undefined,
       sourceBundleId: rawRow?.sourceBundleId || rawRow?.source_bundle_id || null,
       sourceShelfId: rawRow?.sourceShelfId || rawRow?.source_shelf_id || null,
@@ -1414,20 +1467,16 @@ const ProductionGroupOrderWizard: React.FC = () => {
         ? (rawRow?.targetBundleId || rawRow?.target_bundle_id || USE_SOURCE_BUNDLE_VALUE)
         : CREATE_NEW_BUNDLE_VALUE,
       targetBundleLabel: rawRow?.targetBundleLabel || rawRow?.target_bundle_label || null,
-      name: String(rawRow?.name ?? firstPiece?.name ?? ''),
-      length: toNumber(rawRow?.length ?? firstPiece?.length ?? 0),
-      width: toNumber(rawRow?.width ?? firstPiece?.width ?? 0),
-      quantity: Math.max(0, toNumber(rawRow?.quantity ?? firstPiece?.quantity ?? 1)),
+      name: isBlankAdd ? '' : (isPiece ? String(rawRow?.name ?? firstPiece?.name ?? '') : String(rawRow?.name ?? '')),
+      length,
+      width,
+      conversionWidthMm: rawRow?.conversionWidthMm ? toNumber(rawRow.conversionWidthMm) : undefined,
+      quantity,
       mainUnit: String(rawRow?.mainUnit ?? firstPiece?.mainUnit ?? ''),
       subUnit: String(rawRow?.subUnit ?? firstPiece?.subUnit ?? ''),
-      mainQuantity: toNumber(rawRow?.mainQuantity ?? rawRow?.deliveredQty ?? 0),
+      mainQuantity: mainQty,
       subQuantity: toNumber(rawRow?.subQuantity ?? 0),
-      deliveredQty: calcDeliveredQty({
-        mainQuantity: rawRow?.mainQuantity ?? rawRow?.deliveredQty,
-        length: rawRow?.length ?? firstPiece?.length ?? 0,
-        width: rawRow?.width ?? firstPiece?.width ?? 0,
-        quantity: rawRow?.quantity ?? firstPiece?.quantity ?? 1,
-      }),
+      deliveredQty: mainQty,
       targetStageTaskId: rawRow?.targetStageTaskId || rawRow?.target_stage_task_id || group.targetStageTaskId || null,
       giverNote: String(rawRow?.giverNote ?? rawRow?.giver_note ?? ''),
     };
@@ -1435,16 +1484,19 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
   const recalcStartGroup = useCallback((group: StartMaterialGroup): StartMaterialGroup => {
     const pieces = Array.isArray(group.pieces) ? group.pieces : [];
+    const resolvedType = inferGroupDefaultDeliveryType(pieces, group.deliveryType ?? (group as any)?.delivery_type, group.deliveryRows);
     const rows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
       ...row,
-      deliveredQty: calcDeliveredQty(row),
+      deliveryType: row.deliveryType || resolvedType,
+      deliveredQty: calcDeliveredQty(row, resolvedType),
     }));
     return {
       ...group,
+      deliveryType: resolvedType,
       deliveryRows: rows,
       totalPerItemUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + toNumber(piece.perItemUsage), 0),
       totalUsage: pieces.reduce((sum: number, piece: StartMaterialPiece) => sum + toNumber(piece.totalUsage), 0),
-      totalDeliveredQty: rows.reduce((sum, row) => sum + calcDeliveredQty(row), 0),
+      totalDeliveredQty: rows.reduce((sum, row) => sum + calcDeliveredQty(row, resolvedType), 0),
     };
   }, []);
 
@@ -1466,6 +1518,87 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const rows = Array.isArray(group.deliveryRows) ? [...group.deliveryRows] : [];
       rows.push(normalizeDeliveryRow(group));
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows: rows, isConfirmed: false });
+      return next;
+    });
+  }, [normalizeDeliveryRow, recalcStartGroup]);
+
+  const changeDeliveryType = useCallback((groupIndex: number, deliveryType: DeliveryType) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const rows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).map((row) => ({
+        ...row,
+        deliveryType,
+      }));
+      next[groupIndex] = recalcStartGroup({
+        ...group,
+        deliveryType,
+        deliveryRows: rows,
+        isConfirmed: false,
+      });
+      return next;
+    });
+  }, [recalcStartGroup]);
+
+  const addAllBomPiecesToStart = useCallback((groupIndex: number) => {
+    setStartMaterials((prev) => {
+      const next = [...prev];
+      const group = next[groupIndex];
+      if (!group) return prev;
+      const rawPieces = Array.isArray(group.pieces) ? group.pieces : [];
+      if (!rawPieces.length) return prev;
+
+      const mergedPieces = Array.from(
+        rawPieces.reduce((map, piece) => {
+          const pieceKey = `${String(piece.name || '').trim()}::${toNumber(piece.length)}::${toNumber(piece.width)}`;
+          if (!pieceKey) return map;
+          const existing = map.get(pieceKey);
+          if (!existing) {
+            map.set(pieceKey, { ...piece });
+          } else {
+            map.set(pieceKey, {
+              ...existing,
+              totalQuantity: (toNumber(existing.totalQuantity) || toNumber(existing.quantity)) + (toNumber(piece.totalQuantity) || toNumber(piece.quantity)),
+              totalUsage: toNumber(existing.totalUsage) + toNumber(piece.totalUsage),
+              subUsage: toNumber(existing.subUsage) + toNumber(piece.subUsage),
+            });
+          }
+          return map;
+        }, new Map<string, StartMaterialPiece>()).values()
+      );
+
+      const existingRows = (Array.isArray(group.deliveryRows) ? group.deliveryRows : []).filter(
+        (row) => toNumber(row.mainQuantity) > 0 || String(row.name || '').trim() !== ''
+      );
+      const existingNames = new Set(existingRows.map((row) => String(row.name || '').trim()).filter(Boolean));
+      const newRows = mergedPieces
+        .filter((piece) => !existingNames.has(String(piece.name || '').trim()))
+        .map((piece) => {
+          const qtyCount = toNumber(piece.totalQuantity) || toNumber(piece.quantity) || 1;
+          const pieceQty = calculatePieceQuantity(piece.length, piece.width, qtyCount, piece.totalUsage);
+          return normalizeDeliveryRow({ ...group, deliveryType: 'piece' }, {
+            deliveryType: 'piece',
+            pieceKey: piece.key,
+            name: piece.name,
+            length: piece.length,
+            width: piece.width,
+            quantity: qtyCount,
+            mainUnit: piece.mainUnit,
+            subUnit: piece.subUnit,
+            mainQuantity: pieceQty,
+            deliveredQty: pieceQty,
+            subQuantity: toNumber(piece.subUsage),
+          });
+        });
+
+      const mergedRows = [...existingRows.map((row) => ({ ...row, deliveryType: 'piece' as DeliveryType })), ...newRows];
+      next[groupIndex] = recalcStartGroup({
+        ...group,
+        deliveryType: 'piece',
+        deliveryRows: mergedRows,
+        isConfirmed: false,
+      });
       return next;
     });
   }, [normalizeDeliveryRow, recalcStartGroup]);
@@ -1544,10 +1677,19 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const targetIndex = rows.findIndex((row) => String(row.key) === String(rowKey));
       if (targetIndex < 0) return prev;
       const row = rows[targetIndex];
-      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = ['mainQuantity', 'subQuantity'];
-      const nextValue = numericFields.includes(field) ? Math.max(0, toNumber(value)) : String(value ?? '');
+      const numericFields: Array<keyof Omit<StartMaterialDeliveryRow, 'key'>> = [
+        'length',
+        'width',
+        'conversionWidthMm',
+        'quantity',
+        'mainQuantity',
+        'subQuantity',
+      ];
+      const nextValue = numericFields.includes(field)
+        ? Math.max(0, toNumber(value))
+        : (value == null ? '' : String(value));
       const updatedRow = { ...row, [field]: nextValue };
-      rows[targetIndex] = { ...updatedRow, deliveredQty: calcDeliveredQty(updatedRow) };
+      rows[targetIndex] = { ...updatedRow, deliveredQty: calcDeliveredQty(updatedRow, resolveDeliveryType(group)) };
       next[groupIndex] = recalcStartGroup({ ...group, deliveryRows: rows, isConfirmed: false });
       return next;
     });
@@ -1636,13 +1778,14 @@ const ProductionGroupOrderWizard: React.FC = () => {
     const productUnits = new Map<string, string>();
     const { data: productRows } = await supabase
       .from('products')
-      .select('id, main_unit')
+      .select('id, main_unit, category, leather_width, lining_width, accessory_width')
       .in('id', ids);
     (productRows || []).forEach((row: any) => {
       const id = String(row?.id || '');
       if (!id) return;
       const mainUnit = String(row?.main_unit || '').trim();
       if (mainUnit) productUnits.set(id, mainUnit);
+      productWidthMmByProductRef.current[id] = resolveUnitConversionWidthMm({ record: row });
     });
 
     let inventoryQuery = supabase
@@ -1807,21 +1950,30 @@ const ProductionGroupOrderWizard: React.FC = () => {
         if (!productId) return;
         const key = `${categoryLabel}::${productId}`;
         const rows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
-        const normalizedRows = rows.map((row: any, rowIndex: number) => ({
-          ...normalizeProductionDeliverySnapshot(row, group),
-          key: String(row?.key || `${form.id}_${groupIndex}_${rowIndex}`),
-          pieceKey: row?.pieceKey ? String(row.pieceKey) : undefined,
-          name: String(row?.name || ''),
-          length: toNumber(row?.length),
-          width: toNumber(row?.width),
-          quantity: toNumber(row?.quantity),
-          mainUnit: String(row?.mainUnit || row?.main_unit || ''),
-          subUnit: String(row?.subUnit || row?.sub_unit || ''),
-        subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
-        deliveredQty: calcDeliveredQty(row),
-        giverNote: String(row?.giverNote ?? row?.giver_note ?? ''),
-          __readonly: true as const,
-        }));
+        const groupDeliveryType = resolveDeliveryType(group);
+        const normalizedRows = rows.map((row: any, rowIndex: number) => {
+          const snapshot = normalizeProductionDeliverySnapshot(row, group);
+          const rowType = row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : groupDeliveryType;
+          const mainQty = calcDeliveredQty(row, rowType);
+          return {
+            ...snapshot,
+            deliveryType: rowType,
+            key: String(row?.key || `${form.id}_${groupIndex}_${rowIndex}`),
+            pieceKey: snapshot.pieceKey ?? (row?.pieceKey ? String(row.pieceKey) : undefined),
+            name: snapshot.name ?? '',
+            length: snapshot.length ?? 0,
+            width: snapshot.width ?? 0,
+            conversionWidthMm: snapshot.conversionWidthMm,
+            quantity: snapshot.quantity ?? 0,
+            mainUnit: snapshot.mainUnit,
+            subUnit: snapshot.subUnit,
+            mainQuantity: mainQty,
+            subQuantity: Math.max(0, toNumber(row?.subQuantity ?? row?.sub_quantity)),
+            deliveredQty: mainQty,
+            giverNote: snapshot.giverNote,
+            __readonly: true as const,
+          };
+        });
         if (!normalizedRows.length) return;
         const current = map.get(key) || [];
         map.set(key, [...current, ...normalizedRows]);
@@ -1879,11 +2031,14 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const targetTaskId = resolveDefaultTargetTaskForGroup(group);
       const stageOption = targetTaskId ? startStageOptionMap.get(String(targetTaskId)) : null;
       const sourceShelfId = resolveDefaultSourceShelfForGroup(group, sourceShelves || {});
+      const productWidthMm = group.selectedProductId ? (productWidthMmByProductRef.current[group.selectedProductId] ?? null) : null;
       return {
         ...group,
         rowIndex: index,
         collapsed: true,
         isConfirmed: false,
+        deliveryType: inferGroupDefaultDeliveryType(group.pieces, group.deliveryType),
+        productWidthMm,
         sourceShelfId: sourceShelfId || null,
         productionShelfId: stageOption?.shelfId || null,
         targetStageTaskId: targetTaskId || null,
@@ -1901,14 +2056,17 @@ const ProductionGroupOrderWizard: React.FC = () => {
     setStartMaterials(normalizedGroups.map((group) => {
       const saved = draftByKey.get(group.key);
       if (!saved) return group;
+      const savedType = inferGroupDefaultDeliveryType(group.pieces, (saved as any)?.deliveryType ?? group.deliveryType, saved.deliveryRows);
       return recalcStartGroup({
         ...group,
         collapsed: saved.collapsed,
         isConfirmed: false,
+        deliveryType: savedType,
         deliveryRows: (saved.deliveryRows || []).map((row) => ({
           ...row,
-          mainQuantity: calcDeliveredQty(row),
-          deliveredQty: calcDeliveredQty(row),
+          deliveryType: row.deliveryType || savedType,
+          mainQuantity: calcDeliveredQty(row, savedType),
+          deliveredQty: calcDeliveredQty(row, savedType),
           targetBundleId: normalizeDraftTargetBundle(row),
         })),
       });
@@ -1989,7 +2147,11 @@ const ProductionGroupOrderWizard: React.FC = () => {
     }
 
     const deliveryRows = confirmed.flatMap((group) =>
-      (group.deliveryRows || []).map((row) => ({ group, row, quantity: calcDeliveredQty(row) }))
+      (group.deliveryRows || []).map((row) => ({
+        group,
+        row,
+        quantity: calcDeliveredQty(row, resolveDeliveryType(group)),
+      }))
     ).filter((item) => item.quantity > 0);
     if (deliveryRows.some(({ row }) => !row.sourceBundleId || !row.sourceShelfId)) {
       msg.error('برای همه ردیف‌های تحویل، بسته محصول برداشت را مشخص کنید.');
@@ -2047,14 +2209,16 @@ const ProductionGroupOrderWizard: React.FC = () => {
     );
 
     const deliveryGroups = Array.from(new Set(deliveryRows.map(({ group }) => group))).flatMap((group) => {
+      const groupType = resolveDeliveryType(group);
       const rowsByTarget = new Map<string, StartMaterialDeliveryRow[]>();
       (group.deliveryRows || []).forEach((row) => {
-        if (calcDeliveredQty(row) <= 0 || !row.targetStageTaskId) return;
+        if (calcDeliveredQty(row, groupType) <= 0 || !row.targetStageTaskId) return;
         const key = String(row.targetStageTaskId);
         rowsByTarget.set(key, [...(rowsByTarget.get(key) || []), row]);
       });
       return Array.from(rowsByTarget.entries()).map(([targetStageTaskId, rows]) => recalcStartGroup({
         ...group,
+        deliveryType: groupType,
         targetStageTaskId,
         productionShelfId: startStageOptionMap.get(targetStageTaskId)?.shelfId || null,
         deliveryRows: rows,
@@ -2134,8 +2298,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
           if (!targetRow) return;
 
           const existingDeliveryRows = Array.isArray(targetRow?.delivery_rows) ? targetRow.delivery_rows : [];
+          const groupType = resolveDeliveryType(group);
+          const isPieceGroup = groupType === 'piece';
           const sourceRows = (group.deliveryRows || [])
-            .map((row) => ({ row, quantity: calcDeliveredQty(row) }))
+            .map((row) => ({ row, quantity: calcDeliveredQty(row, groupType) }))
             .filter((item) => item.quantity > 0 && item.row.sourceBundleId && item.row.sourceShelfId);
           const sourceTotal = sourceRows.reduce((sum, item) => sum + item.quantity, 0);
           let allocatedSoFar = 0;
@@ -2145,14 +2311,19 @@ const ProductionGroupOrderWizard: React.FC = () => {
               ? Math.max(0, toNumber(allocation.deliveredQty) - allocatedSoFar)
               : toNumber(allocation.deliveredQty) * (item.quantity / Math.max(sourceTotal, 1));
             allocatedSoFar += allocatedQty;
-            const baseArea = Math.max(0, toNumber(item.row.length)) * Math.max(0, toNumber(item.row.width));
+            const baseArea = isPieceGroup ? (Math.max(0, toNumber(item.row.length)) * Math.max(0, toNumber(item.row.width))) : 0;
             return {
               ...item.row,
+              deliveryType: groupType,
+              name: isPieceGroup ? item.row.name : undefined,
+              length: isPieceGroup ? toNumber(item.row.length) : undefined,
+              width: isPieceGroup ? toNumber(item.row.width) : undefined,
+              conversionWidthMm: item.row.conversionWidthMm ? toNumber(item.row.conversionWidthMm) : undefined,
               targetBundleId: getResolvedTargetBundleId(group, item.row),
               target_bundle_id: getResolvedTargetBundleId(group, item.row),
               targetBundleLabel: getResolvedTargetBundleLabel(group, item.row),
               target_bundle_label: getResolvedTargetBundleLabel(group, item.row),
-              quantity: baseArea > 0 ? allocatedQty / baseArea : allocatedQty,
+              quantity: isPieceGroup ? (baseArea > 0 ? allocatedQty / baseArea : allocatedQty) : undefined,
               mainQuantity: allocatedQty,
               subQuantity: sourceTotal > 0 ? toNumber(item.row.subQuantity) * allocatedQty / Math.max(item.quantity, 0.000000001) : 0,
               deliveredQty: allocatedQty,
@@ -2163,6 +2334,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
             // مبدأ در سطح ردیف ثبت شده است؛ درج آن روی سربرگ باعث گم‌شدن بسته‌های متعدد می‌شود.
             selected_shelf_id: null,
             source_bundle_id: null,
+            delivery_type: groupType,
             production_shelf_id: stageOption?.shelfId || group.productionShelfId || targetRow?.production_shelf_id || null,
             target_stage_task_id: targetStageTaskId || targetRow?.target_stage_task_id || null,
             delivered_total_qty: toNumber(targetRow?.delivered_total_qty) + toNumber(allocation.deliveredQty),
@@ -2233,51 +2405,59 @@ const ProductionGroupOrderWizard: React.FC = () => {
             : [];
         const existingForms = existingFormsRaw.length > 0 ? existingFormsRaw : legacyForms;
         const groupsForTask = groupsByDestinationTask[taskId] || [];
-        const normalizedGroups = groupsForTask.map((group) => ({
-          key: String(group.key),
-          rowIndex: Number(group.rowIndex ?? 0),
-          categoryLabel: String(group.categoryLabel || ''),
-          selectedProductId: group.selectedProductId ? String(group.selectedProductId) : null,
-          selectedProductName: String(group.selectedProductName || ''),
-          selectedProductCode: String(group.selectedProductCode || ''),
-          sourceShelfId: group.sourceShelfId ? String(group.sourceShelfId) : null,
-          sourceBundleId: group.sourceBundleId === '__unbundled__' ? null : (group.sourceBundleId || null),
-          targetShelfId: task?.production_shelf_id ? String(task.production_shelf_id) : null,
-          // موجودی در دست این مرحله فقط از تحویل‌های واقعی شروع تولید ساخته می‌شود.
-          // «pieces» سفارش صرفاً در orderPieces نگه‌داری می‌شود تا با موجودی اشتباه نشود.
-          pieces: (group.deliveryRows || [])
-            .filter((row: any) => calcDeliveredQty(row) > 0)
-            .map((row: any, rowIndex: number) => ({
-              key: String(row?.key || `${String(group.key)}_delivered_${rowIndex}`),
-              name: String(row?.name || `قطعه ${rowIndex + 1}`),
-              length: Math.max(0, toNumber(row?.length)),
-              width: Math.max(0, toNumber(row?.width)),
-              quantity: Math.max(0, toNumber(row?.quantity)),
-              totalQuantity: Math.max(0, toNumber(row?.quantity)),
-              mainUnit: String(row?.mainUnit || ''),
-              subUnit: String(row?.subUnit || ''),
-              subUsage: Math.max(0, toNumber(row?.subQuantity)),
-              sourceQty: calcDeliveredQty(row),
-              handoverQty: calcDeliveredQty(row),
-            })),
-          orderPieces: (Array.isArray(group.orderRequirements) ? group.orderRequirements : []).flatMap((req: any) => (
-            Array.isArray(req?.pieces) ? req.pieces : []
-          )),
-          deliveryRows: Array.isArray(group.deliveryRows)
-            ? group.deliveryRows.map((row) => ({
-                ...row,
-                targetBundleId: getResolvedTargetBundleId(group, row),
-                target_bundle_id: getResolvedTargetBundleId(group, row),
-                targetBundleLabel: getResolvedTargetBundleLabel(group, row),
-                target_bundle_label: getResolvedTargetBundleLabel(group, row),
-              }))
-            : [],
-          totalSourceQty: toNumber(group.totalDeliveredQty),
-          totalOrderQty: toNumber(group.totalUsage),
-          totalHandoverQty: toNumber(group.totalDeliveredQty),
-          collapsed: true,
-          isConfirmed: true,
-        }));
+        const normalizedGroups = groupsForTask.map((group) => {
+          const groupType = resolveDeliveryType(group);
+          const isPieceGroup = groupType === 'piece';
+          return {
+            key: String(group.key),
+            rowIndex: Number(group.rowIndex ?? 0),
+            categoryLabel: String(group.categoryLabel || ''),
+            selectedProductId: group.selectedProductId ? String(group.selectedProductId) : null,
+            selectedProductName: String(group.selectedProductName || ''),
+            selectedProductCode: String(group.selectedProductCode || ''),
+            sourceShelfId: group.sourceShelfId ? String(group.sourceShelfId) : null,
+            sourceBundleId: group.sourceBundleId === '__unbundled__' ? null : (group.sourceBundleId || null),
+            targetShelfId: task?.production_shelf_id ? String(task.production_shelf_id) : null,
+            deliveryType: groupType,
+            productWidthMm: group.productWidthMm ?? null,
+            // موجودی در دست این مرحله فقط از تحویل‌های واقعی شروع تولید ساخته می‌شود.
+            // «pieces» سفارش صرفاً در orderPieces نگه‌داری می‌شود تا با موجودی اشتباه نشود.
+            pieces: (group.deliveryRows || [])
+              .filter((row: any) => calcDeliveredQty(row, groupType) > 0)
+              .map((row: any, rowIndex: number) => ({
+                key: String(row?.key || `${String(group.key)}_delivered_${rowIndex}`),
+                deliveryType: groupType,
+                name: isPieceGroup ? String(row?.name || `قطعه ${rowIndex + 1}`) : 'تحویل فله‌ای',
+                length: isPieceGroup ? Math.max(0, toNumber(row?.length)) : 0,
+                width: isPieceGroup ? Math.max(0, toNumber(row?.width)) : 0,
+                quantity: isPieceGroup ? Math.max(0, toNumber(row?.quantity)) : 0,
+                totalQuantity: isPieceGroup ? Math.max(0, toNumber(row?.quantity)) : 0,
+                mainUnit: String(row?.mainUnit || ''),
+                subUnit: String(row?.subUnit || ''),
+                subUsage: Math.max(0, toNumber(row?.subQuantity)),
+                sourceQty: calcDeliveredQty(row, groupType),
+                handoverQty: calcDeliveredQty(row, groupType),
+              })),
+            orderPieces: (Array.isArray(group.orderRequirements) ? group.orderRequirements : []).flatMap((req: any) => (
+              Array.isArray(req?.pieces) ? req.pieces : []
+            )),
+            deliveryRows: Array.isArray(group.deliveryRows)
+              ? group.deliveryRows.map((row) => ({
+                  ...normalizeProductionDeliverySnapshot(row, group),
+                  deliveryType: groupType,
+                  targetBundleId: getResolvedTargetBundleId(group, row),
+                  target_bundle_id: getResolvedTargetBundleId(group, row),
+                  targetBundleLabel: getResolvedTargetBundleLabel(group, row),
+                  target_bundle_label: getResolvedTargetBundleLabel(group, row),
+                }))
+              : [],
+            totalSourceQty: toNumber(group.totalDeliveredQty),
+            totalOrderQty: toNumber(group.totalUsage),
+            totalHandoverQty: toNumber(group.totalDeliveredQty),
+            collapsed: true,
+            isConfirmed: true,
+          };
+        });
         const formId = buildStartStageFormId();
         const nextForm = {
           id: formId,
@@ -2738,6 +2918,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
         if (!candidate) return result;
         return !result || new Date(candidate).getTime() > new Date(result).getTime() ? candidate : result;
       }, null);
+      const deliveryTypes = Array.from(
+        new Set(forms.flatMap((form) => (Array.isArray(form?.deliveryTypes) ? form.deliveryTypes : [])))
+      );
       return {
         ...first,
         id: batchId,
@@ -2749,6 +2932,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         receiverConfirmed: forms.every((form) => form.receiverConfirmed),
         updatedAt: latest,
         totalsByProduct: totals,
+        deliveryTypes,
         productCount: Object.keys(totals).length,
         totalQty: Object.values(totals).reduce((sum, qty) => sum + toNumber(qty), 0),
       };
@@ -2775,6 +2959,22 @@ const ProductionGroupOrderWizard: React.FC = () => {
         dataIndex: 'sourceStageName',
         key: 'sourceStageName',
         width: 170,
+      },
+      {
+        title: 'حالت تحویل',
+        dataIndex: 'deliveryTypes',
+        key: 'deliveryTypes',
+        width: 150,
+        render: (types: DeliveryType[] | undefined) => {
+          const list = Array.isArray(types) && types.length > 0 ? types : [];
+          if (!list.length) return <Tag>نامشخص</Tag>;
+          return (
+            <div className="flex flex-wrap gap-1">
+              {list.includes('piece') ? <Tag color="purple">قطعه‌ای</Tag> : null}
+              {list.includes('bulk') ? <Tag color="cyan">فله‌ای</Tag> : null}
+            </div>
+          );
+        },
       },
       {
         title: 'جمع تحویل',
@@ -2887,6 +3087,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
               onCancel={() => {}}
               onStart={() => void handleConfirmStartGroup()}
               onToggleGroup={setStartMaterialCollapsed}
+              onDeliveryTypeChange={changeDeliveryType}
+              onAddAllBomPieces={addAllBomPiecesToStart}
               onDeliveryRowAdd={addDeliveryRow}
               onDeliveryRowsDelete={deleteDeliveryRows}
               onDeliveryRowsTransfer={transferDeliveryRows}

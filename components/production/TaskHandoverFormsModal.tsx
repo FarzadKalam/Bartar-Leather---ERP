@@ -8,9 +8,11 @@ import persianFa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorianEn from 'react-date-object/locales/gregorian_en';
 import { toPersianNumber } from '../../utils/persianNumberFormatter';
+import { type DeliveryType, resolveDeliveryType } from '../../utils/productionDeliveryRows';
 
 export type StageHandoverPieceDetail = {
   key: string;
+  deliveryType?: DeliveryType;
   name: string;
   length: number;
   width: number;
@@ -53,6 +55,7 @@ export type StageHandoverFormListRow = {
   receiverConfirmed?: boolean;
   totalsByProduct?: Record<string, number>;
   totalsSubByProduct?: Record<string, number>;
+  deliveryTypes?: DeliveryType[];
   piecesByProduct?: Record<string, StageHandoverPieceDetail[]>;
 };
 
@@ -329,26 +332,35 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
       dataIndex: 'productName',
       key: 'productName',
       width: 300,
-      render: (value: string, record: any) => (
-        <div className="flex flex-col">
-          <span className="text-base font-semibold text-[#17372a]">{value || '-'}</span>
-          <span className="text-[11px] text-gray-500">{record?.productCode || '-'}</span>
-          {Array.isArray(record?.pieceDetails) && record.pieceDetails.length > 0 ? (
-            <button
-              type="button"
-              className="mt-1 text-[11px] text-[#1f4534] flex items-center gap-1 w-fit"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                toggleRowExpand(String(record?.productId || ''));
-              }}
-            >
-              {expandedRowKeys.includes(String(record?.productId || '')) ? <DownOutlined /> : <RightOutlined />}
-              نمایش قطعات
-            </button>
-          ) : null}
-        </div>
-      ),
+      render: (value: string, record: any) => {
+        const pieceDetails = Array.isArray(record?.pieceDetails) ? record.pieceDetails : [];
+        const hasPieces = pieceDetails.some((p: any) => resolveDeliveryType(p) === 'piece');
+        const hasBulk = pieceDetails.some((p: any) => resolveDeliveryType(p) === 'bulk');
+        return (
+          <div className="flex flex-col gap-1">
+            <span className="text-base font-semibold text-[#17372a]">{value || '-'}</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-gray-500">{record?.productCode || '-'}</span>
+              {hasPieces ? <Tag color="purple" className="text-[10px] leading-4 px-1.5 py-0 m-0">قطعه‌ای</Tag> : null}
+              {hasBulk ? <Tag color="cyan" className="text-[10px] leading-4 px-1.5 py-0 m-0">فله‌ای</Tag> : null}
+            </div>
+            {pieceDetails.length > 0 && hasPieces ? (
+              <button
+                type="button"
+                className="mt-0.5 text-[11px] text-[#1f4534] flex items-center gap-1 w-fit"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  toggleRowExpand(String(record?.productId || ''));
+                }}
+              >
+                {expandedRowKeys.includes(String(record?.productId || '')) ? <DownOutlined /> : <RightOutlined />}
+                نمایش قطعات ({toPersianNumber(pieceDetails.filter((p: any) => resolveDeliveryType(p) === 'piece').length)})
+              </button>
+            ) : null}
+          </div>
+        );
+      },
     };
 
     if (activeTab?.tone === 'inventory') {
@@ -484,37 +496,51 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
   const pieceColumns = useMemo(
     () => [
       {
+        title: 'نوع تحویل',
+        key: 'deliveryType',
+        width: 95,
+        render: (_: any, row: StageHandoverPieceDetail) => (
+          <Tag color={resolveDeliveryType(row) === 'piece' ? 'purple' : 'cyan'}>
+            {resolveDeliveryType(row) === 'piece' ? 'قطعه‌ای' : 'فله‌ای'}
+          </Tag>
+        ),
+      },
+      {
         title: 'نام قطعه',
         dataIndex: 'name',
         key: 'name',
-        width: 220,
-        render: (value: string) => value || '-',
+        width: 200,
+        render: (value: string, row: StageHandoverPieceDetail) =>
+          resolveDeliveryType(row) === 'piece' ? (value || '-') : 'تحویل فله‌ای',
       },
       {
         title: 'طول',
         dataIndex: 'length',
         key: 'length',
-        width: 90,
-        render: (value: number) => toQty(value),
+        width: 85,
+        render: (value: number, row: StageHandoverPieceDetail) =>
+          resolveDeliveryType(row) === 'piece' && value ? toQty(value) : '-',
       },
       {
         title: 'عرض',
         dataIndex: 'width',
         key: 'width',
-        width: 90,
-        render: (value: number) => toQty(value),
+        width: 85,
+        render: (value: number, row: StageHandoverPieceDetail) =>
+          resolveDeliveryType(row) === 'piece' && value ? toQty(value) : '-',
       },
       {
         title: 'تعداد',
         dataIndex: 'quantity',
         key: 'quantity',
-        width: 90,
-        render: (value: number) => toQty(value),
+        width: 85,
+        render: (value: number, row: StageHandoverPieceDetail) =>
+          resolveDeliveryType(row) === 'piece' && value ? toQty(value) : '-',
       },
       {
         title: 'مقدار واحد اصلی',
         key: 'mainAmount',
-        width: 180,
+        width: 170,
         render: (_: any, row: StageHandoverPieceDetail) => (
           <span className="font-semibold">{toQty(row.mainQty)} {row.mainUnit || ''}</span>
         ),
@@ -522,7 +548,7 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
       {
         title: 'مقدار واحد فرعی',
         key: 'subAmount',
-        width: 180,
+        width: 170,
         render: (_: any, row: StageHandoverPieceDetail) => (
           <span className="font-semibold">{toQty(row.subQty)} {row.subUnit || ''}</span>
         ),
@@ -607,7 +633,8 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
                   expanded ? [...new Set([...prev, key])] : prev.filter((item) => item !== key)
                 );
               },
-              rowExpandable: (record: any) => Array.isArray(record?.pieceDetails) && record.pieceDetails.length > 0,
+              rowExpandable: (record: any) =>
+                Array.isArray(record?.pieceDetails) && record.pieceDetails.some((p: any) => resolveDeliveryType(p) === 'piece'),
               expandedRowRender: (record: any) => (
                 <ResizableTable
                   size="small"
@@ -683,8 +710,56 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
                   title: 'فرم',
                   dataIndex: 'title',
                   key: 'title',
-                  width: 220,
+                  width: 150,
                   render: (value: string) => value || '-',
+                },
+                {
+                  title: 'حالت تحویل',
+                  key: 'deliveryTypes',
+                  width: 130,
+                  render: (_: any, record: StageHandoverFormListRow) => {
+                    const explicitTypes = Array.isArray(record.deliveryTypes) && record.deliveryTypes.length > 0
+                      ? record.deliveryTypes
+                      : Array.from(
+                          new Set(
+                            Object.values(record.piecesByProduct || {})
+                              .flat()
+                              .map((row: any) => resolveDeliveryType(row))
+                          )
+                        );
+                    if (explicitTypes.length === 0) return <span className="text-gray-400">-</span>;
+                    return (
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {explicitTypes.includes('piece') ? <Tag color="purple">قطعه‌ای</Tag> : null}
+                        {explicitTypes.includes('bulk') ? <Tag color="cyan">فله‌ای</Tag> : null}
+                      </div>
+                    );
+                  },
+                },
+                {
+                  title: 'جمع کل تحویل',
+                  key: 'totalDelivered',
+                  width: 170,
+                  render: (_: any, record: StageHandoverFormListRow) => {
+                    const entries = Object.entries(record.totalsByProduct || {});
+                    if (entries.length === 0) return <span className="text-gray-400">-</span>;
+                    const byUnit: Record<string, number> = {};
+                    entries.forEach(([productId, rawQty]) => {
+                      const qty = toNumber(rawQty);
+                      const fromPiece = record.piecesByProduct?.[productId]?.[0]?.mainUnit;
+                      const fromSummary = (summaries || []).find((s) => String(s.productId) === String(productId))?.unit;
+                      const fromInventory = (currentStageInventory || []).find((i) => String(i.productId) === String(productId))?.unit;
+                      const unit = String(fromPiece || fromSummary || fromInventory || '').trim();
+                      byUnit[unit] = (byUnit[unit] || 0) + qty;
+                    });
+                    const formatted = Object.entries(byUnit)
+                      .map(([unit, sum]) => (unit ? `${toQty(sum)} ${unit}` : toQty(sum)));
+                    return (
+                      <span className="font-semibold text-[#17372a]">
+                        {formatted.join(' + ')}
+                      </span>
+                    );
+                  },
                 },
                 {
                   title: 'مرحله تحویل‌دهنده',
