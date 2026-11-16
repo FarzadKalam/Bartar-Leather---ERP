@@ -1,3 +1,9 @@
+import { bomRouteGroups, connectBomGroup, refreshBomRoutes } from '../utils/bomGroupRoutes';
+import './productionStageExecution.test';
+import { attachRoutes, expectedAmount, materialChoices, planIssue, warehouse, finishedShelf, type PlannedTransfer } from '../utils/productionStagePlan';
+import { finalStageConsumption } from '../utils/finalStageConsumption';
+import { planProductionReturn } from '../utils/productionReturn';
+import { materialCostPerItem } from '../utils/bomMaterialCost';
 import * as assert from 'node:assert/strict';
 import {
   adaptDeliveryRowForTargetGroup,
@@ -358,4 +364,66 @@ assert.equal(adaptedAcrossDifferentProducts.mainUnit, 'عدد');
 assert.equal(adaptedAcrossDifferentProducts.subUnit, 'بسته');
 assert.equal(adaptedAcrossDifferentProducts.targetStageTaskId, 'task-b');
 
+const testGroup = (src: string, dst: string, qty: number) => ({
+  selectedProductId: 'leather', deliveryType: 'bulk', deliveryRows: [{sourceBundleId: src, targetBundleId: dst, mainQuantity: qty}],
+});
+const receive = {direction: 'outgoing', sourceTaskId: 'cut', destinationTaskId: 'sew',
+  sourceShelfId: 'cut-shelf', targetShelfId: 'sew-shelf', groups: [testGroup('original','received',10)]};
+const send = {direction: 'outgoing', sourceTaskId: 'sew', destinationTaskId: 'cut',
+  sourceShelfId: 'sew-shelf', targetShelfId: 'cut-shelf', groups: [testGroup('received','offcut',3)],
+  wasteByProduct: {leather: 1}, wasteBundleByProduct: {leather:'received'}};
+const task = (id: string, sort_order: number, forms: unknown[]) => ({
+  id, sort_order, production_line_id: 'line', recurrence_info: {production_handover:{forms}},
+});
+const balance = finalStageConsumption([task('cut',1,[receive]), task('sew',2,[send])]);
+assert.equal(balance?.length,1);
+assert.equal(balance?.[0].quantity,6);
+assert.equal(balance?.[0].bundle_id,'received');
+assert.equal(balance?.[0].to_shelf_id,'sew-shelf');
+assert.equal(finalStageConsumption([task('cut',1,[])]),null);
+assert.equal(materialCostPerItem(20,11,0,0,10),220);
+assert.ok(Math.abs(materialCostPerItem(0,11,2,100,10)-220)<1e-9);
+assert.equal(materialCostPerItem(0,10,2,100,0),200);
+
+const initialMove = {product_id:'leather',from_shelf_id:'warehouse',to_shelf_id:'cut',bundle_id:'origin',target_bundle_id:'roll',quantity:10};
+const transfer = (from: string, to: string | null, src: string, dst: string, quantity: number) => ({
+  product_id:'leather',from_shelf_id:from,to_shelf_id:to,source_bundle_id:src,target_bundle_id:dst,delivered_qty:quantity,
+});
+const returns = planProductionReturn([initialMove],[
+  transfer('warehouse','cut','origin','roll',10),
+  transfer('cut','sew','roll','piece',4),
+  transfer('sew',null,'piece','piece',1),
+]);
+assert.deepEqual(returns.map(r=>[r.from_shelf_id,r.to_shelf_id,r.target_bundle_id,r.quantity]),[
+  ['cut','warehouse','origin',6],['sew','warehouse','origin',3],
+]);
+assert.throws(()=>planProductionReturn([initialMove],[]));
 console.log('Production delivery regressions passed: recorded amounts, bundle routing, legacy rows, bulk/piece delivery types, bidirectional conversions, remainder/waste math, atomic piece zeroing, cross-group transfer, and current requirements.');
+
+const planStages = [{id:1,name:'برش'}, {id:2,name:'لیزر'}, {id:3,name:'لویس'}, {id:4,name:'بسته‌بندی'}];
+const route = (from:string,to:string,perItem:number): PlannedTransfer => ({
+  id:from+'-'+to, from,to, perItem,material:'body',materialName:'بدنه',state:'برش‌خورده',mode:'piece',unit:'عدد',
+});
+const plan = [route(warehouse,'1',1.2),route('1','2',2),route('2','3',3),route('2','4',1),route('3','4',3),route('4',finishedShelf,1)];
+assert.equal(planIssue(planStages,plan),null);
+assert.deepEqual(plan.map(r=>expectedAmount(r,5)),[6,10,15,5,15,5]);
+assert.deepEqual(attachRoutes(planStages,plan).flatMap(s=>s.materialRoutes),plan);
+assert.equal('materialRoutes' in planStages[0],false);
+assert.equal(attachRoutes([{name:'مرحله قدیمی'}],[])[0].id,'legacy-stage-0');
+assert.ok(planIssue(planStages,[...plan,route('3','1',1)]));
+assert.ok(planIssue(planStages,[...plan,plan[0]]));
+assert.ok(planIssue(planStages,[route('missing','1',1)]));
+assert.ok(planIssue(planStages,[route('1','2',0)]));
+assert.equal(materialChoices([{key:'a',header:{selected_product_name:'چرم'},pieces:[{key:'p',name:'بدنه'}]}])[1].label,'چرم / بدنه');
+const leatherRows = ['brown','black'].map(key=>({key,header:{selected_product_name:key,main_unit:'فوت مربع'},
+  pieces:[{key:'a',name:'بدنه',quantity:2,final_usage:0.7},{key:'b',name:'جیب',quantity:2,final_usage:0.4},{key:'c',name:'بند',quantity:1,final_usage:0.1}]}));
+const groups = bomRouteGroups(leatherRows);
+const pairsFor = (g:typeof groups[number]) => Object.fromEntries(g.pieces.map(p=>[p.key,p.name==='جیب'?{from:'2',to:'3'}:{from:'1',to:'2'}]));
+const brown=connectBomGroup([],groups[0],'1',pairsFor(groups[0]));
+assert.deepEqual(brown.map(r=>expectedAmount(r,5)),[6,10,10,5]);
+assert.deepEqual(brown.map(r=>r.from),[warehouse,'1','2','1']);
+const both=connectBomGroup(brown,groups[1],'1',pairsFor(groups[1]));
+assert.deepEqual(connectBomGroup(both,groups[1],'1',pairsFor(groups[1])),both);
+leatherRows[0].pieces[0].quantity=3;
+leatherRows[0].pieces[0].final_usage=1.05;
+assert.deepEqual(refreshBomRoutes(both,bomRouteGroups(leatherRows)).map(r=>expectedAmount(r,5)),[7.75,15,10,5,6,10,10,5]);

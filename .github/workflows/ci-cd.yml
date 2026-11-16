@@ -28,6 +28,13 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: Test catalog, inventory and production
+        run: |
+          npm run test:product-catalog
+          npm install --prefix .tmp-tests/pg-validation --no-save --package-lock=false --ignore-scripts @electric-sql/pglite@0.5.11
+          node tests/productionOperations.test.mjs
+          node tests/productionStageShelfGuard.test.mjs
+
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
@@ -44,6 +51,23 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare production database
+        env:
+          PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$PRODUCTION_DATABASE_URL" ]]; then
+            needs_migration=$(psql "$PRODUCTION_DATABASE_URL" -XAt -v ON_ERROR_STOP=1 -c "select to_regprocedure('public.commit_production_operation(jsonb)') is null")
+            if [[ "$needs_migration" == t ]]; then
+              psql "$PRODUCTION_DATABASE_URL" -X -v ON_ERROR_STOP=1 -f migrations/20261114_production_operations.sql
+            fi
+          fi
+          node scripts/check-production-schema.mjs
+
       - uses: actions/download-artifact@v4
         with:
           name: dist

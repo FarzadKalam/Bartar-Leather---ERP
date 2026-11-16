@@ -1228,7 +1228,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                   value={value || undefined}
                                   placeholder="انتخاب بسته"
                                   options={(value && !sourceBundleOptions.some((option) => String(option.value) === String(value))
-                                    ? [{ label: record.sourceBundleLabel || String(value), value }, ...sourceBundleOptions]
+                                    ? [{ label: record.sourceBundleLabel || 'بسته بدون شماره', value }, ...sourceBundleOptions]
                                     : sourceBundleOptions).map((option) => ({
                                       ...option,
                                       disabled: Boolean(option.disabled || option.sourceDisabled),
@@ -1269,7 +1269,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
                                 ];
                                 if (value && ![CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE].includes(String(value))
                                   && !options.some((option) => String(option.value) === String(value))) {
-                                  options.push({ label: record.targetBundleLabel || String(value), value } as any);
+                                  options.push({ label: record.targetBundleLabel || 'بسته بدون شماره', value } as any);
                                 }
                                 return (
                                   <Select

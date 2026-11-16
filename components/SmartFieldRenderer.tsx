@@ -756,6 +756,8 @@ const SmartFieldRenderer: React.FC<SmartFieldRendererProps> = ({
           readOnly={isBom ? false : !canEditStages}
           compact={compactMode}
           orderStatus={isOrder ? (allValues as any)?.status : null}
+          planMaterials={(allValues as any)?.grid_materials || []}
+          planQuantity={(allValues as any)?.quantity}
           draftStages={(allValues as any)?.production_stages_draft || []}
           showWageSummary={isOrder}
         />

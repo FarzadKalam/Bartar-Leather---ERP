@@ -310,10 +310,11 @@ const UsersTab: React.FC = () => {
                                         <Select
                                             placeholder="انتخاب نقش"
                                             options={[
-                                                { label: 'super_admin', value: 'super_admin' },
-                                                { label: 'admin', value: 'admin' },
-                                                { label: 'manager', value: 'manager' },
-                                                { label: 'viewer', value: 'viewer' },
+                                                { label: 'مدیر کل', value: 'super_admin' },
+                                                { label: 'مدیر سیستم', value: 'admin' },
+                                                { label: 'مدیر', value: 'manager' },
+                                                { label: 'ویرایشگر', value: 'editor' },
+                                                { label: 'مشاهده‌گر', value: 'viewer' },
                                             ]}
                                         />
                                 </Form.Item>

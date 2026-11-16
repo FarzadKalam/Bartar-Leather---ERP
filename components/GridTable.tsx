@@ -1,3 +1,4 @@
+import { materialCostPerItem } from '../utils/bomMaterialCost';
 import ResizableTable from './ResizableTable';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Typography, message } from 'antd';
@@ -487,9 +488,8 @@ const GridTable: React.FC<GridTableProps> = ({
 
       const unitPrice = parseFloat(piece.unit_price ?? piece.main_unit_price ?? gridRow?.header?.selected_product_main_unit_price) || 0;
       const subUnitPrice = parseFloat(piece.sub_unit_price ?? piece.sub_buy_price ?? gridRow?.header?.selected_product_sub_unit_price) || 0;
-      const costPerItem = unitPrice > 0
-        ? unitPrice * finalUsage
-        : subUnitPrice * qtySub;
+      const costPerItem = materialCostPerItem(unitPrice, finalUsage, subUnitPrice,
+        Number.isFinite(qtySubRaw) ? qtySubRaw : qtySub, wasteRate);
       const totalUsage = qty ? finalUsage * qty : 0;
       const totalCostRow = qty ? costPerItem * qty : costPerItem;
 

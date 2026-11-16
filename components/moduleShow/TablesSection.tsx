@@ -110,6 +110,8 @@ const TablesSection: React.FC<TablesSectionProps> = ({
               readOnly={!canEditModule || (isProductionOrder && ['completed'].includes(String(data?.status || '')))}
               compact={true}
               onQuantityChange={(qty) => onDataUpdate?.({ quantity: qty })}
+              planMaterials={data?.grid_materials || []}
+              planQuantity={data?.quantity}
               draftStages={data?.production_stages_draft || []}
               onDraftStagesChange={(stages) => onDataUpdate?.({ production_stages_draft: stages })}
               showWageSummary={module.id === 'production_orders'}

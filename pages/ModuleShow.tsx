@@ -1,4 +1,5 @@
-﻿import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { snapshotBomStages } from '../utils/bomGroupRoutes';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button, Spin, App, Avatar, Checkbox, Modal, Select } from 'antd';
 import { EditOutlined, CheckOutlined, CloseOutlined, UserOutlined, TeamOutlined } from '@ant-design/icons';
@@ -38,13 +39,10 @@ import QrScanPopover from '../components/QrScanPopover';
 import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import { getRecordTitle } from '../utils/recordTitle';
 import { getErrorMessage } from '../utils/errorHandling';
-import {
-  applyProductionMoves,
-  rollbackProductionMoves,
-  consumeProductionMaterials,
-  addFinishedGoods,
-  syncProductStock,
-} from '../utils/productionWorkflow';
+import { commitProduction, prepareProductionMoves } from '../utils/productionTransaction';
+import { finalStageConsumption } from '../utils/finalStageConsumption';
+import { planProductionReturn } from '../utils/productionReturn';
+import type { ProductionMove } from '../utils/productionWorkflow';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { syncInvoiceInventoryOnSave } from '../utils/invoiceInventoryWorkflow';
@@ -123,8 +121,8 @@ const ModuleShow: React.FC = () => {
     canDeleteRecordFilesManager: true,
   });
   const [isCreateOrderOpen, setIsCreateOrderOpen] = useState(false);
-  const [autoSyncedBomId, setAutoSyncedBomId] = useState<string | null>(null);
   const bomCopyPromptRef = useRef<string | null>(null);
+  const [stopMode, setStopMode] = useState<'hold' | 'return' | undefined>();
   const [productionModal, setProductionModal] = useState<'start' | 'stop' | 'complete' | null>(null);
   const [productionShelfOptions, setProductionShelfOptions] = useState<{ label: string; value: string }[]>([]);
   const [, setSourceShelfOptionsByProduct] = useState<Record<string, { label: string; value: string; stock?: number }[]>>({});
@@ -163,10 +161,11 @@ const ModuleShow: React.FC = () => {
   const startDraftStorageKey = useMemo(() => (id ? `production-start-draft:${id}` : null), [id]);
     const fetchProductionQuantity = useCallback(async () => {
       if (moduleId !== 'production_orders' || !id) return null;
-      const { data: lines } = await supabase
+      const { data: lines, error } = await supabase
         .from('production_lines')
-        .select('quantity, qty, count')
+        .select('quantity')
         .eq('production_order_id', id);
+      if (error) throw error;
       const total = (lines || []).reduce((sum: number, row: any) => {
         const raw = row?.quantity ?? row?.qty ?? row?.count ?? 0;
         return sum + (parseFloat(raw) || 0);
@@ -697,111 +696,36 @@ const ModuleShow: React.FC = () => {
     return moves;
   }, []);
 
-  const buildFinalStageConsumptionMoves = useCallback(async () => {
-    if (!id) return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; bundle_id?: string | null; quantity: number; unit?: string | null }>;
-    try {
-      const { data: taskRows, error } = await supabase
-        .from('tasks')
+  const resolveConsumption = async (quantity: number) => {
+    const tasks: any[] = [];
+    for (let offset = 0; ; offset += 500) {
+      const { data: rows, error } = await supabase.from('tasks')
         .select('id, sort_order, production_line_id, production_shelf_id, recurrence_info')
-        .eq('related_production_order', id);
+        .eq('related_production_order', id).order('id').range(offset, offset + 499);
       if (error) throw error;
-
-      const tasks = Array.isArray(taskRows) ? taskRows : [];
-      if (!tasks.length) return [];
-
-      const byLine = new Map<string, any[]>();
-      tasks.forEach((task: any) => {
-        const lineKey = String(task?.production_line_id || 'default');
-        if (!byLine.has(lineKey)) byLine.set(lineKey, []);
-        byLine.get(lineKey)!.push(task);
-      });
-
-      const finalMoves: Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; bundle_id?: string | null; quantity: number; unit?: string | null }> = [];
-      byLine.forEach((lineTasks) => {
-        const ordered = [...lineTasks].sort((a: any, b: any) => Number(a?.sort_order || 0) - Number(b?.sort_order || 0));
-        const lastTask = ordered[ordered.length - 1];
-        if (!lastTask) return;
-
-        let recurrenceInfo: any = lastTask?.recurrence_info;
-        if (typeof recurrenceInfo === 'string') {
-          try {
-            recurrenceInfo = JSON.parse(recurrenceInfo);
-          } catch {
-            recurrenceInfo = null;
-          }
-        }
-
-        const handover = recurrenceInfo?.production_handover;
-        const forms = Array.isArray(handover?.forms) && handover.forms.length > 0
-          ? handover.forms
-          : (Array.isArray(handover?.groups) ? [{ groups: handover.groups }] : []);
-        forms.forEach((form: any) => {
-          const groups = Array.isArray(form?.groups) ? form.groups : [];
-          const targetShelfId = String(
-            form?.targetShelfId
-            || form?.target_shelf_id
-            || handover?.targetShelfId
-            || handover?.target_shelf_id
-            || lastTask?.production_shelf_id
-            || data?.production_shelf_id
-            || ''
-          );
-          if (!targetShelfId || !groups.length) return;
-
-          groups.forEach((group: any) => {
-            const pieces = Array.isArray(group?.pieces) ? group.pieces : [];
-            const deliveryRows = Array.isArray(group?.deliveryRows) ? group.deliveryRows : [];
-            const selectedPiece = pieces.find((piece: any) => piece?.selectedProductId || piece?.selected_product_id || piece?.product_id) || null;
-            const productId = String(
-              group?.selectedProductId
-              || group?.selected_product_id
-              || selectedPiece?.selectedProductId
-              || selectedPiece?.selected_product_id
-              || selectedPiece?.product_id
-              || ''
-            );
-            if (!productId) return;
-            if (deliveryRows.length > 0) {
-              const groupDeliveryType = resolveDeliveryType(group);
-              deliveryRows.forEach((row: any) => {
-                const rowType = row?.deliveryType || row?.delivery_type ? resolveDeliveryType(row) : groupDeliveryType;
-                const quantity = getDeliveryMainQuantity(row, rowType);
-                if (!quantity || quantity <= 0) return;
-                finalMoves.push({
-                  product_id: productId,
-                  from_shelf_id: targetShelfId,
-                  to_shelf_id: targetShelfId,
-                  bundle_id: row?.sourceBundleId || row?.source_bundle_id || row?.bundle_id || group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id || null,
-                  quantity,
-                  unit: row?.mainUnit || row?.main_unit || selectedPiece?.mainUnit || selectedPiece?.main_unit || null,
-                });
-              });
-              return;
-            }
-            const qty = pieces.reduce((sum: number, piece: any) => {
-                  const raw = piece?.handoverQty ?? piece?.handover_qty ?? piece?.sourceQty ?? piece?.source_qty ?? 0;
-                  const value = parseFloat(raw);
-                  return sum + (Number.isFinite(value) ? value : 0);
-                }, 0);
-            if (!qty || qty <= 0) return;
-            finalMoves.push({
-              product_id: productId,
-              from_shelf_id: targetShelfId,
-              to_shelf_id: targetShelfId,
-              bundle_id: group?.sourceBundleId || group?.source_bundle_id || group?.bundle_id || null,
-              quantity: qty,
-              unit: selectedPiece?.mainUnit || selectedPiece?.main_unit || deliveryRows[0]?.mainUnit || deliveryRows[0]?.main_unit || null,
-            });
-          });
-        });
-      });
-
-      return finalMoves;
-    } catch (err) {
-      console.warn('Could not build final stage consumption moves', err);
-      return [] as Array<{ product_id: string; from_shelf_id: string; to_shelf_id: string; bundle_id?: string | null; quantity: number; unit?: string | null }>;
+      tasks.push(...(rows || []));
+      if ((rows || []).length < 500) break;
     }
-  }, [data?.production_shelf_id, id]);
+    const final = finalStageConsumption(tasks || []);
+    const moves: ProductionMove[] = final ?? (data.production_moves?.length
+      ? data.production_moves : buildConsumptionMoves(data, quantity, data.production_shelf_id));
+    if (!moves.length) throw new Error('مواد قابل مصرف در مرحلهٔ نهایی ثبت نشده است.');
+    if (moves.some(m => !(m.target_bundle_id || m.bundle_id) || !m.to_shelf_id)) throw new Error('قفسه یا بستهٔ مصرف مشخص نشده است.');
+    return moves;
+  };
+
+  const finishProduction = async (moves: ProductionMove[], product: string, shelf: string, qty: number) => {
+    const deltas = moves.map(m => ({ productId: m.product_id, shelfId: m.to_shelf_id,
+      bundleId: m.target_bundle_id || m.bundle_id || null, delta: -m.quantity, unit: m.unit }));
+    deltas.push({ productId: product, shelfId: shelf, bundleId: null, delta: qty, unit: null });
+    const transfers = deltas.map(d => ({ transfer_type: 'production', production_order_id: id,
+      product_id: d.productId, from_shelf_id: d.delta < 0 ? d.shelfId : null,
+      to_shelf_id: d.delta > 0 ? d.shelfId : null, bundle_id: d.bundleId,
+      required_qty: Math.abs(d.delta), delivered_qty: Math.abs(d.delta) }));
+    await commitProduction({ kind: 'complete', orders: [{ id: id!, revision: data.production_revision || 0,
+      patch: { production_output_qty: qty, production_output_product_id: product, production_output_shelf_id: shelf } }], deltas, transfers });
+    await fetchRecord();
+  };
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRoleId, setCurrentUserRoleId] = useState<string | null>(null);
@@ -1019,7 +943,7 @@ const ModuleShow: React.FC = () => {
     });
     const options = (filtered.length ? filtered : (shelves || [])).map((row: any) => ({
       value: row.id,
-      label: `${row.shelf_number || row.name || row.id}${row?.warehouses?.name ? ` - ${row.warehouses.name}` : ''}`
+      label: `${row.shelf_number || row.name || 'قفسه بدون عنوان'}${row?.warehouses?.name ? ` - ${row.warehouses.name}` : ''}`
     }));
     setProductionShelfOptions(options);
   }, []);
@@ -1070,7 +994,7 @@ const ModuleShow: React.FC = () => {
       shelfMap = new Map((shelves || []).map((shelf: any) => {
         const warehouseName = String(shelf?.warehouses?.name || '');
         const isProductionWarehouse = warehouseName.includes('تولید') || /production/i.test(warehouseName);
-        const label = `${shelf.shelf_number || shelf.name || shelf.id}${warehouseName ? ` - ${warehouseName}` : ''}`;
+        const label = `${shelf.shelf_number || shelf.name || 'قفسه بدون عنوان'}${warehouseName ? ` - ${warehouseName}` : ''}`;
         return [String(shelf.id), { label, isProductionWarehouse }];
       }));
     }
@@ -1082,7 +1006,7 @@ const ModuleShow: React.FC = () => {
       const shelfId = String(row.shelf_id);
       const stock = parseFloat(row?.stock) || 0;
       const shelfInfo = shelfMap.get(shelfId);
-      const labelBase = shelfInfo?.label || shelfId;
+      const labelBase = shelfInfo?.label || 'قفسه بدون عنوان';
       const productUnit = productUnits.get(productId);
       const unitSuffix = productUnit ? ` ${productUnit}` : '';
       const label = `${labelBase} (موجودی: ${toPersianNumber(stock)}${unitSuffix})`;
@@ -1139,9 +1063,9 @@ const ModuleShow: React.FC = () => {
       nextBundles[productId] = Array.from(bundles.entries()).map(([bundleId, bundleRows]) => {
         const shelfIds = Array.from(new Set(bundleRows.map((item) => item.shelfId)));
         const totalStock = bundleRows.reduce((sum, item) => sum + item.stock, 0);
-        const bundleNumber = ((inventoryRows || []).find((row: any) => String(row?.bundle_id || '') === bundleId) as any)?.product_bundles?.bundle_number || bundleId;
+        const bundleNumber = ((inventoryRows || []).find((row: any) => String(row?.bundle_id || '') === bundleId) as any)?.product_bundles?.bundle_number || 'بسته بدون شماره';
         const hasSingleShelf = shelfIds.length === 1;
-        const shelfLabel = hasSingleShelf ? bundleRows[0]?.shelfLabel || shelfIds[0] : null;
+        const shelfLabel = hasSingleShelf ? bundleRows[0]?.shelfLabel || 'قفسه بدون عنوان' : null;
         return {
           value: bundleId,
           label: hasSingleShelf
@@ -1165,7 +1089,7 @@ const ModuleShow: React.FC = () => {
       .limit(500);
     const options = (shelves || []).map((row: any) => ({
       value: row.id,
-      label: `${row.shelf_number || row.name || row.id}${row?.warehouses?.name ? ` - ${row.warehouses.name}` : ''}`
+      label: `${row.shelf_number || row.name || 'قفسه بدون عنوان'}${row?.warehouses?.name ? ` - ${row.warehouses.name}` : ''}`
     }));
     setOutputShelfOptions(options);
   }, []);
@@ -1385,13 +1309,6 @@ const ModuleShow: React.FC = () => {
     setProductionModal(type);
   };
 
-  const finalizeStatusUpdate = async (payload: any) => {
-    if (!id) return;
-    const { error } = await supabase.from(moduleId).update(payload).eq('id', id);
-    if (error) throw error;
-    setData((prev: any) => ({ ...prev, ...payload }));
-  };
-
   useEffect(() => {
     if (productionModal !== 'start') return;
     writeStartDraft(startMaterials);
@@ -1429,6 +1346,14 @@ const ModuleShow: React.FC = () => {
   const handleProductionStatusChange = async (nextStatus: string) => {
     if (moduleId !== 'production_orders') return;
     if (nextStatus === 'in_progress') {
+      if (id && data?.production_on_hold) {
+        try {
+          await commitProduction({ kind: 'resume', orders: [{ id, revision: data.production_revision }] });
+          await fetchRecord();
+          msg.success('تولید با موجودی مرحله ادامه یافت');
+        } catch (error: any) { msg.error(error.message); }
+        return;
+      }
       openProductionWizard();
       return;
     }
@@ -1436,6 +1361,7 @@ const ModuleShow: React.FC = () => {
       return;
     }
     if (nextStatus === 'pending') {
+      setStopMode(undefined);
       await openProductionModal('stop');
       return;
     }
@@ -1646,7 +1572,7 @@ const ModuleShow: React.FC = () => {
       const { data: relData } = await query;
       const filteredRows = filterRelationRows((relData || []) as any[], targetModule, fieldKey);
       const options = filteredRows.map((item: any) => {
-        const baseLabel = item?.[normalizedTargetField] || item?.shelf_number || item?.system_code || item?.id;
+        const baseLabel = item?.[normalizedTargetField] || item?.shelf_number || item?.system_code || 'بدون عنوان';
         return {
           label: formatRelationOptionLabel(targetModule, baseLabel, item.system_code),
           value: item.id,
@@ -1732,12 +1658,13 @@ const ModuleShow: React.FC = () => {
         .order('created_at', { ascending: true });
       if (fetchError) throw fetchError;
 
-      const { error: deleteError } = await supabase
+      const { data: orderFiles, error: filesError } = await supabase
         .from('record_files')
-        .delete()
+        .select('file_url')
         .eq('module_id', 'production_orders')
         .eq('record_id', orderId);
-      if (deleteError) throw deleteError;
+      if (filesError) throw filesError;
+      const existingUrls = new Set((orderFiles || []).map(file => normalizeStoragePublicUrl(file.file_url)));
 
       const insertPayload = (bomFiles || [])
         .map((file: any, index: number) => {
@@ -1752,7 +1679,7 @@ const ModuleShow: React.FC = () => {
             sort_order: Number.isFinite(sortOrder) ? sortOrder : index,
           };
         })
-        .filter((file: any) => file.file_url);
+        .filter((file: any) => file.file_url && !existingUrls.has(file.file_url));
 
       if (insertPayload.length > 0) {
         const { error: insertError } = await supabase
@@ -1765,44 +1692,6 @@ const ModuleShow: React.FC = () => {
       throw error;
     }
   }, []);
-
-  useEffect(() => {
-    if (moduleId !== 'production_orders' || !data?.bom_id) return;
-    if (autoSyncedBomId === data.bom_id) return;
-
-    const isEmptyArray = (val: any) => !Array.isArray(val) || val.length === 0;
-    const shouldSync = isEmptyArray(data?.grid_materials) || isEmptyArray(data?.production_stages_draft);
-    if (!shouldSync) return;
-
-    const syncFromBom = async () => {
-      try {
-        const { data: bom, error } = await supabase
-          .from('production_boms')
-          .select('name, grid_materials, production_stages_draft, product_category, model_name, image_url')
-          .eq('id', data.bom_id)
-          .single();
-        if (error) throw error;
-
-        const patch: any = {
-          grid_materials: bom?.grid_materials || [],
-          production_stages_draft: bom?.production_stages_draft || [],
-          product_category: bom?.product_category ?? data?.product_category ?? null,
-          model_name: bom?.model_name ?? data?.model_name ?? null,
-          name: bom?.name || data?.name || '',
-          image_url: normalizeStoragePublicUrl(bom?.image_url) ?? null,
-        };
-
-        await supabase.from('production_orders').update(patch).eq('id', data.id);
-        await syncBomFilesToOrder(String(data.bom_id), String(data.id));
-        setData((prev: any) => ({ ...prev, ...patch }));
-        setAutoSyncedBomId(data.bom_id);
-      } catch (err) {
-        console.warn('Auto sync from BOM failed', err);
-      }
-    };
-
-    syncFromBom();
-  }, [moduleId, data, autoSyncedBomId, syncBomFilesToOrder]);
 
   useEffect(() => {
     if (!moduleConfig) return;
@@ -1913,7 +1802,7 @@ const ModuleShow: React.FC = () => {
             updateData['product_category'] = bom?.product_category ?? null;
             updateData['image_url'] = normalizeStoragePublicUrl(bom?.image_url) ?? null;
             if (bom.production_stages_draft) {
-              updateData['production_stages_draft'] = bom.production_stages_draft;
+              updateData['production_stages_draft'] = snapshotBomStages(bom.production_stages_draft, bom.grid_materials);
             }
 
             const { error: updateError } = await supabase
@@ -2475,7 +2364,7 @@ const ModuleShow: React.FC = () => {
           }
       }
 
-      return value;
+      return field.type === FieldType.RELATION ? 'عنوان در دسترس نیست' : value;
   };
 
   const getFieldValueLabel = (fieldKey: string, value: any) => {
@@ -2703,11 +2592,8 @@ const ModuleShow: React.FC = () => {
       }));
 
       setStatusLoading(true);
-      const moveResults = await applyProductionMoves(moves);
+      const moveResults = prepareProductionMoves(moves);
       const resolvedMoveByKey = new Map(moveResults.map((result) => [String(result.client_key), result]));
-      void loadDestinationBundleOptions(supabase as any)
-        .then(setDestinationBundleOptions)
-        .catch((error) => console.warn('Could not refresh destination bundles', error));
       const resolvedMaterials = materialsWithDelivery.map((group) => ({
         ...group,
         deliveryRows: (group.deliveryRows || []).map((row) => ({
@@ -2724,31 +2610,11 @@ const ModuleShow: React.FC = () => {
         move.target_bundle_id = targetBundleByMoveKey.get(String(move.client_key)) || move.target_bundle_id || move.bundle_id || null;
         move.create_new_target_bundle = false;
       });
-      await Promise.all(Array.from(new Set(moves.map((move) => move.product_id))).map((productId) => syncProductStock(productId)));
-      try {
-        const { data: authData } = await supabase.auth.getUser();
-        const userId = authData?.user?.id || null;
-        const transferPayload = moves.map((move) => ({
-          transfer_type: 'production',
-          product_id: move.product_id,
-          delivered_qty: move.quantity,
-          required_qty: move.quantity,
-          invoice_id: null,
-          production_order_id: id || null,
-          from_shelf_id: move.from_shelf_id,
-          to_shelf_id: move.to_shelf_id,
-          bundle_id: move.target_bundle_id ?? move.bundle_id ?? null,
-          source_bundle_id: move.bundle_id ?? null,
-          target_bundle_id: move.target_bundle_id ?? move.bundle_id ?? null,
-          sender_id: userId,
-          receiver_id: userId,
-        }));
-        if (transferPayload.length > 0) {
-          await supabase.from('stock_transfers').insert(transferPayload);
-        }
-      } catch (movementLogError) {
-        console.warn('Could not log production stock transfers', movementLogError);
-      }
+      const transfers = moves.map(m => ({
+        transfer_type: 'production', production_order_id: id, product_id: m.product_id,
+        required_qty: m.quantity, delivered_qty: m.quantity, from_shelf_id: m.from_shelf_id, to_shelf_id: m.to_shelf_id,
+        bundle_id: m.target_bundle_id, source_bundle_id: m.bundle_id, target_bundle_id: m.target_bundle_id,
+      }));
       const currentGridMaterials = Array.isArray(data?.grid_materials) ? data.grid_materials : [];
       const deliveredByGroupKey = new Map<string, StartMaterialGroup>(
         resolvedMaterials.map((group) => [group.key, group])
@@ -2789,13 +2655,17 @@ const ModuleShow: React.FC = () => {
       });
       const firstProductionShelfId = moves[0]?.to_shelf_id || null;
       const nowIso = new Date().toISOString();
-      await finalizeStatusUpdate({
+      await commitProduction({kind: 'deliver', moves: moveResults, transfers, orders: [{ id: id!, revision: data.production_revision || 0, patch: {
         status: 'in_progress',
         production_shelf_id: firstProductionShelfId,
         production_moves: moves,
         grid_materials: nextGridMaterials,
         production_started_at: nowIso,
-      });
+      } }] });
+      void loadDestinationBundleOptions(supabase as any)
+        .then(setDestinationBundleOptions)
+        .catch((error) => console.warn('Could not refresh destination bundles', error));
+      await fetchRecord();
       clearStartDraft();
       msg.success('تولید آغاز شد');
       setProductionModal(null);
@@ -2864,33 +2734,38 @@ const ModuleShow: React.FC = () => {
           }),
         };
       });
-      if (moves.length === 0) {
-        msg.warning('حرکتی برای بازگشت موجودی ثبت نشده است');
-        const nowIso = new Date().toISOString();
-        await finalizeStatusUpdate({
-          status: 'pending',
-          production_shelf_id: null,
-          production_moves: null,
-          grid_materials: clearedGridMaterials,
-          production_stopped_at: nowIso,
-        });
+      if (!stopMode || !id) return;
+      setStatusLoading(true);
+      let returns: ProductionMove[] = [];
+      if (stopMode === 'return') {
+        const logs: any[] = [];
+        for (let offset = 0; ; offset += 500) {
+          let query = supabase.from('stock_transfers').select('id,created_at,from_shelf_id,to_shelf_id,product_id,source_bundle_id,target_bundle_id,bundle_id,delivered_qty,stage_task_id,source_task_id,destination_task_id,notes')
+            .eq('production_order_id', id).in('transfer_type', ['production','production_stage','waste'])
+            .order('created_at').order('production_event_index', { nullsFirst: true }).order('id').range(offset, offset + 499);
+          if (data.production_returned_at) query = query.gt('created_at', data.production_returned_at);
+          const { data: rows, error } = await query;
+          if (error) throw error;
+          logs.push(...(rows || []));
+          if ((rows || []).length < 500) break;
+        }
+        returns = planProductionReturn(moves, logs);
+      }
+      if (stopMode === 'hold') {
+        await commitProduction({ kind: 'hold', orders: [{ id, revision: data.production_revision || 0 }] });
+        await fetchRecord();
+        msg.success('تولید متوقف شد و موجودی در قفسه‌های تولید باقی ماند');
         setProductionModal(null);
         return;
       }
-      setStatusLoading(true);
-      await rollbackProductionMoves(moves);
-      const productIds = Array.from(new Set(moves.map((move: any) => String(move?.product_id || '')).filter(Boolean))) as string[];
-      if (productIds.length > 0) {
-        await Promise.all(productIds.map((productId) => syncProductStock(productId)));
-      }
-      const nowIso = new Date().toISOString();
-      await finalizeStatusUpdate({
-        status: 'pending',
-        production_shelf_id: null,
-        production_moves: null,
-        grid_materials: clearedGridMaterials,
-        production_stopped_at: nowIso,
-      });
+      const transfers = returns.map(m => ({ transfer_type: 'production', production_order_id: id,
+        product_id: m.product_id, delivered_qty: m.quantity, required_qty: m.quantity,
+        from_shelf_id: m.from_shelf_id, to_shelf_id: m.to_shelf_id, bundle_id: m.target_bundle_id,
+        source_bundle_id: m.bundle_id, target_bundle_id: m.target_bundle_id, notes: 'برگشت مانده هنگام توقف تولید' }));
+      await commitProduction({ kind: 'return', orders: [{ id, revision: data.production_revision || 0,
+        patch: { production_moves: null, production_shelf_id: null, grid_materials: clearedGridMaterials } }],
+        moves: prepareProductionMoves(returns), transfers });
+      await fetchRecord();
       msg.success('تولید متوقف شد');
       setProductionModal(null);
     } catch (e: any) {
@@ -2919,89 +2794,9 @@ const ModuleShow: React.FC = () => {
         msg.error(PRODUCTION_MESSAGES.requireQuantity);
         return;
       }
-      const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
-      const productionShelfId = data?.production_shelf_id;
-      const finalStageMoves = await buildFinalStageConsumptionMoves();
-      const fallbackMoves = moves.length
-        ? moves
-        : (productionShelfId ? buildConsumptionMoves(data, normalizedQty, String(productionShelfId)) : []);
-      const consumptionMoves = finalStageMoves.length ? finalStageMoves : fallbackMoves;
-      if (!consumptionMoves.length) {
-        msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
-        return;
-      }
+      const consumptionMoves = await resolveConsumption(normalizedQty);
       setStatusLoading(true);
-      if (consumptionMoves.length) {
-        await consumeProductionMaterials(consumptionMoves, productionShelfId || undefined);
-      }
-      const consumedGrouped = new Map<string, number>();
-      consumptionMoves.forEach((move: any) => {
-        const shelfId = String(move?.to_shelf_id || productionShelfId || '');
-        const productId = String(move?.product_id || '');
-        const qty = parseFloat(move?.quantity) || 0;
-        if (!productId || !shelfId || qty <= 0) return;
-        const key = `${productId}:${shelfId}:${String(move?.bundle_id || '__null__')}`;
-        consumedGrouped.set(key, (consumedGrouped.get(key) || 0) + qty);
-      });
-      const consumedProductIds = Array.from(
-        new Set(consumptionMoves.map((move: any) => String(move?.product_id || '')).filter(Boolean))
-      ) as string[];
-      if (consumedProductIds.length > 0) {
-        await Promise.all(consumedProductIds.map((productId) => syncProductStock(productId)));
-      }
-      try {
-        const { data: authData } = await supabase.auth.getUser();
-        const userId = authData?.user?.id || null;
-        const consumptionTransferPayload = Array.from(consumedGrouped.entries()).map(([key, qty]) => {
-          const [productId, fromShelfId, bundleKey] = key.split(':');
-          return {
-            transfer_type: 'production',
-            product_id: productId,
-            delivered_qty: qty,
-            required_qty: qty,
-            invoice_id: null,
-            production_order_id: id || null,
-            from_shelf_id: fromShelfId || null,
-            to_shelf_id: null,
-            bundle_id: bundleKey === '__null__' ? null : bundleKey,
-            sender_id: userId,
-            receiver_id: userId,
-          };
-        });
-        if (consumptionTransferPayload.length > 0) {
-          await supabase.from('stock_transfers').insert(consumptionTransferPayload);
-        }
-      } catch (consumptionLogErr) {
-        console.warn('Could not log production material consumption transfers', consumptionLogErr);
-      }
-      await addFinishedGoods(outputProductId, outputShelfId, normalizedQty);
-      await syncProductStock(outputProductId);
-      try {
-        const { data: authData } = await supabase.auth.getUser();
-        const userId = authData?.user?.id || null;
-        await supabase.from('stock_transfers').insert({
-          transfer_type: 'production',
-          product_id: outputProductId,
-          delivered_qty: normalizedQty,
-          required_qty: normalizedQty,
-          invoice_id: null,
-          production_order_id: id || null,
-          from_shelf_id: null,
-          to_shelf_id: outputShelfId,
-          sender_id: userId,
-          receiver_id: userId,
-        });
-      } catch (transferLogErr) {
-        console.warn('Could not log finished goods transfer', transferLogErr);
-      }
-      const nowIso = new Date().toISOString();
-      await finalizeStatusUpdate({
-        status: 'completed',
-        production_output_product_id: outputProductId,
-        production_output_shelf_id: outputShelfId,
-        production_output_qty: normalizedQty,
-        production_completed_at: nowIso,
-      });
+      await finishProduction(consumptionMoves, outputProductId, outputShelfId, normalizedQty);
       msg.success('تولید تکمیل شد');
       setProductionModal(null);
     } catch (e: any) {
@@ -3065,17 +2860,7 @@ const ModuleShow: React.FC = () => {
         return;
       }
 
-      const moves = Array.isArray(data?.production_moves) ? data.production_moves : [];
-      const productionShelfId = data?.production_shelf_id;
-      const finalStageMoves = await buildFinalStageConsumptionMoves();
-      const fallbackMoves = moves.length
-        ? moves
-        : (productionShelfId ? buildConsumptionMoves(data, normalizedQty, String(productionShelfId)) : []);
-      const consumptionMoves = finalStageMoves.length ? finalStageMoves : fallbackMoves;
-      if (!consumptionMoves.length) {
-        msg.error(PRODUCTION_MESSAGES.requireProductionShelf);
-        return;
-      }
+      const consumptionMoves = await resolveConsumption(normalizedQty);
 
       const { data: authData } = await supabase.auth.getUser();
       const userId = authData?.user?.id || null;
@@ -3109,74 +2894,7 @@ const ModuleShow: React.FC = () => {
       if (!productId) throw new Error('ثبت محصول ناموفق بود');
       setOutputProductId(productId);
       setOutputShelfId(outputShelf);
-      if (consumptionMoves.length) {
-        await consumeProductionMaterials(consumptionMoves, productionShelfId || undefined);
-      }
-      const consumedGrouped = new Map<string, number>();
-      consumptionMoves.forEach((move: any) => {
-        const shelfId = String(move?.to_shelf_id || productionShelfId || '');
-        const productId = String(move?.product_id || '');
-        const qty = parseFloat(move?.quantity) || 0;
-        if (!productId || !shelfId || qty <= 0) return;
-        const key = `${productId}:${shelfId}:${String(move?.bundle_id || '__null__')}`;
-        consumedGrouped.set(key, (consumedGrouped.get(key) || 0) + qty);
-      });
-      const consumedProductIds = Array.from(
-        new Set(consumptionMoves.map((move: any) => String(move?.product_id || '')).filter(Boolean))
-      ) as string[];
-      if (consumedProductIds.length > 0) {
-        await Promise.all(consumedProductIds.map((productId) => syncProductStock(productId)));
-      }
-      try {
-        const consumptionTransferPayload = Array.from(consumedGrouped.entries()).map(([key, qty]) => {
-          const [productId, fromShelfId, bundleKey] = key.split(':');
-          return {
-            transfer_type: 'production',
-            product_id: productId,
-            delivered_qty: qty,
-            required_qty: qty,
-            invoice_id: null,
-            production_order_id: id || null,
-            from_shelf_id: fromShelfId || null,
-            to_shelf_id: null,
-            bundle_id: bundleKey === '__null__' ? null : bundleKey,
-            sender_id: userId,
-            receiver_id: userId,
-          };
-        });
-        if (consumptionTransferPayload.length > 0) {
-          await supabase.from('stock_transfers').insert(consumptionTransferPayload);
-        }
-      } catch (consumptionLogErr) {
-        console.warn('Could not log production material consumption transfers for new product', consumptionLogErr);
-      }
-      await addFinishedGoods(productId, outputShelf, normalizedQty);
-      await syncProductStock(productId);
-      try {
-        await supabase.from('stock_transfers').insert({
-          transfer_type: 'production',
-          product_id: productId,
-          delivered_qty: normalizedQty,
-          required_qty: normalizedQty,
-          invoice_id: null,
-          production_order_id: id || null,
-          from_shelf_id: null,
-          to_shelf_id: outputShelf,
-          sender_id: userId,
-          receiver_id: userId,
-        });
-      } catch (transferLogErr) {
-        console.warn('Could not log finished goods transfer for new product', transferLogErr);
-      }
-      const nowIso = new Date().toISOString();
-      await finalizeStatusUpdate({
-        status: 'completed',
-        production_output_product_id: productId,
-        production_output_shelf_id: outputShelf,
-        production_output_qty: normalizedQty,
-        production_completed_at: nowIso,
-      });
-
+      await finishProduction(consumptionMoves, productId, outputShelf, normalizedQty);
       msg.success(
         resolution.exactProduct || resolution.fallbackProduct
           ? 'محصول متناظر پیدا شد، موجودی آن افزایش یافت و سفارش تکمیل شد'
@@ -3395,6 +3113,14 @@ const ModuleShow: React.FC = () => {
       || canUseAction('stop_production')
       || canUseAction('complete_production');
 
+    if (canEditModule && data?.production_on_hold && canUseAction('start_production')) {
+      headerActions.push({ id: 'resume_production', label: 'ادامهٔ تولید با موجودی فعلی', variant: 'primary',
+        onClick: () => handleProductionStatusChange('in_progress') });
+    }
+    if (canEditModule && data?.status === 'in_progress' && canUseAction('stop_production')) {
+      headerActions.push({ id: 'stop_production', label: 'توقف تولید', variant: 'default',
+        onClick: () => handleProductionStatusChange('pending') });
+    }
     if (canOpenProductionWizard) {
       headerActions.push({
         id: 'view_production_status',
@@ -3572,7 +3298,7 @@ const ModuleShow: React.FC = () => {
             model_name: data?.model_name || null,
             image_url: data?.image_url || null,
             grid_materials: data?.grid_materials || [],
-            production_stages_draft: data?.production_stages_draft || [],
+            production_stages_draft: snapshotBomStages(data?.production_stages_draft || [],data?.grid_materials),
             __skipBomConfirm: true,
           }}
           onCancel={() => setIsCreateOrderOpen(false)}
@@ -3610,12 +3336,15 @@ const ModuleShow: React.FC = () => {
             onOk={handleConfirmStopProduction}
             onCancel={() => setProductionModal(null)}
             okText="توقف تولید"
+            okButtonProps={{ disabled: !stopMode }}
             cancelText="انصراف"
             confirmLoading={statusLoading}
             destroyOnHidden
           >
             <div className="text-sm text-gray-600 whitespace-pre-line">
-              {PRODUCTION_MESSAGES.stopNotice}
+              پس از توقف، با ماندهٔ مواد تحویلی چه شود؟
+              <Select className="mt-3 w-full" value={stopMode} onChange={setStopMode} placeholder="انتخاب کنید"
+                options={[{ value: 'hold', label: 'نگهداری در قفسه‌های تولید' }, { value: 'return', label: 'برگشت مانده به قفسه‌های مبدأ' }]} />
             </div>
           </Modal>
 

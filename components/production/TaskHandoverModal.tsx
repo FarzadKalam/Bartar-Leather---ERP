@@ -987,7 +987,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               ];
                               if (value && String(value) !== String(record.sourceBundleId || '')
                                 && !destinationOptions.some((option) => String(option.value) === String(value))) {
-                                destinationOptions.push({ label: record.targetBundleLabel || String(value), value } as any);
+                                destinationOptions.push({ label: record.targetBundleLabel || 'بسته بدون شماره', value } as any);
                               }
                               const sourceLabel = bundleLabels[String(record.sourceBundleId || '')] || record.sourceBundleLabel || sourceBundleOption?.label || 'ثبت نشده';
                               const selectedTargetOption = destinationOptions.find((option) => String(option.value) === String(value || ''));

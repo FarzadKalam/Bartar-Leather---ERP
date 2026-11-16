@@ -1,3 +1,4 @@
+import { snapshotBomStages } from '../utils/bomGroupRoutes';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { App, Form, Button, Spin, Divider, Select, Space, Checkbox } from 'antd';
 import { UserOutlined, TeamOutlined } from '@ant-design/icons';
@@ -862,6 +863,9 @@ const SmartForm: React.FC<SmartFormProps> = ({
           values.production_stages_draft = formData?.production_stages_draft || [];
         }
       }
+      if ((module.id === 'production_orders' || module.id === 'production_boms') && Array.isArray(values.production_stages_draft)) {
+        values.production_stages_draft = snapshotBomStages(values.production_stages_draft, values.grid_materials ?? formData?.grid_materials);
+      }
       const summarySource = { ...formData, ...values };
       const summaryData = getSummaryData(summarySource);
       const summaryBlock = module.blocks?.find(b => b.summaryConfig);
@@ -1373,9 +1377,12 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     readOnly={!canEditModule}
                     compact={true}
                     orderStatus={module.id === 'production_orders' ? (currentValues as any)?.status : null}
+                    planMaterials={(currentValues as any)?.grid_materials || []}
+                    planQuantity={(currentValues as any)?.quantity}
                     draftStages={(currentValues as any)?.production_stages_draft || []}
+                    draftStagesPersistedByParent
                     onDraftStagesChange={(stages) => {
-                      const next = { ...form.getFieldsValue(), production_stages_draft: stages };
+                      const next = { ...currentValues, ...form.getFieldsValue(), production_stages_draft: stages };
                       form.setFieldValue('production_stages_draft', stages);
                       setFormData(next);
                     }}

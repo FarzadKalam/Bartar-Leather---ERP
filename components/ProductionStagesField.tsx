@@ -1,3 +1,4 @@
+import StageMaterialPlan from './production/StageMaterialPlan';
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Avatar, Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
 import { PlusOutlined, UserOutlined, DownOutlined, TeamOutlined, CopyOutlined, DeleteOutlined, EditOutlined, CheckOutlined, CloseOutlined, PlayCircleOutlined, AuditOutlined, WarningOutlined } from '@ant-design/icons';
@@ -23,8 +24,8 @@ import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
-import { applyInventoryDeltas, syncMultipleProductsStock } from '../utils/inventoryTransactions';
-import { applyProductionMoves, type ProductionMove } from '../utils/productionWorkflow';
+import { commitProduction, prepareProductionMoves } from '../utils/productionTransaction';
+import { type ProductionMove } from '../utils/productionWorkflow';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { MODULES } from '../moduleRegistry';
@@ -60,6 +61,8 @@ interface ProductionStagesFieldProps {
   onQuantityChange?: (qty: number) => void;
   orderStatus?: string | null;
   draftStages?: any[];
+  planMaterials?: any[];
+  planQuantity?: number;
   onDraftStagesChange?: (stages: any[]) => void | Promise<void>;
   draftStagesPersistedByParent?: boolean;
   showWageSummary?: boolean;
@@ -123,7 +126,7 @@ type OpenHandoverOptions = {
   sourceOverrideTask?: any | null;
 };
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false, focusedTaskId = null, focusedTaskAction = null, focusedHandoverFormId = null, onFocusedTaskHandled }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, planMaterials, planQuantity, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false, focusedTaskId = null, focusedTaskAction = null, focusedHandoverFormId = null, onFocusedTaskHandled }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -967,7 +970,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         const shelfLabel = shelfId
           ? (allShelfOptions.find((item) => String(item.value) === shelfId)?.label || 'اطلاعات قفسه در دسترس نیست')
           : 'قفسه تعیین نشده';
-        const bundleNumber = String(row?.product_bundles?.bundle_number || bundleId);
+        const bundleNumber = String(row?.product_bundles?.bundle_number || 'بسته بدون شماره');
         const option: StageHandoverBundleOption = {
           value: bundleId,
           label: `${bundleNumber} — ${shelfLabel} (موجودی: ${toNumber(row?.stock).toLocaleString('en-US')})`,
@@ -2086,12 +2089,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         ...group,
         deliveryRows: (Array.isArray(group?.deliveryRows) ? group.deliveryRows : []).map((row: any) => ({ ...row })),
       }));
+      const movementResults = prepareProductionMoves(productionMoves);
       if (productionMoves.length > 0) {
-        const movementResults = await applyProductionMoves(productionMoves);
         const resultByKey = new Map(movementResults.map((result) => [String(result.client_key), result]));
-        void loadDestinationBundleOptions(supabase as any)
-          .then(setDestinationBundleOptions)
-          .catch((error) => console.warn('Could not refresh destination bundles', error));
         persistedGroups = persistedGroups.map((group: any, groupIndex: number) => {
           const groupKey = String(group?.key || `group_${groupIndex}`);
           return {
@@ -2128,6 +2128,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
             sender_id: userId,
             receiver_id: userId,
             notes: isRollback ? 'اصلاح فرم تحویل مرحله‌ای' : null,
+            stage_task_id: currentTaskId, source_task_id: isRollback ? effectiveDestinationTaskId : effectiveSourceTaskId,
+            destination_task_id: isRollback ? effectiveSourceTaskId : (effectiveDestinationTaskId || currentTaskId),
           });
         });
       }
@@ -2154,8 +2156,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         // ضایعاتِ بسته‌محور باید صراحتاً از همان بسته انتخاب شوند. تا زمانی که
         // انتخاب نشده، موجودی هیچ بسته‌ای را حدسی کم/زیاد نمی‌کنیم.
         if (!explicitBundleId && bundleIds.length > 1) {
-          console.warn('Skipping ambiguous multi-bundle waste adjustment', { productId, wasteDelta });
-          return;
+          throw new Error('بستهٔ ضایعات باید مشخص باشد.');
         }
         const bundleId = explicitBundleId ?? bundleIds[0] ?? null;
         if (wasteDelta > 0) {
@@ -2174,21 +2175,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           });
         } else {
           deltas.push({ productId, shelfId: String(effectiveSourceShelfId), bundleId, delta: Math.abs(wasteDelta), unit: mainUnit } as any);
+          transferLogs.push({ transfer_type: 'waste', product_id: productId, production_order_id: handoverContext.orderId,
+            required_qty: -wasteDelta, delivered_qty: -wasteDelta, to_shelf_id: effectiveSourceShelfId, bundle_id: bundleId,
+            notes: 'اصلاح ضایعات تولید' });
         }
       });
-
-      if (deltas.length > 0) {
-        await applyInventoryDeltas(supabase as any, deltas);
-        await syncMultipleProductsStock(
-          supabase as any,
-          Array.from(new Set(deltas.map((item) => item.productId).filter(Boolean)))
-        );
-      }
-
-      if (transferLogs.length > 0) {
-        const { error: transferError } = await supabase.from('stock_transfers').insert(transferLogs);
-        if (transferError) throw transferError;
-      }
 
       const nowIso = new Date().toISOString();
       const nextGiverConfirmation: StageHandoverConfirm = existingForm?.giverConfirmation?.confirmed
@@ -2268,12 +2259,12 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         recurrence_info: nextRecurrence,
         production_shelf_id: freshTask?.production_shelf_id || (effectiveDirection === 'outgoing' ? effectiveSourceShelfId : effectiveTargetShelfId) || null,
       };
-      const { error: updateError } = await supabase
-        .from('tasks')
-        .update(updatePayload)
-        .eq('id', handoverContext.taskId);
-      if (updateError) throw updateError;
-
+      await commitProduction({ kind: 'handover', orders: [{ id: handoverContext.orderId }],
+        moves: movementResults, deltas, transfers: transferLogs, tasks: [{ id: currentTaskId,
+          previous: freshTask?.recurrence_info ?? null, shelf: freshTask?.production_shelf_id || null, recurrence: nextRecurrence }] });
+        void loadDestinationBundleOptions(supabase as any)
+          .then(setDestinationBundleOptions)
+          .catch((error) => console.warn('Could not refresh destination bundles', error));
       const updatedTask = {
         ...freshTask,
         ...updatePayload,
@@ -3361,19 +3352,24 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     const previousStages = draftLocal;
     setDraftLocal(nextStages);
     try {
-      if (onDraftStagesChange) await onDraftStagesChange(nextStages);
       const draftStagesTable = moduleId === 'production_boms'
         ? 'production_boms'
         : moduleId === 'production_orders'
           ? 'production_orders'
           : null;
       if (draftStagesTable && recordId && !draftStagesPersistedByParent) {
-        const { error } = await supabase
+        let update = supabase
           .from(draftStagesTable)
           .update({ production_stages_draft: nextStages })
           .eq('id', recordId);
+        if (moduleId === 'production_boms' && previousStages.length) {
+          update = update.filter('production_stages_draft', 'eq', JSON.stringify(previousStages));
+        }
+        const { data: saved, error } = await update.select('id').maybeSingle();
         if (error) throw error;
+        if (!saved) throw new Error('مراحل تغییر کرده‌اند یا دسترسی ذخیره ندارید. شناسنامه را تازه کنید.');
       }
+      if (onDraftStagesChange) await onDraftStagesChange(nextStages);
     } catch (error: any) {
       setDraftLocal(previousStages);
       message.error(error?.message || 'ذخیره مراحل پیش‌نویس ناموفق بود.');
@@ -3404,6 +3400,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
   };
 
   const handleRemoveDraftStage = async (id: any) => {
+    if (draftLocal.some(stage => stage.materialRoutes?.some((route: {from: string; to: string}) =>
+      route.from === String(id) || route.to === String(id)))) {
+      message.warning('ابتدا مسیرهای متصل به این مرحله را حذف یا ویرایش کنید.');
+      return;
+    }
     Modal.confirm({
       title: 'حذف مرحله پیش‌نویس',
       content: 'آیا از حذف این مرحله پیش‌نویس مطمئن هستید؟',
@@ -3637,6 +3638,10 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
           ) : null}
         </div>
       )}
+
+      {planMaterials && !lazyLoad && <StageMaterialPlan stages={draftList} materials={planMaterials}
+        quantity={Number(planQuantity) || 0} isOrder={!isBom} canEdit={isBom && !readOnly}
+        onSave={saveDraftStages} />}
 
       {!isBom && visibleLines.map((line) => {
         const lineTasks = tasksByLine.get(String(line.id)) || [];

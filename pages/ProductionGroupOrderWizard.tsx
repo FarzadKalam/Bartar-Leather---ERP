@@ -38,7 +38,7 @@ import {
 import { resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { isProductionOrderPanelExpanded } from '../utils/productionOrderPanels';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
-import { applyProductionMoves, syncProductStock } from '../utils/productionWorkflow';
+import { commitProduction, prepareProductionMoves, type TaskChange, type OrderChange } from '../utils/productionTransaction';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { getAllowNegativeInventory } from '../utils/companySettings';
@@ -70,6 +70,7 @@ type ProductionOrderRecord = {
   production_line_qty?: number;
   grid_materials?: any[] | null;
   production_moves?: any[] | null;
+  production_revision?: number;
   production_shelf_id?: string | null;
   production_stages_draft?: any[] | null;
 };
@@ -357,7 +358,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       const systemCode = separatorIndex > -1 ? label.slice(0, separatorIndex).trim() : '';
       const name = separatorIndex > -1 ? label.slice(separatorIndex + 3).trim() : label;
       map.set(id, {
-        name: name || id,
+        name: name || 'محصول بدون عنوان',
         system_code: systemCode || '',
       });
     });
@@ -599,7 +600,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       return;
     }
 
-    const selectFields = 'id,name,system_code,status,quantity,bom_id,grid_materials,production_moves,production_shelf_id,production_stages_draft';
+    const selectFields = '*';
     const { data: rows, error } = await supabase.from('production_orders').select(selectFields).in('id', ids);
     if (error) throw error;
 
@@ -982,7 +983,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
       const { data: freshTask, error: taskError } = await supabase
         .from('tasks')
-        .select('id, recurrence_info')
+        .select('id, recurrence_info, production_shelf_id, related_production_order')
         .eq('id', startFormEditorTaskId)
         .single();
       if (taskError) throw taskError;
@@ -1060,11 +1061,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
         ...recurrence,
         production_handover: nextHandover,
       };
-      const { error: updateError } = await supabase
-        .from('tasks')
-        .update({ recurrence_info: nextRecurrence })
-        .eq('id', startFormEditorTaskId);
-      if (updateError) throw updateError;
+      await commitProduction({ kind: 'handover', orders: [{ id: freshTask.related_production_order }],
+        tasks: [{ id: startFormEditorTaskId, previous: freshTask.recurrence_info ?? null,
+          recurrence: nextRecurrence, shelf: freshTask.production_shelf_id }] });
 
       if (side === 'giver') {
         setStartFormEditorGiverConfirmation(updatedForm?.giverConfirmation || { confirmed: false });
@@ -1819,7 +1818,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       shelfMap = new Map((shelves || []).map((shelf: any) => {
         const warehouseName = String(shelf?.warehouses?.name || '');
         const isProductionWarehouse = warehouseName.includes('تولید') || /production/i.test(warehouseName);
-        const label = `${shelf.shelf_number || shelf.name || shelf.id}${warehouseName ? ` - ${warehouseName}` : ''}`;
+        const label = `${shelf.shelf_number || shelf.name || 'قفسه بدون عنوان'}${warehouseName ? ` - ${warehouseName}` : ''}`;
         return [String(shelf.id), { label, isProductionWarehouse }];
       }));
     }
@@ -1884,7 +1883,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       nextBundleOptions[productId] = Array.from(bundles.entries()).map(([bundleId, bundleRows]) => {
         const shelfIds = Array.from(new Set(bundleRows.map((item) => item.shelfId)));
         const totalStock = bundleRows.reduce((sum, item) => sum + item.stock, 0);
-        const bundleNumber = ((inventoryRows || []).find((row: any) => String(row?.bundle_id || '') === bundleId) as any)?.product_bundles?.bundle_number || bundleId;
+        const bundleNumber = ((inventoryRows || []).find((row: any) => String(row?.bundle_id || '') === bundleId) as any)?.product_bundles?.bundle_number || 'بسته بدون شماره';
         const hasSingleShelf = shelfIds.length === 1;
         const shelfLabel = hasSingleShelf ? bundleRows[0]?.shelfLabel || 'اطلاعات قفسه در دسترس نیست' : null;
         return {
@@ -2255,11 +2254,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
     setIsStartingGroup(true);
     try {
-      const moveResults = await applyProductionMoves(moves);
+      const moveResults = prepareProductionMoves(moves);
+      const taskChanges: TaskChange[] = [];
+      const orderChanges: OrderChange[] = [];
       const resolvedMoveByKey = new Map(moveResults.map((result) => [String(result.client_key), result]));
-      void loadDestinationBundleOptions(supabase as any)
-        .then(setDestinationBundleOptions)
-        .catch((error) => console.warn('Could not refresh destination bundles', error));
       const getResolvedTargetBundleId = (group: StartMaterialGroup, row: StartMaterialDeliveryRow) => (
         resolvedMoveByKey.get(getMovementKey(group, row))?.target_bundle_id
         || (isUseSourceBundleValue(row.targetBundleId) ? row.sourceBundleId : row.targetBundleId)
@@ -2271,7 +2269,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         || row.targetBundleLabel
         || null
       );
-      await Promise.all(Array.from(new Set(moves.map((move) => move.product_id))).map((productId) => syncProductStock(productId)));
+
 
       const nowIso = new Date().toISOString();
       // هر مقصد فرم مستقل خود را نگه می‌دارد؛ این شناسه آن‌ها را برای ثبت‌کننده
@@ -2317,7 +2315,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
             const isLast = sourceIndex === sourceRows.length - 1;
             const allocatedQty = isLast
               ? Math.max(0, toNumber(allocation.deliveredQty) - allocatedSoFar)
-              : toNumber(allocation.deliveredQty) * (item.quantity / Math.max(sourceTotal, 1));
+              : toNumber(allocation.deliveredQty) * (item.quantity / sourceTotal);
             allocatedSoFar += allocatedQty;
             const baseArea = isPieceGroup ? (Math.max(0, toNumber(item.row.length)) * Math.max(0, toNumber(item.row.width))) : 0;
             return {
@@ -2370,7 +2368,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
               const isLast = sourceIndex === sourceRows.length - 1;
               const quantity = isLast
                 ? Math.max(0, toNumber(allocation.deliveredQty) - allocatedSoFar)
-                : toNumber(allocation.deliveredQty) * (item.quantity / Math.max(sourceTotal, 1));
+                : toNumber(allocation.deliveredQty) * (item.quantity / sourceTotal);
               allocatedSoFar += quantity;
               if (quantity <= 0) return;
               orderMovesMap[allocation.orderId].push({
@@ -2390,7 +2388,10 @@ const ProductionGroupOrderWizard: React.FC = () => {
 
       for (const taskId of Object.keys(groupsByDestinationTask)) {
         const task = taskById.get(String(taskId));
-        if (!task) continue;
+        const destination = startStageOptionMap.get(taskId);
+        if (!task || !destination || task.related_production_order !== destination.orderId || task.production_shelf_id !== destination.shelfId) {
+          throw new Error('مرحله یا قفسهٔ مقصد تغییر کرده است. اطلاعات سفارش گروهی را تازه کنید.');
+        }
         const recurrence = parseRecurrenceInfo(task?.recurrence_info);
         const existingHandover = recurrence?.production_handover && typeof recurrence.production_handover === 'object'
           ? recurrence.production_handover
@@ -2516,14 +2517,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
           ...recurrence,
           production_handover: nextHandover,
         };
-        const { error: updateTaskError } = await supabase
-          .from('tasks')
-          .update({
-            recurrence_info: nextRecurrence,
-            production_shelf_id: task?.production_shelf_id || null,
-          })
-          .eq('id', taskId);
-        if (updateTaskError) throw updateTaskError;
+        taskChanges.push({ id: taskId, previous: task.recurrence_info ?? null, shelf: task.production_shelf_id, recurrence: nextRecurrence });
       }
 
       const transferPayload: any[] = [];
@@ -2546,15 +2540,11 @@ const ProductionGroupOrderWizard: React.FC = () => {
           });
         });
       });
-      if (transferPayload.length > 0) {
-        const { error: transferError } = await supabase.from('stock_transfers').insert(transferPayload);
-        if (transferError) throw transferError;
-      }
-
       for (const orderId of selectedOrderIds) {
         const rows = nextRowsByOrder[orderId] || [];
         const movesForOrder = orderMovesMap[orderId] || [];
         const currentOrder = selectedOrderMap.get(String(orderId));
+        if (currentOrder?.status === 'completed' && !movesForOrder.length) continue;
         const existingMoves = Array.isArray(currentOrder?.production_moves) ? currentOrder?.production_moves : [];
         const payload: Record<string, any> = {
           status: 'in_progress',
@@ -2570,22 +2560,14 @@ const ProductionGroupOrderWizard: React.FC = () => {
         }
         const qty = toNumber(orderQuantityMap[orderId]);
         if (qty > 0) payload.quantity = qty;
-        const { error } = await supabase.from('production_orders').update(payload).eq('id', orderId);
-        if (error) throw error;
+        orderChanges.push({ id: orderId, revision: currentOrder?.production_revision || 0, patch: payload });
       }
 
-      const { error: groupError } = await supabase
-        .from('production_group_orders')
-        .update({
-          status: 'in_progress',
-          ...(groupStatus === 'pending' ? { started_at: nowIso } : {}),
-          production_order_ids: selectedOrderIds,
-          updated_by: currentUserId,
-          updated_at: nowIso,
-        })
-        .eq('id', groupId);
-      if (groupError) throw groupError;
-
+      await commitProduction({ kind: 'deliver', groupId, orders: orderChanges, tasks: taskChanges,
+        transfers: transferPayload, moves: moveResults });
+      void loadDestinationBundleOptions(supabase as any)
+        .then(setDestinationBundleOptions)
+        .catch((error) => console.warn('Could not refresh destination bundles', error));
       setGroupStatus('in_progress');
       setOrderRowsMap(nextRowsByOrder);
       setCurrentStep(3);
@@ -2680,7 +2662,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
       if (map.has(bomId)) return;
       const bomLabel = String(order?.bom_name || '').trim();
       const bomCode = String(order?.bom_system_code || '').trim();
-      const label = bomCode ? `${bomLabel || 'BOM'} (${bomCode})` : (bomLabel || bomId);
+      const label = bomCode ? `${bomLabel || 'BOM'} (${bomCode})` : (bomLabel || 'شناسنامه بدون عنوان');
       map.set(bomId, { value: bomId, label });
     });
     return Array.from(map.values());
@@ -2890,6 +2872,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
                   compact
                   readOnly={!canEditGroup || groupStatus === 'completed'}
                   orderStatus={String(order.status || '')}
+                  planMaterials={order?.grid_materials || []}
+                  planQuantity={orderQuantityMap[order.id] ?? order.quantity}
                   draftStages={Array.isArray((order as any).production_stages_draft) ? (order as any).production_stages_draft : []}
                   onDraftStagesChange={(stages) => saveOrderDraftStages(order.id, stages)}
                   draftStagesPersistedByParent
@@ -3254,6 +3238,8 @@ const ProductionGroupOrderWizard: React.FC = () => {
                   compact
                   readOnly={!canEditGroup || groupStatus === 'completed'}
                   orderStatus={order.status || null}
+                  planMaterials={order?.grid_materials || []}
+                  planQuantity={orderQuantityMap[order.id] ?? order.quantity}
                   draftStages={Array.isArray((order as any).production_stages_draft) ? (order as any).production_stages_draft : []}
                   onDraftStagesChange={(stages) => saveOrderDraftStages(order.id, stages)}
                   draftStagesPersistedByParent

@@ -58,7 +58,7 @@ export const loadDestinationBundleOptions = async (
     const shelfId = occupiedShelfIds[0] || null;
     const shelfLabel = shelfId ? (shelfLabelById.get(shelfId) || 'اطلاعات قفسه در دسترس نیست') : null;
     const stock = rows.reduce((sum: number, row: any) => sum + toNumber(row?.stock), 0);
-    const bundleNumber = String(bundle?.bundle_number || bundleId);
+    const bundleNumber = String(bundle?.bundle_number || 'بسته بدون شماره');
     return {
       value: bundleId,
       label: !hasSingleShelf
