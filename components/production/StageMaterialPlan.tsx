@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import BomGroupRouteEditor from './BomGroupRouteEditor';
-import { bomRouteGroups, refreshBomRoutes } from '../../utils/bomGroupRoutes';
+import { bomRouteGroups, editBomRoute, hasBomQuantity, incompleteBomGroups, refreshBomRoutes } from '../../utils/bomGroupRoutes';
 import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Table } from 'antd';
 import { HARD_CODED_UNIT_OPTIONS } from '../../utils/unitConversions';
-import { attachRoutes, expectedAmount, finishedShelf, materialChoices, planIssue, stageKey, warehouse, type PlanStage, type PlannedTransfer } from '../../utils/productionStagePlan';
+import { attachRoutes, defaultTransferMode, expectedAmount, finishedShelf, materialChoices, planIssue, stageKey, warehouse, type PlanStage, type PlannedTransfer } from '../../utils/productionStagePlan';
 
 interface Props {
   stages: PlanStage[];
@@ -29,14 +29,15 @@ export default function StageMaterialPlan({ stages, materials, quantity, isOrder
   const choices = useMemo(() => materialChoices(materials), [materials]);
   const groups = useMemo(()=>bomRouteGroups(materials),[materials]);
   const routes = refreshBomRoutes(stages.flatMap(s => s.materialRoutes || []),groups);
-  const linkedItems = new Set(routes.filter(r=>r.bomGroup).map(r=>r.material));
-  const incompleteGroups = groups.filter(g=>linkedItems.has(g.raw.key) && g.pieces.some(p=>!linkedItems.has(p.key)));
-  const snapshot = JSON.stringify(stages);
+  const incompleteGroups = incompleteBomGroups(groups,routes);
+  const editingRoute = routes.find(r=>r.id===editing?.id);
+  const linkedQuantity = hasBomQuantity(editingRoute);
+  const snapshot = JSON.stringify({stages,materials});
   const visible = routes.filter(r => !filter || r.from === filter || r.to === filter);
   function open(row?: PlannedTransfer) {
     setIssue('');
     form.resetFields();
-    form.setFieldsValue(row || {from:warehouse, mode:'bulk', unit:'عدد'});
+    form.setFieldsValue(row || {from:warehouse, mode:'piece', unit:'عدد'});
     setEditing({id:row?.id, snapshot});
   }
   async function persist(next: PlannedTransfer[]) {
@@ -53,11 +54,13 @@ export default function StageMaterialPlan({ stages, materials, quantity, isOrder
   }
   function submit(values: PlannedTransfer) {
     if (!editing || !canEdit) return;
-    if (editing.snapshot !== snapshot) { setIssue('مراحل تغییر کرده‌اند. فرم را دوباره باز کنید.'); return; }
+    if (editing.snapshot !== snapshot) { setIssue('مراحل یا مواد شناسنامه تغییر کرده‌اند. فرم را دوباره باز کنید.'); return; }
     const old = routes.find(r => r.id === editing.id);
-    const row = {...old, ...values, state:values.state.trim(), id:old?.id || crypto.randomUUID(),
-      materialName: choices.find(o => o.value === values.material)?.label || (old?.material === values.material ? old.materialName : '')};
-    void persist(old ? routes.map(r => r.id === row.id ? row : r) : [...routes,row]);
+    try {
+      const materialName = choices.find(o=>o.value===values.material)?.label || (old?.material===values.material ? old.materialName : '');
+      const row = old ? editBomRoute(old,{...values,materialName},groups) : {...values,state:values.state.trim(),id:crypto.randomUUID(),materialName};
+      void persist(old ? routes.map(r => r.id === row.id ? row : r) : [...routes,row]);
+    } catch (error) { setIssue(error instanceof Error ? error.message : 'ویرایش مسیر انجام نشد.'); }
   }
   if (!stages.length || (!routes.length && !canEdit)) return null;
   return <section className="rounded-lg border bg-white p-3 space-y-3" dir="rtl">
@@ -79,7 +82,7 @@ export default function StageMaterialPlan({ stages, materials, quantity, isOrder
         {title:'برای یک محصول', render:(_,r) => format(r.perItem) + ' ' + r.unit},
         ...(isOrder ? [{title:'برای سفارش (' + format(quantity) + ' محصول)', render:(_:unknown,r:PlannedTransfer) => format(expectedAmount(r,quantity)) + ' ' + r.unit}] : []),
         ...(canEdit ? [{title:'عملیات',render:(_:unknown,r:PlannedTransfer) => <div className="flex">
-          {r.bomGroup ? <span className="text-xs">از شناسنامه</span> : <Button size="small" type="link" disabled={busy} onClick={() => open(r)}>ویرایش</Button>}
+          <Button size="small" type="link" disabled={busy} onClick={() => open(r)}>ویرایش</Button>
           <Popconfirm title="این مسیر حذف شود؟" okText="حذف" cancelText="انصراف" onConfirm={() => persist(routes.filter(x => x.id !== r.id))}>
             <Button size="small" type="link" danger disabled={busy}>حذف</Button></Popconfirm></div>}] : []),
       ]}/>
@@ -90,21 +93,23 @@ export default function StageMaterialPlan({ stages, materials, quantity, isOrder
           <Form.Item name="from" label="از کجا" rules={required}><Select options={[{value:warehouse,label:'انبار'},...options]}/></Form.Item>
           <Form.Item name="to" label="به کجا" rules={required}><Select options={[...options,{value:finishedShelf,label:'قفسهٔ خروجی'}]}/></Form.Item>
         </div>
-        <Form.Item name="material" label="ماده یا قطعهٔ شناسنامه" rules={required}><Select showSearch optionFilterProp="label"
+        <Form.Item name="material" label="ماده یا قطعهٔ شناسنامه" rules={required}><Select disabled={!!editingRoute?.bomGroup} showSearch optionFilterProp="label"
           options={[...choices, ...(editing?.id ? routes.filter(r => r.id === editing.id && r.material !== custom && !choices.some(c => c.value === r.material)).map(r => ({value:r.material,label:r.materialName || 'قطعهٔ قبلی'})) : []),{value:custom,label:'قطعه یا پک با نام مستقل'}]}
           onChange={value => {
             const choice = choices.find(o => o.value === value);
             const item = groups.flatMap(group => [group.raw, ...group.pieces]).find(candidate => candidate.key === value);
             if (choice && item) form.setFieldsValue({unit:choice.unit, perItem:item.quantity, state:item.name,
-              mode:groups.some(group => group.raw.key === value) ? 'bulk' : 'piece'});
+              mode:defaultTransferMode(item.unit)});
           }}/></Form.Item>
         <Form.Item name="state" label="نام و وضعیت هنگام تحویل" rules={[...required,{whitespace:true,message:'نام و وضعیت را وارد کنید.'}]}>
           <Input placeholder="مثلاً بدنهٔ کیف بایگان، لیزرشده" maxLength={160}/></Form.Item>
         <div className="grid grid-cols-3 gap-x-3">
           <Form.Item name="mode" label="شکل تحویل" rules={required}><Select options={[{value:'bulk',label:'فله‌ای'},{value:'piece',label:'قطعه‌ای'}]}/></Form.Item>
-          <Form.Item name="perItem" label="برای یک محصول" rules={required}><InputNumber className="w-full" min={0} /></Form.Item>
-          <Form.Item name="unit" label="واحد" rules={required}><Select options={HARD_CODED_UNIT_OPTIONS}/></Form.Item>
+          <Form.Item name="perItem" label="برای یک محصول" rules={required}><InputNumber disabled={linkedQuantity} className="w-full" min={0} /></Form.Item>
+          <Form.Item name="unit" label="واحد" rules={required}><Select disabled={linkedQuantity} options={HARD_CODED_UNIT_OPTIONS}
+            onChange={unit => form.setFieldsValue({mode:defaultTransferMode(unit)})}/></Form.Item>
         </div>
+        {linkedQuantity && <Alert type="info" message="مقدار و واحد از جدول مواد اولیهٔ شناسنامه خوانده می‌شوند. برای تغییر آن‌ها همان جدول را ویرایش کنید؛ مسیر و شکل تحویل در این فرم قابل تغییر است."/>}
         {issue && <Alert type="error" message={issue}/>}
       </Form>
     </Modal>

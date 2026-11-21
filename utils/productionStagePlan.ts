@@ -1,3 +1,5 @@
+import { normalizeUnitValue } from './unitConversions';
+
 export const warehouse = 'warehouse';
 export const finishedShelf = 'finished-shelf';
 
@@ -14,6 +16,8 @@ export interface PlannedTransfer {
   bomGroup?: string;
   bomIntermediate?: boolean;
   routeCode?: string;
+  modeOverride?: 'bulk' | 'piece';
+  stateOverride?: string;
 }
 
 export interface PlanStage {
@@ -22,6 +26,11 @@ export interface PlanStage {
   title?: string;
   sort_order?: number;
   materialRoutes?: PlannedTransfer[];
+}
+
+// Receipt from a warehouse does not imply bulk: fittings and packs are countable too.
+export function defaultTransferMode(unit: string): PlannedTransfer['mode'] {
+  return ['عدد', 'بسته'].includes(normalizeUnitValue(unit)) ? 'piece' : 'bulk';
 }
 
 export function stageKey(stage: PlanStage, index: number) {

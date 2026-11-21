@@ -1,5 +1,5 @@
 import { bomRouteGroups } from './bomGroupRoutes';
-import { attachRoutes, finishedShelf, planIssue, stageKey, warehouse, type PlanStage, type PlannedTransfer } from './productionStagePlan';
+import { attachRoutes, defaultTransferMode, finishedShelf, planIssue, stageKey, warehouse, type PlanStage, type PlannedTransfer } from './productionStagePlan';
 
 export interface BomExcelRoute {
   code: string;
@@ -64,7 +64,7 @@ export function importBomRoutes(stages: PlanStage[], materials: any[], rows: Bom
       material: linked ? reference!.item.key : 'output:' + row.code,
       materialName: reference?.group.raw.name || '',
       state: linked ? reference!.item.name : row.name,
-      mode: row.kind === 'مصرف ماده' ? 'bulk' : 'piece', unit, perItem: quantity,
+      mode: defaultTransferMode(unit), unit, perItem: quantity,
       ...(reference ? { bomGroup: reference.group.raw.key } : {}),
       ...(!linked && reference ? { bomIntermediate: true } : {}),
     };

@@ -1,4 +1,4 @@
-import { attachRoutes, materialChoices, materialGroupKey, warehouse, type PlanStage, type PlannedTransfer } from './productionStagePlan';
+import { attachRoutes, defaultTransferMode, finishedShelf, materialChoices, materialGroupKey, warehouse, type PlanStage, type PlannedTransfer } from './productionStagePlan';
 import { convertBetweenUnits } from './unitConversions';
 
 interface BomItem { key:string; name:string; materialName:string; unit:string; quantity:number }
@@ -58,7 +58,41 @@ export function refreshBomRoutes(routes:PlannedTransfer[], groups:BomRouteGroup[
     if (r.bomIntermediate) return items.has(r.bomGroup) ? [r] : [];
     const item=items.get(r.material);
     if (!item) return [];
-    return [{...r,state:item.name, materialName:item.materialName, perItem:item.quantity,unit:item.unit}];
+    return [{...r,state:r.stateOverride || item.name, materialName:item.materialName, perItem:item.quantity,unit:item.unit,mode:r.modeOverride || defaultTransferMode(item.unit)}];
+  });
+}
+
+export function hasBomQuantity(route?: PlannedTransfer) {
+  return !!route?.bomGroup && !route.bomIntermediate;
+}
+
+export function editBomRoute(old: PlannedTransfer, values: PlannedTransfer, groups: BomRouteGroup[]): PlannedTransfer {
+  const next = {...old, ...values, id:old.id, state:values.state.trim()};
+  if (!old.bomGroup) return next;
+  next.bomGroup = old.bomGroup;
+  next.material = old.material;
+  next.bomIntermediate = old.bomIntermediate;
+  next.routeCode = old.routeCode;
+  if (!hasBomQuantity(old)) return next;
+  const group = groups.find(g=>g.raw.key===old.bomGroup);
+  const item = group && [group.raw,...group.pieces].find(p=>p.key===old.material);
+  if (!item) throw new Error('مرجع این مسیر در شناسنامه پیدا نشد. صفحه را تازه کنید.');
+  next.perItem = item.quantity;
+  next.unit = item.unit;
+  next.modeOverride = values.mode === defaultTransferMode(item.unit) ? undefined : values.mode;
+  next.stateOverride = next.state === item.name ? undefined : next.state;
+  return refreshBomRoutes([next],groups)[0];
+}
+
+export function incompleteBomGroups(groups: BomRouteGroup[], routes: PlannedTransfer[]) {
+  const linked = new Set(routes.filter(r=>r.bomGroup).map(r=>r.material));
+  const finalAssembly = new Set(routes.filter(r=>r.to===finishedShelf).map(r=>r.from));
+  return groups.filter(group=>{
+    if (!linked.has(group.raw.key) || group.pieces.every(piece=>linked.has(piece.key))) return false;
+    // Direct ingredients of a final pack have no separate manufactured piece output.
+    const transformed = group.pieces.some(piece=>linked.has(piece.key)) || routes.some(r=>r.bomGroup===group.raw.key&&r.bomIntermediate);
+    const receipts = routes.filter(r=>r.material===group.raw.key&&r.from===warehouse);
+    return transformed || !receipts.length || !receipts.every(r=>finalAssembly.has(r.to));
   });
 }
 
@@ -96,7 +130,9 @@ export function connectBomGroup(routes:PlannedTransfer[], group:BomRouteGroup, r
       const match=matches[0];
       if (match) replaced.add(match.id);
       linked.push({id:prior?.id || match?.id || crypto.randomUUID(),from,to,material:item.key, materialName:item.materialName,
-        state:item.name,mode:raw?'bulk':'piece',unit:item.unit,perItem:item.quantity,bomGroup:group.raw.key,
+        state:prior?.stateOverride || item.name,mode:prior?.modeOverride || defaultTransferMode(item.unit),unit:item.unit,perItem:item.quantity,bomGroup:group.raw.key,
+        ...(prior?.modeOverride ? {modeOverride:prior.modeOverride} : {}),
+        ...(prior?.stateOverride ? {stateOverride:prior.stateOverride} : {}),
         ...(prior?.routeCode ? {routeCode:prior.routeCode} : {})});
     }
   }
