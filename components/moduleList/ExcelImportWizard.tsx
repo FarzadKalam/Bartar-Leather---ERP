@@ -26,6 +26,7 @@ import { FieldNature, FieldType, ModuleDefinition, ModuleField } from "../../typ
 import { supabase } from "../../supabaseClient";
 import { attachTaskCompletionIfNeeded } from "../../utils/taskCompletion";
 import { buildModuleExcelTemplate } from "../../utils/excelImportTemplates";
+import { importBomRoutes } from "../../utils/bomExcelRoutes";
 import {
   buildVariantName,
   buildVariantSignature,
@@ -566,6 +567,13 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
 
   const handleDownloadTemplate = useCallback(async () => {
     try {
+      if (moduleConfig.id === "production_boms") {
+        const link = document.createElement("a");
+        link.href = "/templates/production-bom.xlsx";
+        link.download = "نمونه شناسنامه و گردش تولید.xlsx";
+        link.click();
+        return;
+      }
       const XLSX = await import("xlsx");
       const template = buildModuleExcelTemplate(moduleConfig);
       const workbook = XLSX.utils.book_new();
@@ -886,6 +894,8 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
   const handleProductionBomTemplateImport = useCallback(async () => {
     const bomMatrix = findSheetMatrix(workbookSheets, "BOM");
     const materialMatrix = findSheetMatrix(workbookSheets, "مواد اولیه");
+    const routeMatrix = findSheetMatrix(workbookSheets, "گردش قطعات");
+    const routeRows = routeMatrix ? matrixToSheetData(routeMatrix, true).rows.filter(buildRowHasAnyValue) : [];
     const draftStagesMatrix = findSheetMatrixByCandidates(workbookSheets, [
       "مراحل پیش نویس تولید",
       "مراحل پیش‌نویس تولید",
@@ -903,6 +913,11 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
       : [];
     if (!bomRows.length) {
       message.error("در شیت BOM داده‌ای پیدا نشد.");
+      return;
+    }
+    const bomKeys = new Set(bomRows.map(row => getCellValue(row, "کلید BOM", "عنوان مدل")));
+    if (routeRows.some(row => !bomKeys.has(getCellValue(row, "کلید BOM")))) {
+      message.error("کلید BOM بعضی ردیف‌های گردش قطعات در شیت BOM تعریف نشده است.");
       return;
     }
 
@@ -1062,7 +1077,8 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
           specs[meta.key] = meta.multi ? splitByDelimiters(value) : value;
         });
 
-        const groupKey = `${category}:${JSON.stringify(specs)}`;
+        const groupCode = getCellValue(row, "کد گروه");
+        const groupKey = `${category}:${JSON.stringify(specs)}:${groupCode}`;
         if (!materialsByBom.has(bomKey)) materialsByBom.set(bomKey, new Map<string, any>());
         const bomMaterials = materialsByBom.get(bomKey)!;
         if (!bomMaterials.has(groupKey)) {
@@ -1070,6 +1086,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
             key: createImportKey("grid"),
             collapsed: false,
             header: {
+              bom_code: groupCode,
               category,
               selected_product_id: null,
               selected_product_name: null,
@@ -1084,6 +1101,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
         }
 
         bomMaterials.get(groupKey).pieces.push({
+          bom_code: getCellValue(row, "کد قطعه"),
           key: createImportKey("piece"),
           name: getCellValue(row, "نام تکه") || "مصرف",
           length: parseNumber(getCellValue(row, "طول")) || 0,
@@ -1108,6 +1126,7 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
         const bomKey = getCellValue(row, "کلید BOM", "عنوان مدل");
         const stageName = getCellValue(row, "عنوان مرحله", "نام مرحله", "مرحله", "name", "title");
         if (!bomKey || !stageName) return;
+        if (routeMatrix && ["انبار", "قفسهٔ خروجی"].includes(stageName)) return;
 
         if (!draftStagesByBom.has(bomKey)) draftStagesByBom.set(bomKey, []);
         const currentStages = draftStagesByBom.get(bomKey)!;
@@ -1157,22 +1176,31 @@ const ExcelImportWizard: React.FC<ExcelImportWizardProps> = ({
         const statusOption = statusField?.options?.find(
           (option) => normalizeKey(option.label) === normalizeKey(statusRaw) || normalizeKey(option.value) === normalizeKey(statusRaw)
         );
-        const grid_materials = Array.from(materialsByBom.get(bomKey)?.values() || []).map(calculateGridRow);
-        const payload = {
-          name,
-          status: statusOption?.value || statusRaw || "active",
-          product_category: getCellValue(row, "دسته بندی محصول") || null,
-          model_name: getCellValue(row, "نام مدل") || null,
-          grid_materials,
-          ...(draftStagesMatrix ? { production_stages_draft: draftStagesByBom.get(bomKey) || [] } : {}),
-        };
-
         try {
-          const { data: existing } = await withTimeout(
+          const grid_materials = Array.from(materialsByBom.get(bomKey)?.values() || []).map(calculateGridRow);
+          const importedRoutes = routeRows.filter(route => getCellValue(route, "کلید BOM") === bomKey).map(route => ({
+            code: getCellValue(route, "کد مسیر"), kind: getCellValue(route, "نوع"),
+            reference: getCellValue(route, "مرجع شناسنامه"), name: getCellValue(route, "نام خروجی"),
+            from: getCellValue(route, "مبدأ"), to: getCellValue(route, "مقصد"),
+            quantity: parseNumber(getCellValue(route, "مقدار برای یک محصول")), unit: getCellValue(route, "واحد"),
+          }));
+          const stages = draftStagesByBom.get(bomKey) || [];
+          if (routeMatrix && !draftStagesMatrix) throw new Error("ورود گردش قطعات به شیت مراحل پیش نویس تولید نیاز دارد.");
+          const payload = {
+            name,
+            status: statusOption?.value || statusRaw || "active",
+            product_category: getCellValue(row, "دسته بندی محصول") || null,
+            model_name: getCellValue(row, "نام مدل") || null,
+            grid_materials,
+            ...(draftStagesMatrix ? { production_stages_draft: routeMatrix ? importBomRoutes(stages, grid_materials, importedRoutes) : stages } : {}),
+          };
+
+          const { data: existing, error: lookupError } = await withTimeout(
             supabase.from(moduleConfig.table).select("id").eq("name", name).limit(1),
             20000,
             `بررسی BOM تکراری ردیف ${idx + 2}`
           );
+          if (lookupError) throw lookupError;
           const existingId = (existing && existing[0]?.id) ? String(existing[0].id) : "";
           if (existingId) {
             const { error } = await withTimeout(

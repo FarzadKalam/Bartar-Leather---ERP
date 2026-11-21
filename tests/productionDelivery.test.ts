@@ -1,5 +1,6 @@
 import { bomRouteGroups, connectBomGroup, refreshBomRoutes } from '../utils/bomGroupRoutes';
 import './productionStageExecution.test';
+import './bomExcelRoutes.test';
 import { attachRoutes, expectedAmount, materialChoices, planIssue, warehouse, finishedShelf, type PlannedTransfer } from '../utils/productionStagePlan';
 import { finalStageConsumption } from '../utils/finalStageConsumption';
 import { planProductionReturn } from '../utils/productionReturn';

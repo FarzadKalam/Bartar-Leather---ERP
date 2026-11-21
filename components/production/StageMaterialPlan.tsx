@@ -55,7 +55,7 @@ export default function StageMaterialPlan({ stages, materials, quantity, isOrder
     if (!editing || !canEdit) return;
     if (editing.snapshot !== snapshot) { setIssue('مراحل تغییر کرده‌اند. فرم را دوباره باز کنید.'); return; }
     const old = routes.find(r => r.id === editing.id);
-    const row = {...values, state:values.state.trim(), id:old?.id || crypto.randomUUID(),
+    const row = {...old, ...values, state:values.state.trim(), id:old?.id || crypto.randomUUID(),
       materialName: choices.find(o => o.value === values.material)?.label || (old?.material === values.material ? old.materialName : '')};
     void persist(old ? routes.map(r => r.id === row.id ? row : r) : [...routes,row]);
   }
@@ -74,7 +74,7 @@ export default function StageMaterialPlan({ stages, materials, quantity, isOrder
       columns={[
         {title:'مبدأ', dataIndex:'from', render:v => names.get(v) || 'مرحلهٔ حذف‌شده'},
         {title:'مقصد', dataIndex:'to', render:v => names.get(v) || 'مرحلهٔ حذف‌شده'},
-        {title:'ماده یا قطعه', render:(_,r) => <>{r.materialName && <div className="text-xs text-gray-500">{r.materialName}</div>}{r.state}</>},
+        {title:'ماده یا قطعه', render:(_,r) => <>{r.materialName && <div className="text-xs text-gray-500">{r.materialName}</div>}{r.state}{r.routeCode && <span className="mr-2 text-xs" dir="ltr">{r.routeCode}</span>}</>},
         {title:'شکل تحویل', render:(_,r) => r.mode === 'bulk' ? 'فله‌ای' : 'قطعه‌ای'},
         {title:'برای یک محصول', render:(_,r) => format(r.perItem) + ' ' + r.unit},
         ...(isOrder ? [{title:'برای سفارش (' + format(quantity) + ' محصول)', render:(_:unknown,r:PlannedTransfer) => format(expectedAmount(r,quantity)) + ' ' + r.unit}] : []),
@@ -92,7 +92,12 @@ export default function StageMaterialPlan({ stages, materials, quantity, isOrder
         </div>
         <Form.Item name="material" label="ماده یا قطعهٔ شناسنامه" rules={required}><Select showSearch optionFilterProp="label"
           options={[...choices, ...(editing?.id ? routes.filter(r => r.id === editing.id && r.material !== custom && !choices.some(c => c.value === r.material)).map(r => ({value:r.material,label:r.materialName || 'قطعهٔ قبلی'})) : []),{value:custom,label:'قطعه یا پک با نام مستقل'}]}
-          onChange={value => { const choice = choices.find(o => o.value === value); if (choice) form.setFieldsValue({unit:choice.unit}); }}/></Form.Item>
+          onChange={value => {
+            const choice = choices.find(o => o.value === value);
+            const item = groups.flatMap(group => [group.raw, ...group.pieces]).find(candidate => candidate.key === value);
+            if (choice && item) form.setFieldsValue({unit:choice.unit, perItem:item.quantity, state:item.name,
+              mode:groups.some(group => group.raw.key === value) ? 'bulk' : 'piece'});
+          }}/></Form.Item>
         <Form.Item name="state" label="نام و وضعیت هنگام تحویل" rules={[...required,{whitespace:true,message:'نام و وضعیت را وارد کنید.'}]}>
           <Input placeholder="مثلاً بدنهٔ کیف بایگان، لیزرشده" maxLength={160}/></Form.Item>
         <div className="grid grid-cols-3 gap-x-3">

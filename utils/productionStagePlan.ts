@@ -12,6 +12,8 @@ export interface PlannedTransfer {
   unit: string;
   perItem: number;
   bomGroup?: string;
+  bomIntermediate?: boolean;
+  routeCode?: string;
 }
 
 export interface PlanStage {
@@ -37,7 +39,8 @@ export function materialChoices(materials: any[]) {
     const header = row.header || row;
     const key = materialGroupKey(row,i);
     const label = header.selected_product_name || row.product_name || categories[header.category] || ('مادهٔ ' + (i + 1).toLocaleString('fa-IR'));
-    const unit = header.selected_product_main_unit || header.main_unit || row.pieces?.[0]?.main_unit || 'عدد';
+    const unit = row.pieces?.find((piece: any) => piece.main_unit)?.main_unit
+      || header.selected_product_main_unit || header.main_unit || '';
     choices.push({value:JSON.stringify([key]), label, unit});
     for (const [j, piece] of (row.pieces || []).entries()) {
       if (piece.name?.trim()) choices.push({value:JSON.stringify([key,String(piece.key ?? piece.id ?? j)]), label:label + ' / ' + piece.name, unit:'عدد'});
