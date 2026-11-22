@@ -40,6 +40,8 @@ import { PRODUCTION_MESSAGES } from '../utils/productionMessages';
 import { getRecordTitle } from '../utils/recordTitle';
 import { getErrorMessage } from '../utils/errorHandling';
 import { commitProduction, prepareProductionMoves } from '../utils/productionTransaction';
+import { saveReceiptDrafts, productionTransitShelf } from '../utils/productionReceipts';
+import ProductionReceiptBoard from '../components/production/ProductionReceiptBoard';
 import { finalStageConsumption } from '../utils/finalStageConsumption';
 import { planProductionReturn } from '../utils/productionReturn';
 import type { ProductionMove } from '../utils/productionWorkflow';
@@ -970,6 +972,7 @@ const ModuleShow: React.FC = () => {
     let inventoryQuery = supabase
       .from('product_inventory')
       .select('product_id, shelf_id, stock, bundle_id, product_bundles:bundle_id(bundle_number)')
+      .neq('shelf_id', await productionTransitShelf())
       .in('product_id', productIds);
     if (!allowNegativeInventory) {
       inventoryQuery = inventoryQuery.gt('stock', 0);
@@ -2655,7 +2658,7 @@ const ModuleShow: React.FC = () => {
       });
       const firstProductionShelfId = moves[0]?.to_shelf_id || null;
       const nowIso = new Date().toISOString();
-      await commitProduction({kind: 'deliver', moves: moveResults, transfers, orders: [{ id: id!, revision: data.production_revision || 0, patch: {
+      await saveReceiptDrafts({kind: 'deliver', moves: moveResults, transfers, orders: [{ id: id!, revision: data.production_revision || 0, patch: {
         status: 'in_progress',
         production_shelf_id: firstProductionShelfId,
         production_moves: moves,
@@ -2667,7 +2670,7 @@ const ModuleShow: React.FC = () => {
         .catch((error) => console.warn('Could not refresh destination bundles', error));
       await fetchRecord();
       clearStartDraft();
-      msg.success('تولید آغاز شد');
+      msg.success('پیش‌نویس تحویل ذخیره شد. ارسال و دریافت واقعی را در بخش «ارسال و دریافت مواد» تأیید کنید.');
       setProductionModal(null);
     } catch (e: any) {
       msg.error(e.message || 'خطا در شروع تولید');
@@ -2738,17 +2741,8 @@ const ModuleShow: React.FC = () => {
       setStatusLoading(true);
       let returns: ProductionMove[] = [];
       if (stopMode === 'return') {
-        const logs: any[] = [];
-        for (let offset = 0; ; offset += 500) {
-          let query = supabase.from('stock_transfers').select('id,created_at,from_shelf_id,to_shelf_id,product_id,source_bundle_id,target_bundle_id,bundle_id,delivered_qty,stage_task_id,source_task_id,destination_task_id,notes')
-            .eq('production_order_id', id).in('transfer_type', ['production','production_stage','waste'])
-            .order('created_at').order('production_event_index', { nullsFirst: true }).order('id').range(offset, offset + 499);
-          if (data.production_returned_at) query = query.gt('created_at', data.production_returned_at);
-          const { data: rows, error } = await query;
-          if (error) throw error;
-          logs.push(...(rows || []));
-          if ((rows || []).length < 500) break;
-        }
+        const { data: logs, error } = await supabase.rpc('production_return_history', { order_id: id, since_at: data.production_returned_at || null });
+        if (error) throw error;
         returns = planProductionReturn(moves, logs);
       }
       if (stopMode === 'hold') {
@@ -3150,6 +3144,7 @@ const ModuleShow: React.FC = () => {
 
   return (
     <div className="p-4 pt-1 md:p-6 md:pt-1 max-w-[1600px] mx-auto pb-20 transition-all overflow-hidden pl-0 md:pl-16 scrollbar-wide">
+      {(moduleId === 'production_orders' || moduleId === 'tasks') && (moduleId === 'production_orders' ? id : data?.related_production_order) && <ProductionReceiptBoard orderIds={[moduleId === 'production_orders' ? id! : data.related_production_order]} onChanged={() => { void fetchRecord(); }} />}
       <div className="mb-4 md:mb-0">
         <RelatedSidebar
           moduleConfig={moduleConfig}

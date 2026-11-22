@@ -430,3 +430,4 @@ assert.deepEqual(connectBomGroup(both,groups[1],'1',pairsFor(groups[1])),both);
 leatherRows[0].pieces[0].quantity=3;
 leatherRows[0].pieces[0].final_usage=1.05;
 assert.deepEqual(refreshBomRoutes(both,bomRouteGroups(leatherRows)).map(r=>expectedAmount(r,5)),[7.75,15,10,5,6,10,10,5]);
+import './productionReceiptModel.test';

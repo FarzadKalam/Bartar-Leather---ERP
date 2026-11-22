@@ -38,7 +38,10 @@ import {
 import { resolveUnitConversionWidthMm } from '../utils/unitConversions';
 import { isProductionOrderPanelExpanded } from '../utils/productionOrderPanels';
 import { toPersianNumber } from '../utils/persianNumberFormatter';
-import { commitProduction, prepareProductionMoves, type TaskChange, type OrderChange } from '../utils/productionTransaction';
+import { prepareProductionMoves, type TaskChange, type OrderChange } from '../utils/productionTransaction';
+import { saveReceiptDrafts, confirmLegacyReceipt, productionTransitShelf } from '../utils/productionReceipts';
+import { materialGroupKey, stageKey, warehouse } from '../utils/productionStagePlan';
+import ProductionReceiptBoard from '../components/production/ProductionReceiptBoard';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
 import { getAllowNegativeInventory } from '../utils/companySettings';
@@ -564,7 +567,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
   }, []);
 
   const loadSelectableOrders = useCallback(async (currentSelectedIds: string[]) => {
-    const selectFields = 'id,name,system_code,status,quantity,bom_id,grid_materials,production_moves,production_shelf_id,production_stages_draft';
+    const selectFields = 'id,name,system_code,status,quantity,bom_id,grid_materials,production_moves,production_shelf_id,production_stages_draft,production_revision';
     const { data: pendingRows, error: pendingError } = await supabase
       .from('production_orders')
       .select(selectFields)
@@ -976,100 +979,9 @@ const ProductionGroupOrderWizard: React.FC = () => {
     if (!startFormEditorTaskId || !startFormEditorFormId) return;
     setStartFormEditorLoading(true);
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const authUser = authData?.user || null;
-      const userId = String(currentUserId || authUser?.id || '').trim() || null;
-      const userName = String(authUser?.user_metadata?.full_name || authUser?.email || 'کاربر');
-
-      const { data: freshTask, error: taskError } = await supabase
-        .from('tasks')
-        .select('id, recurrence_info, production_shelf_id, related_production_order')
-        .eq('id', startFormEditorTaskId)
-        .single();
-      if (taskError) throw taskError;
-
-      const recurrence = parseRecurrenceInfo(freshTask?.recurrence_info);
-      const existingHandover = recurrence?.production_handover && typeof recurrence.production_handover === 'object'
-        ? recurrence.production_handover
-        : {};
-      const existingFormsRaw = Array.isArray(existingHandover?.forms)
-        ? existingHandover.forms
-        : (Array.isArray(existingHandover?.groups)
-          ? [{
-              id: existingHandover?.activeFormId || startFormEditorFormId,
-              sourceTaskId: existingHandover?.sourceTaskId || null,
-              sourceStageName: existingHandover?.sourceStageName || null,
-              sourceShelfId: existingHandover?.sourceShelfId || null,
-              targetShelfId: existingHandover?.targetShelfId || null,
-              direction: existingHandover?.direction || 'incoming',
-              giver: existingHandover?.giver || null,
-              receiver: existingHandover?.receiver || null,
-              giverConfirmation: existingHandover?.giverConfirmation || null,
-              receiverConfirmation: existingHandover?.receiverConfirmation || null,
-              groups: existingHandover?.groups || [],
-              createdAt: existingHandover?.updatedAt || null,
-              updatedAt: existingHandover?.updatedAt || null,
-            }]
-          : []);
-      if (!existingFormsRaw.length) {
-        msg.error('فرم تحویل برای این مرحله یافت نشد.');
-        return;
-      }
-
-      const nowIso = new Date().toISOString();
-      let updatedForm: any = null;
-      const nextForms = existingFormsRaw.map((form: any) => {
-        if (String(form?.id || '') !== String(startFormEditorFormId)) return form;
-        const nextForm = { ...form };
-        const nextConfirm = {
-          confirmed: true,
-          userId,
-          userName,
-          at: nowIso,
-        };
-        if (side === 'giver') nextForm.giverConfirmation = nextConfirm;
-        if (side === 'receiver') nextForm.receiverConfirmation = nextConfirm;
-        nextForm.updatedAt = nowIso;
-        updatedForm = nextForm;
-        return nextForm;
-      });
-      if (!updatedForm) {
-        msg.error('فرم انتخاب‌شده در مرحله مقصد یافت نشد.');
-        return;
-      }
-
-      const nextHandover = {
-        ...existingHandover,
-        direction: updatedForm?.direction || existingHandover?.direction || 'incoming',
-        sourceTaskId: updatedForm?.sourceTaskId || existingHandover?.sourceTaskId || null,
-        destinationTaskId: updatedForm?.destinationTaskId || existingHandover?.destinationTaskId || null,
-        sourceStageName: updatedForm?.sourceStageName || existingHandover?.sourceStageName || 'شروع تولید',
-        sourceShelfId: updatedForm?.sourceShelfId || existingHandover?.sourceShelfId || null,
-        targetShelfId: updatedForm?.targetShelfId || existingHandover?.targetShelfId || startFormEditorTargetShelfId || null,
-        giver: updatedForm?.giver || existingHandover?.giver || null,
-        receiver: updatedForm?.receiver || existingHandover?.receiver || null,
-        groups: Array.isArray(updatedForm?.groups) ? updatedForm.groups : (existingHandover?.groups || []),
-        wasteByProduct: updatedForm?.wasteByProduct || existingHandover?.wasteByProduct || {},
-        giverConfirmation: updatedForm?.giverConfirmation || existingHandover?.giverConfirmation || { confirmed: false },
-        receiverConfirmation: updatedForm?.receiverConfirmation || existingHandover?.receiverConfirmation || { confirmed: false },
-        forms: nextForms,
-        activeFormId: String(updatedForm?.id || startFormEditorFormId),
-        updatedAt: nowIso,
-      };
-
-      const nextRecurrence = {
-        ...recurrence,
-        production_handover: nextHandover,
-      };
-      await commitProduction({ kind: 'handover', orders: [{ id: freshTask.related_production_order }],
-        tasks: [{ id: startFormEditorTaskId, previous: freshTask.recurrence_info ?? null,
-          recurrence: nextRecurrence, shelf: freshTask.production_shelf_id }] });
-
-      if (side === 'giver') {
-        setStartFormEditorGiverConfirmation(updatedForm?.giverConfirmation || { confirmed: false });
-      } else {
-        setStartFormEditorReceiverConfirmation(updatedForm?.receiverConfirmation || { confirmed: false });
-      }
+      const confirmation = await confirmLegacyReceipt(startFormEditorTaskId, startFormEditorFormId, side);
+      if (side === 'giver') setStartFormEditorGiverConfirmation(confirmation);
+      else setStartFormEditorReceiverConfirmation(confirmation);
       await loadStartStageContext();
       msg.success('تایید فرم تحویل ثبت شد.');
     } catch (error: any) {
@@ -1795,6 +1707,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
     let inventoryQuery = supabase
       .from('product_inventory')
       .select('product_id, shelf_id, stock, bundle_id, product_bundles:bundle_id(bundle_number)')
+      .neq('shelf_id', await productionTransitShelf())
       .in('product_id', ids);
     if (!allowNegativeInventory) {
       inventoryQuery = inventoryQuery.gt('stock', 0);
@@ -1940,9 +1853,20 @@ const ProductionGroupOrderWizard: React.FC = () => {
     const orderIds = Array.from(new Set(requirements.map((req) => String(req?.orderId || '')).filter(Boolean)));
     if (orderIds.length !== 1) return null;
     const orderId = orderIds[0];
-    const option = startStageTaskOptions.find((item) => String(item.orderId) === orderId);
-    return option?.value || null;
-  }, [startStageTaskOptions]);
+    const stages = selectedOrderMap.get(orderId)?.production_stages_draft || [];
+    const destinations = new Set<string>();
+    for (const req of requirements) {
+      const index = Number(req.rowIndex), row = (orderRowsMap[orderId] || [])[index];
+      if (!row) return null;
+      const material = JSON.stringify([materialGroupKey(row, index)]);
+      for (const route of stages.flatMap((s: any) => s.materialRoutes || []))
+        if (route.from === warehouse && route.material === material) destinations.add(route.to);
+    }
+    if (destinations.size !== 1) return null;
+    const stage = stages.find((s: any, i: number) => stageKey(s, i) === [...destinations][0]);
+    const options = startStageTaskOptions.filter(item => item.orderId === orderId && item.stageName === (stage?.name || stage?.title));
+    return options.length === 1 ? options[0].value : null;
+  }, [startStageTaskOptions, selectedOrderMap, orderRowsMap]);
 
   const buildPreviousRowsByGroup = useCallback(() => {
     const map = new Map<string, Array<StartMaterialDeliveryRow & { __readonly: true }>>();
@@ -2517,7 +2441,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
           ...recurrence,
           production_handover: nextHandover,
         };
-        taskChanges.push({ id: taskId, previous: task.recurrence_info ?? null, shelf: task.production_shelf_id, recurrence: nextRecurrence });
+        taskChanges.push({ id: taskId, orderId: task.related_production_order, previous: task.recurrence_info ?? null, shelf: task.production_shelf_id, recurrence: nextRecurrence });
       }
 
       const transferPayload: any[] = [];
@@ -2563,19 +2487,17 @@ const ProductionGroupOrderWizard: React.FC = () => {
         orderChanges.push({ id: orderId, revision: currentOrder?.production_revision || 0, patch: payload });
       }
 
-      await commitProduction({ kind: 'deliver', groupId, orders: orderChanges, tasks: taskChanges,
+      await saveReceiptDrafts({ kind: 'deliver', requestKey: startDeliveryBatchId, groupId, orders: orderChanges, tasks: taskChanges,
         transfers: transferPayload, moves: moveResults });
       void loadDestinationBundleOptions(supabase as any)
         .then(setDestinationBundleOptions)
         .catch((error) => console.warn('Could not refresh destination bundles', error));
-      setGroupStatus('in_progress');
-      setOrderRowsMap(nextRowsByOrder);
       setCurrentStep(3);
       await loadSelectedOrders(selectedOrderIds, true);
       await loadStartStageContext();
       setStartFormMode('list');
       if (startDeliveryDraftKey) clearDurableDraft(startDeliveryDraftKey);
-      msg.success('فرم تحویل مواد اولیه ثبت شد.');
+      msg.success('پیش‌نویس ذخیره شد؛ در بخش «ارسال و دریافت مواد» ارسال را تأیید کنید. موجودی هنوز تغییر نکرده است.');
     } catch (err: any) {
       msg.error(err?.message || 'خطا در شروع تولید گروهی');
     } finally {
@@ -3031,19 +2953,24 @@ const ProductionGroupOrderWizard: React.FC = () => {
         render: (_: any, record: any) => (
           <div className="flex items-center gap-1 flex-wrap">
             {(record?.members || [record]).map((member: any) => (
-              <Tag key={member.id} color={member?.giverConfirmed && member?.receiverConfirmed ? 'green' : 'orange'}>
+              <Button key={member.id} size="small" onClick={(event) => { event.stopPropagation(); void openStartFormEditor(member); }}>
                 {member?.stageName || 'مرحله'}: {member?.giverConfirmed && member?.receiverConfirmed ? 'تکمیل' : 'در انتظار امضا'}
-              </Tag>
+              </Button>
             ))}
           </div>
         ),
       },
     ],
-    []
+    [openStartFormEditor]
   );
 
   const renderStartStep = () => (
     <Card className="rounded-2xl">
+      <ProductionReceiptBoard orderIds={selectedOrderIds} onChanged={() => {
+        void loadStartStageContext(); void loadSelectedOrders(selectedOrderIds, true);
+        if (groupId) void supabase.from('production_group_orders').select('status').eq('id', groupId).single()
+          .then(({ data: refreshed }) => { if (refreshed?.status) setGroupStatus(refreshed.status); });
+      }} />
       <div className="space-y-4">
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
           تعداد سفارش انتخاب شده: <span className="font-semibold">{toPersianNumber(selectedOrderRows.length)}</span>
@@ -3147,6 +3074,7 @@ const ProductionGroupOrderWizard: React.FC = () => {
         ) : null}
         <TaskHandoverModal
           open={startFormEditorOpen}
+          legacy
           loading={startFormEditorLoading}
           locked
           taskName={startFormEditorTaskName}

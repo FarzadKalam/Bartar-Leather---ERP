@@ -34,6 +34,7 @@ jobs:
           npm install --prefix .tmp-tests/pg-validation --no-save --package-lock=false --ignore-scripts @electric-sql/pglite@0.5.11
           node tests/productionOperations.test.mjs
           node tests/productionStageShelfGuard.test.mjs
+          node tests/productionReceipts.test.mjs
 
       - name: Build
         env:

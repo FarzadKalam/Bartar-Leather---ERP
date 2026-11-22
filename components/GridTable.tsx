@@ -1,4 +1,4 @@
-import { calculateMaterialRow } from '../utils/materialRowCalculations';
+import { calculateMaterialRow, materialRowsForPersistence } from '../utils/materialRowCalculations';
 import ResizableTable from './ResizableTable';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Typography, message } from 'antd';
@@ -607,7 +607,8 @@ const GridTable: React.FC<GridTableProps> = ({
         }
       });
     }
-    const payload = (rows || []).map(({ key, ...rest }: any) => rest);
+    // BOM routes reference these stable keys. Removing one silently detaches material destinations.
+    const payload = materialRowsForPersistence(rows || [], moduleId);
     const { error } = await supabase.from(moduleId).update({ [block.id]: payload }).eq('id', recordId);
     if (error) throw error;
     setData(payload);

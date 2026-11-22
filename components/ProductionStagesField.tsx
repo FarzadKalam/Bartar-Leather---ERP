@@ -27,7 +27,9 @@ import persian from 'react-date-object/calendars/persian';
 import persian_fa from 'react-date-object/locales/persian_fa';
 import gregorian from 'react-date-object/calendars/gregorian';
 import gregorian_en from 'react-date-object/locales/gregorian_en';
-import { commitProduction, prepareProductionMoves } from '../utils/productionTransaction';
+import { prepareProductionMoves } from '../utils/productionTransaction';
+import { saveReceiptDrafts, confirmLegacyReceipt, productionTransitShelf } from '../utils/productionReceipts';
+import ProductionReceiptBoard from './production/ProductionReceiptBoard';
 import { type ProductionMove } from '../utils/productionWorkflow';
 import { CREATE_NEW_BUNDLE_VALUE, USE_SOURCE_BUNDLE_VALUE, hasTargetBundleSelection, isCreateNewBundleValue, isUseSourceBundleValue } from '../utils/productionBundles';
 import { loadDestinationBundleOptions, type DestinationBundleOption } from '../utils/destinationBundleOptions';
@@ -956,6 +958,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       const { data: bundleRows } = await supabase
         .from('product_inventory')
         .select('product_id, shelf_id, stock, bundle_id, product_bundles:bundle_id(bundle_number)')
+        .neq('shelf_id', await productionTransitShelf())
         .in('product_id', productIds)
         .gt('stock', 0);
       (bundleRows || []).forEach((row: any) => {
@@ -1705,6 +1708,14 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   const saveHandover = useCallback(async (confirmSide?: StageHandoverSide) => {
     if (!handoverContext || !handoverTask) return false;
+    if (confirmSide && activeHandoverFormId && handoverForms.some(f => f.id === activeHandoverFormId)) {
+      try {
+        const confirmation = await confirmLegacyReceipt(handoverContext.taskId, activeHandoverFormId, confirmSide);
+        setHandoverContext(previous => previous ? { ...previous, [`${confirmSide}Confirmation`]: confirmation } : previous);
+        message.success('تأیید سابقه ثبت شد؛ موجودی دوباره منتقل نشد.');
+        return true;
+      } catch (error: any) { message.error(error.message); return false; }
+    }
 
     const currentTaskId = String(handoverContext.taskId);
     const lineId = handoverTask?.production_line_id ? String(handoverTask.production_line_id) : null;
@@ -1855,7 +1866,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       if (hasRowWithoutTargetBundle) {
         throw new Error('برای هر ردیفِ تحویل مرحله‌ای، بسته تحویل مقصد باید مشخص باشد.');
       }
-      const nextTotalsByProduct = toGroupTotals(effectiveGroups as any);
       const previousBundleTotals = toGroupBundleTotals(previousGroups as any);
       const nextBundleTotals = toGroupBundleTotals(effectiveGroups as any);
 
@@ -2251,53 +2261,13 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         production_handover: nextHandover,
       };
 
-      const updatePayload: any = {
-        recurrence_info: nextRecurrence,
-        production_shelf_id: freshTask?.production_shelf_id || (effectiveDirection === 'outgoing' ? effectiveSourceShelfId : effectiveTargetShelfId) || null,
-      };
-      await commitProduction({ kind: 'handover', orders: [{ id: handoverContext.orderId }],
+      await saveReceiptDrafts({ kind: 'handover', orders: [{ id: handoverContext.orderId }],
         moves: movementResults, deltas, transfers: transferLogs, tasks: [{ id: currentTaskId,
           previous: freshTask?.recurrence_info ?? null, shelf: freshTask?.production_shelf_id || null, recurrence: nextRecurrence }] });
-        void loadDestinationBundleOptions(supabase as any)
-          .then(setDestinationBundleOptions)
-          .catch((error) => console.warn('Could not refresh destination bundles', error));
-      const updatedTask = {
-        ...freshTask,
-        ...updatePayload,
-        recurrence_info: nextRecurrence,
-      };
-      setTasks((prev) => prev.map((item: any) => (
-        String(item?.id) === String(handoverContext.taskId)
-          ? {
-              ...item,
-              recurrence_info: nextRecurrence,
-              production_shelf_id: updatePayload.production_shelf_id,
-            }
-          : item
-      )));
-      setHandoverTask(updatedTask);
-      setStageShelfLocked((previous) => previous || effectiveDirection === 'incoming');
-      setHandoverForms(nextForms as StageHandoverForm[]);
-      setHandoverGroups(persistedGroups as StageHandoverGroup[]);
-      setActiveHandoverFormId(formId);
-      setHandoverContext((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          sourceTaskId: effectiveSourceTaskId,
-          sourceStageName: effectiveSourceStageName,
-          sourceShelfId: effectiveSourceShelfId,
-          targetShelfId: handoverContext.targetShelfId || effectiveTargetShelfId,
-          groups: prev.groups,
-          previousTotalsByProduct: nextTotalsByProduct,
-          previousWasteByProduct: finalWasteByProduct,
-          previousWasteBundleByProduct: finalWasteBundleByProduct,
-          giverConfirmation: nextGiverConfirmation,
-          receiverConfirmation: nextReceiverConfirmation,
-        };
-      });
-      message.success(confirmSide ? 'تایید ثبت شد' : 'فرم تحویل ذخیره شد');
+      message.success('پیش‌نویس ذخیره شد؛ تأیید ارسال و دریافت را در بخش «ارسال و دریافت مواد» انجام دهید.');
       if (handoverDraftKey) clearDurableDraft(handoverDraftKey);
+      setHandoverEditorOpen(false);
+      setHandoverFormsModalOpen(true);
       return true;
     } catch (error: any) {
       message.error(error?.message || 'خطا در ثبت فرم تحویل');
@@ -4107,6 +4077,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
         activityDetailsHref={handoverTask?.id ? `/tasks/${handoverTask.id}` : null}
         stageActivityPanel={handoverTask ? (
           <div className="space-y-4" dir="rtl">
+            {handoverContext?.orderId && <ProductionReceiptBoard orderIds={[handoverContext.orderId]} onChanged={() => { void openTaskHandoverModal(handoverTask, tasks); }} />}
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <div className="text-base font-black text-[#17372a]">اطلاعات فعالیت</div>
@@ -4240,8 +4211,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
       <TaskHandoverModal
         open={handoverEditorOpen && !!handoverTask && !!handoverContext}
+        legacy={handoverForms.some(f => f.id === activeHandoverFormId)}
         loading={handoverLoading}
-        locked={!!(handoverContext?.giverConfirmation?.confirmed || handoverContext?.receiverConfirmation?.confirmed)}
+        locked={handoverForms.some(f => f.id === activeHandoverFormId) || !!(handoverContext?.giverConfirmation?.confirmed || handoverContext?.receiverConfirmation?.confirmed)}
         taskName={String(handoverTask?.name || handoverTask?.title || 'مرحله')}
         sourceStageName={String(handoverContext?.sourceStageName || 'شروع تولید')}
         nextStageName={handoverNextTask?.name || handoverNextTask?.title || null}

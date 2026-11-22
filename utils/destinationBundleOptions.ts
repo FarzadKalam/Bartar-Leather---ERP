@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toPersianNumber } from './persianNumberFormatter';
 import { formatProductionShelfLabel } from './productionShelfLabel';
+import { productionTransitShelf } from './productionReceipts';
 
 export type DestinationBundleOption = {
   value: string;
@@ -23,6 +24,7 @@ const toNumber = (value: unknown) => {
 export const loadDestinationBundleOptions = async (
   client: SupabaseClient
 ): Promise<DestinationBundleOption[]> => {
+  const transitShelf = await productionTransitShelf();
   const [{ data: bundles, error: bundleError }, { data: inventory, error: inventoryError }] = await Promise.all([
     client.from('product_bundles').select('id, bundle_number').order('created_at', { ascending: false }).limit(1000),
     client.from('product_inventory').select('bundle_id, shelf_id, stock').not('bundle_id', 'is', null).gt('stock', 0).limit(5000),
@@ -69,7 +71,7 @@ export const loadDestinationBundleOptions = async (
       shelfId,
       shelfLabel,
       stock,
-      disabled: !hasSingleShelf,
+      disabled: !hasSingleShelf || shelfId === transitShelf,
     };
   });
 };

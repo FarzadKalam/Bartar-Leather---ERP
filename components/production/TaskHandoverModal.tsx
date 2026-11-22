@@ -120,6 +120,7 @@ interface TaskHandoverModalProps {
   open: boolean;
   loading: boolean;
   locked?: boolean;
+  legacy?: boolean;
   taskName: string;
   sourceStageName: string;
   nextStageName?: string | null;
@@ -263,6 +264,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   giverConfirmation,
   receiverConfirmation,
   canEditGiverNotes = false,
+  legacy = false,
   onCancel,
   onSave,
   onTrafficTypeChange,
@@ -433,12 +435,15 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
         <Button key="cancel" onClick={onCancel}>
           انصراف
         </Button>,
-        <Button key="save" type="primary" loading={loading} onClick={onSave}>
-          ثبت فرم
+        !legacy && <Button key="save" type="primary" loading={loading} onClick={onSave}>
+          ذخیرهٔ پیش‌نویس تحویل
         </Button>,
       ]}
     >
       <div className="production-delivery-content space-y-4" dir="rtl">
+        <div className="rounded-lg bg-amber-50 p-3 text-sm">{legacy
+          ? 'سابقهٔ ثبت‌شده: موجودی این فرم قبلاً منتقل شده است. تأیید فقط امضای مسئول را ثبت می‌کند؛ اصلاح مقدار به بررسی مغایرت نیاز دارد.'
+          : 'ذخیرهٔ این فرم موجودی را تغییر نمی‌دهد. سپس در بخش «ارسال و دریافت مواد»، تحویل‌دهنده ارسال و تحویل‌گیرنده مقدار واقعی را جداگانه تأیید می‌کنند.'}</div>
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
           <div className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -613,7 +618,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                       disabled={locked}
                     />
                     {group.isConfirmed && (
-                      <span className="text-[11px] bg-white/20 rounded px-2 py-0.5">ثبت شده</span>
+                      <span className="text-[11px] bg-white/20 rounded px-2 py-0.5">{legacy ? 'ثبت شده' : 'آمادهٔ ذخیرهٔ پیش‌نویس'}</span>
                     )}
                     <Button
                       type="text"
@@ -1379,7 +1384,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
             تحویل‌گیرنده: <span className="font-medium">{receiverName || '-'}</span>
           </div>
           <HandoverAmountSummary groups={groups} giverConfirmed={giverConfirmation.confirmed} receiverConfirmed={receiverConfirmation.confirmed} />
-          <div className="flex flex-col md:flex-row gap-2">
+          {legacy && <div className="flex flex-col md:flex-row gap-2">
             {giverConfirmation.confirmed ? (
               <div className="text-xs rounded border border-green-200 bg-green-50 text-green-700 px-3 py-2">
                 {giverConfirmation.userName || 'کاربر'} مقادیر فوق را در {toPersianNumber(formatDateTime(giverConfirmation.at || null))} تحویل داده است.
@@ -1398,7 +1403,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                 مقادیر فوق را تحویل گرفتم
               </Button>
             )}
-          </div>
+          </div>}
         </div>
       </div>
       <style>{`

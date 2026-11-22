@@ -1,6 +1,14 @@
 import { materialCostPerItem } from './bomMaterialCost';
 import { convertBetweenUnits } from './unitConversions';
 
+export function materialRowsForPersistence(rows: any[], moduleId?: string) {
+  return rows.map(row => {
+    if (moduleId === 'production_orders' || moduleId === 'production_boms') return { ...row };
+    const { key: _key, ...rest } = row;
+    return rest;
+  });
+}
+
 export const calculateMaterialRow = (gridRow: any, orderQuantity = 0) => {
     const pieces = Array.isArray(gridRow.pieces) ? gridRow.pieces : [];
     const qty = Number(orderQuantity) || 0;

@@ -9,6 +9,7 @@ export type OrderChange = {
   patch?: Record<string, unknown>;
 };
 export type TaskChange = {
+  orderId?: string;
   id: string;
   previous: unknown;
   shelf: string | null;
@@ -30,7 +31,8 @@ export function prepareProductionMoves(moves: ProductionMove[]) {
   });
 }
 
-type Command = {
+export type Command = {
+  requestKey?: string;
   kind: 'deliver' | 'handover' | 'complete' | 'hold' | 'resume' | 'return';
   orders: OrderChange[];
   tasks?: TaskChange[];
