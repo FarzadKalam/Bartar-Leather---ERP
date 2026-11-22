@@ -22,7 +22,7 @@ await db.exec(`
   create table tasks(id uuid primary key,related_production_order uuid,production_shelf_id uuid,recurrence_info jsonb);
   create table stock_transfers(id uuid primary key default gen_random_uuid(),created_at timestamptz default now(),transfer_type text,
     product_id uuid,required_qty numeric,delivered_qty numeric,production_order_id uuid,from_shelf_id uuid,to_shelf_id uuid,bundle_id uuid,
-    source_bundle_id uuid,target_bundle_id uuid,stage_task_id uuid,source_task_id uuid,destination_task_id uuid,sender_id uuid,receiver_id uuid,delivered_at timestamptz,notes text);
+    source_bundle_id uuid,target_bundle_id uuid,source_task_id uuid,destination_task_id uuid,sender_id uuid,receiver_id uuid,delivered_at timestamptz);
   insert into products(id) values ('${product}'),('${output}');
   insert into shelves(id) values ('${stage}'),('${source}');
   insert into product_bundles(id,bundle_number,shelf_id) values ('${bundle}','B-1','${source}');
@@ -37,8 +37,15 @@ const run = (cmd) => db.query('select commit_production_operation($1)', [JSON.st
 const stock = async (s,p) => Number((await db.query('select coalesce(sum(stock),0) n from product_inventory where shelf_id=$1 and product_id=$2',[s,p])).rows[0].n);
 const move = { product_id: product,source_shelf_id: source,target_shelf_id: stage,source_bundle_id: bundle,target_bundle_id: dest,quantity: 4,new_bundle: true };
 const form = {production_handover:{forms:[{id:'receipt'}]}};
-const log = {transfer_type:'production_stage',production_order_id:order,product_id:product,required_qty:4,delivered_qty:4,from_shelf_id:source,to_shelf_id:stage,bundle_id:dest,source_bundle_id:bundle,target_bundle_id:dest};
+const log = {transfer_type:'production_stage',production_order_id:order,product_id:product,required_qty:4,delivered_qty:4,from_shelf_id:source,to_shelf_id:stage,bundle_id:dest,source_bundle_id:bundle,target_bundle_id:dest,notes:'تحویل مواد اولیه آزمایشی',stage_task_id:task};
 const command = {kind:'deliver',orders:[{id:order,revision:0}],moves:[move],tasks:[{id:task,shelf:stage,previous:null,recurrence:form}],transfers:[log],factors:{[product]:1}};
+// Reproduce the older production schema before applying the additive repair.
+await assert.rejects(run(command), /notes.*does not exist/);
+assert.equal(await stock(source,product),10);
+assert.equal((await db.query('select count(*)::int n from stock_transfers')).rows[0].n,0);
+const metadataMigration = await readFile(new URL('../migrations/20261121_production_transfer_metadata.sql', import.meta.url),'utf8');
+await db.exec(metadataMigration);
+await db.exec(metadataMigration); // Re-running must preserve existing schema/data.
 await db.exec("set test.can_edit='off'");
 await assert.rejects(run(command), /دسترسی/);
 await db.exec("set test.can_edit='on'");
@@ -68,6 +75,19 @@ assert.equal(await stock(stage,product),4);
 assert.equal(await stock(secondStage,product),4);
 await db.exec('rollback');
 await run(command);
+const metadata = (await db.query('select notes,stage_task_id from stock_transfers')).rows[0];
+assert.equal(metadata.notes, 'تحویل مواد اولیه آزمایشی');
+assert.equal(metadata.stage_task_id, task);
+// Giver and receiver confirmations change the form, not the transferred stock.
+await db.exec('begin');
+const giverForm = {...form, giverConfirmation:{confirmed:true}};
+await run({kind:'handover',orders:[{id:order}],tasks:[{id:task,shelf:stage,previous:form,recurrence:giverForm}],factors:{}});
+const receiverForm = {...giverForm,receiverConfirmation:{confirmed:true}};
+await run({kind:'handover',orders:[{id:order}],tasks:[{id:task,shelf:stage,previous:giverForm,recurrence:receiverForm}],factors:{}});
+assert.equal(await stock(stage,product),4);
+assert.equal((await db.query('select count(*)::int n from stock_transfers')).rows[0].n,1);
+await assert.rejects(run({kind:'handover',orders:[{id:order}],tasks:[{id:task,shelf:stage,previous:giverForm,recurrence:receiverForm}],factors:{}}), /مرحله تغییر کرده/);
+await db.exec('rollback');
 await assert.rejects(run(command));
 assert.equal(await stock(stage,product),4);
 await run({kind:'hold',orders:[{id:order,revision:1}]});

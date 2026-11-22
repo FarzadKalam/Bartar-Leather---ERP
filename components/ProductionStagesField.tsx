@@ -1,3 +1,6 @@
+import { getHandoverCurrentQuantity } from '../utils/productionHandoverSummary';
+import { createPortal } from 'react-dom';
+import ProductionQuantityEditor from './production/ProductionQuantityEditor';
 import StageMaterialPlan from './production/StageMaterialPlan';
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Avatar, Popover, Button, Tooltip, Modal, Form, Input, message, Spin, Select, InputNumber, Space } from 'antd';
@@ -63,6 +66,7 @@ interface ProductionStagesFieldProps {
   draftStages?: any[];
   planMaterials?: any[];
   planQuantity?: number;
+  quantityEditorTarget?: HTMLElement | null;
   onDraftStagesChange?: (stages: any[]) => void | Promise<void>;
   draftStagesPersistedByParent?: boolean;
   showWageSummary?: boolean;
@@ -126,7 +130,7 @@ type OpenHandoverOptions = {
   sourceOverrideTask?: any | null;
 };
 
-const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, planMaterials, planQuantity, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false, focusedTaskId = null, focusedTaskAction = null, focusedHandoverFormId = null, onFocusedTaskHandled }) => {
+const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId, moduleId, readOnly = false, compact = false, lazyLoad = false, onlyLineId = null, onQuantityChange, orderStatus, draftStages, planMaterials, planQuantity, quantityEditorTarget, onDraftStagesChange, draftStagesPersistedByParent = false, showWageSummary = false, focusedTaskId = null, focusedTaskAction = null, focusedHandoverFormId = null, onFocusedTaskHandled }) => {
   const [lines, setLines] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<{ users: any[]; roles: any[] }>({ users: [], roles: [] });
@@ -340,13 +344,6 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     };
   }, [buildHandoverRowKey, toNumber]);
 
-  const sumDeliveredRows = useCallback((rows: StageHandoverDeliveryRow[], groupDeliveryType?: DeliveryType) => {
-    return rows.reduce(
-      (sum, row) => sum + getDeliveryMainQuantity(row, groupDeliveryType),
-      0
-    );
-  }, []);
-
   const recalcHandoverGroup = useCallback((group: StageHandoverGroup): StageHandoverGroup => {
     const pieces = Array.isArray(group?.pieces) ? group.pieces : [];
     const orderPieces = Array.isArray(group?.orderPieces) ? group.orderPieces : [];
@@ -357,11 +354,9 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       : [];
     const totalSourceQty = pieces.reduce((sum, row) => sum + Math.max(0, toNumber(row?.sourceQty)), 0);
     const totalOrderQty = orderPieces.reduce((sum, row) => sum + Math.max(0, toNumber(row?.sourceQty)), 0);
-    const fallbackTotal = pieces.reduce(
-      (sum, row) => sum + Math.max(0, toNumber((row as any)?.handoverQty ?? row?.sourceQty)),
-      0
-    );
-    const totalHandoverQty = deliveryRows.length > 0 ? sumDeliveredRows(deliveryRows, resolvedType) : fallbackTotal;
+    const totalHandoverQty = getHandoverCurrentQuantity({
+      ...groupWithType, ...(Array.isArray(group.deliveryRows) ? { deliveryRows } : {}),
+    });
     return {
       ...groupWithType,
       pieces,
@@ -371,7 +366,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       totalOrderQty,
       totalHandoverQty,
     };
-  }, [normalizeHandoverDeliveryRow, sumDeliveredRows, toNumber]);
+  }, [normalizeHandoverDeliveryRow, toNumber]);
 
   const parseRecurrenceInfo = useCallback((value: any) => {
     if (!value) return {};
@@ -511,7 +506,8 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
     const { error } = await supabase
       .from('production_orders')
       .update({ quantity: nextTotal })
-      .eq('id', recordId);
+      .eq('id', recordId)
+      .or(`quantity.is.null,quantity.neq.${nextTotal}`);
     if (error) {
       message.error(`خطا در بروزرسانی تعداد تولید: ${error.message}`);
     }
@@ -3565,6 +3561,11 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
 
   return (
     <div ref={containerRef} className="w-full flex flex-col gap-4 select-none" dir="rtl">
+      {!isBom && quantityEditorTarget && createPortal(<ProductionQuantityEditor
+        lines={lines} drafts={lineQuantityDrafts} savingId={savingLineQuantityId}
+        disabled={readOnly || (!!orderStatus && orderStatus !== 'pending')}
+        onEdit={startLineQuantityEdit} onChange={changeLineQuantityDraft} onSave={saveLineQuantityEdit}
+        onCancel={cancelLineQuantityEdit} onAdd={() => setIsLineModalOpen(true)} />, quantityEditorTarget)}
       {isBom && (
         <div className="space-y-2">
           <div className="text-xs text-gray-500">مراحل پیش‌نویس (BOM)</div>
@@ -3646,7 +3647,7 @@ const ProductionStagesField: React.FC<ProductionStagesFieldProps> = ({ recordId,
       {!isBom && visibleLines.map((line) => {
         const lineTasks = tasksByLine.get(String(line.id)) || [];
         const canEditQuantity = !readOnly && (!orderStatus || orderStatus === 'pending');
-        const showInlineQty = !compact || canEditQuantity;
+        const showInlineQty = !quantityEditorTarget && (!compact || canEditQuantity);
         const lineId = String(line.id);
         const isEditingQuantity = Object.prototype.hasOwnProperty.call(lineQuantityDrafts, lineId);
         const currentQty = Math.max(0, toNumber(line.quantity));

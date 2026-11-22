@@ -1,3 +1,4 @@
+import './deliveryModal.css';
 import ResizableTable from '../ResizableTable';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Drawer, Input, InputNumber, Modal, Popover, Segmented, Select, Tag } from 'antd';
@@ -364,7 +365,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
 
   const bodyContent = (
     <>
-      <div className="space-y-4">
+      <div className="production-delivery-content space-y-4" dir="rtl">
         <div className="text-sm text-gray-700">
           لطفا مقادیر مواد اولیه تحویل شده به خط تولید را وارد کنید.
         </div>
@@ -425,10 +426,10 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
 
             return (
               <div key={group.key} className={containerClass}>
-                <div className={`sticky top-0 z-30 px-3 py-2 flex items-center justify-between gap-2 ${headerToneClass}`}>
+                <div className={`px-3 py-2 flex items-center justify-between gap-2 ${headerToneClass}`}>
                   <div className="min-w-0">
                     <div className="text-xs">دسته‌بندی: {group.categoryLabel}</div>
-                    <div className="text-base sm:text-lg leading-6 font-bold truncate">
+                    <div className="text-base sm:text-lg leading-6 font-bold whitespace-normal break-words">
                       محصول انتخاب‌شده: {group.selectedProductName || '-'}
                       {group.selectedProductCode ? ` (${group.selectedProductCode})` : ''}
                     </div>
@@ -1569,7 +1570,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
 
   if (inline) {
     return (
-      <div className="space-y-3">
+      <div className="production-delivery-content space-y-3">
         <div className="rounded-2xl border border-gray-200 bg-white p-3">
           <h2 className="mb-3 text-lg font-bold text-[#17372a]">فرم تحویل مواد اولیه</h2>
           {bodyContent}
@@ -1583,7 +1584,9 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
     <>
       <Modal
         title="فرم تحویل مواد اولیه"
-        width="min(980px, calc(100vw - 24px))"
+        width={1200}
+        className="production-delivery-modal"
+        zIndex={11000}
         open={open}
         onOk={onStart}
         onCancel={onCancel}
@@ -1591,7 +1594,7 @@ const StartProductionModal: React.FC<StartProductionModalProps> = ({
         cancelText="انصراف"
         confirmLoading={loading}
         destroyOnHidden
-        styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}
+        styles={{ body: { overflowY: 'auto', overflowX: 'hidden' } }}
       >
         {bodyContent}
       </Modal>

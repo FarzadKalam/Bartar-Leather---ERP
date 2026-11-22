@@ -1,3 +1,4 @@
+import './deliveryModal.css';
 import ResizableTable from '../ResizableTable';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Modal, Tabs, Tag } from 'antd';
@@ -576,13 +577,15 @@ const TaskHandoverFormsModal: React.FC<TaskHandoverFormsModalProps> = ({
       title="فرم‌های تحویل کالا"
       open={open}
       onCancel={onClose}
-      width="min(1440px, calc(100vw - 16px))"
+      width={1440}
+      className="production-delivery-modal"
+      zIndex={11000}
       footer={null}
       destroyOnHidden
-      styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }}
+      styles={{ body: { overflowY: 'auto', overflowX: 'hidden' } }}
       centered
     >
-      <div className="space-y-4 font-['Vazirmatn']" dir="rtl">
+      <div className="production-delivery-content space-y-4 font-['Vazirmatn']" dir="rtl">
         <div className="rounded-2xl border border-[#c9b29a] bg-[#f7f1ea] p-4">
           <div className="text-lg font-black text-[#17372a]">
             مدیریت تحویل‌های مرحله "{taskName}"

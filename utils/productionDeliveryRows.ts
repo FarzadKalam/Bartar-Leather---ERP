@@ -137,8 +137,11 @@ export const applyDeliveryRowFieldUpdate = <T extends Record<string, any>>(
   const updatedRow: Record<string, any> = { ...row, [field]: nextValue };
   const effectiveType = resolveDeliveryType(group);
 
-  if (effectiveType === 'piece' && (field === 'length' || field === 'width' || field === 'quantity')) {
+  const changedPieceDimensions = effectiveType === 'piece' && (field === 'length' || field === 'width' || field === 'quantity');
+  if (changedPieceDimensions) {
     updatedRow.mainQuantity = calculatePieceQuantity(updatedRow.length, updatedRow.width, updatedRow.quantity);
+  }
+  if (changedPieceDimensions || field === 'mainQuantity') {
     if (updatedRow.mainQuantity <= 0) {
       updatedRow.subQuantity = 0;
     } else {

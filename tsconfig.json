@@ -38,6 +38,11 @@
     "noFallthroughCasesInSwitch": true
   },
   "exclude": [
-    "supabase/functions"
+    "supabase/functions",
+    "node_modules",
+    "dist",
+    ".tmp-tests",
+    "output",
+    "outputs"
   ]
 }

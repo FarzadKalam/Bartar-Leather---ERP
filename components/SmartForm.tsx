@@ -1,6 +1,7 @@
 import { snapshotBomStages } from '../utils/bomGroupRoutes';
+import { calculateMaterialRow } from '../utils/materialRowCalculations';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { App, Form, Button, Spin, Divider, Select, Space, Checkbox } from 'antd';
+import { App, Form, Button, Spin, Divider, Select, Space, Checkbox, InputNumber } from 'antd';
 import { UserOutlined, TeamOutlined } from '@ant-design/icons';
 import { SaveOutlined, CloseOutlined } from '@ant-design/icons';
 import { supabase } from '../supabaseClient';
@@ -854,6 +855,8 @@ const SmartForm: React.FC<SmartFormProps> = ({
         if (values.grid_materials === undefined) {
           values.grid_materials = formData?.grid_materials || [];
         }
+        values.grid_materials = values.grid_materials.map((row: any) =>
+          calculateMaterialRow(row, Number(values.quantity ?? formData?.quantity) || 0));
         if (values.production_stages_draft === undefined) {
           values.production_stages_draft = formData?.production_stages_draft || [];
         }
@@ -1050,6 +1053,10 @@ const SmartForm: React.FC<SmartFormProps> = ({
               }
             }
             if (module.id === 'production_orders') {
+              const { error: lineError } = await supabase.from('production_lines').insert({
+                production_order_id: inserted.id, line_no: 1, quantity: Number(sanitizedValues.quantity) || 0,
+              });
+              if (lineError) throw lineError;
               const postPayload: any = {};
               if (sanitizedValues?.grid_materials !== undefined) postPayload.grid_materials = sanitizedValues.grid_materials;
               if (sanitizedValues?.production_stages_draft !== undefined) postPayload.production_stages_draft = sanitizedValues.production_stages_draft;
@@ -1152,6 +1159,7 @@ const SmartForm: React.FC<SmartFormProps> = ({
   };
   const formActionButtons = (module.actionButtons || []).filter(b => b.placement === 'form');
   const sortedBlocks = [...(module.blocks || [])].sort((a, b) => a.order - b.order);
+  const [quantityEditorTarget, setQuantityEditorTarget] = useState<HTMLDivElement | null>(null);
   const headerFields = module.fields
       .filter(f => f.location === FieldLocation.HEADER)
       .filter(f => canViewField(f.key))
@@ -1265,6 +1273,15 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 <input />
               </Form.Item>
 
+              {module.id === 'production_orders' && canViewField('quantity') && (
+                recordId ? <div ref={setQuantityEditorTarget} /> :
+                <section className="mb-5 rounded-2xl border border-green-200 bg-green-50 p-4">
+                  <Form.Item name="quantity" label="تعداد محصولی که می‌خواهید تولید کنید" rules={[{ required: true }]} initialValue={1}>
+                    <InputNumber min={1} disabled={!canEditModule} />
+                  </Form.Item>
+                  <p className="text-xs m-0">این تعداد برای کل سفارش است؛ تعداد قطعات شناسنامه مربوط به یک محصول است.</p>
+                </section>
+              )}
               {(canViewField('assignee_id')) && (
                 <div className="mb-6">
                   <div className="flex items-center justify-between sm:justify-start bg-gray-50 dark:bg-white/5 border border-gray-100 dark:border-gray-700 rounded-lg sm:rounded-full pl-2 sm:pl-1 pr-3 py-1 gap-1 sm:gap-2">
@@ -1379,6 +1396,11 @@ const SmartForm: React.FC<SmartFormProps> = ({
                     orderStatus={module.id === 'production_orders' ? (currentValues as any)?.status : null}
                     planMaterials={(currentValues as any)?.grid_materials || []}
                     planQuantity={(currentValues as any)?.quantity}
+                    quantityEditorTarget={quantityEditorTarget}
+                    onQuantityChange={(quantity) => {
+                      form.setFieldValue('quantity', quantity);
+                      setFormData((previous: any) => previous.quantity === quantity ? previous : { ...previous, quantity });
+                    }}
                     draftStages={(currentValues as any)?.production_stages_draft || []}
                     draftStagesPersistedByParent
                     onDraftStagesChange={(stages) => {
@@ -1571,11 +1593,15 @@ const SmartForm: React.FC<SmartFormProps> = ({
                 if (block.type === BlockType.GRID_TABLE) {
                   return (
                     <div key={block.id} className="mb-6 p-1 border border-dashed border-gray-300 rounded-3xl">
+                      {module.id === 'production_orders' && <div role="note" className="p-3 text-sm text-green-900 bg-green-50 rounded-xl mb-2">
+                        مواد را انتخاب کنید و در پایان «ذخیره تغییرات» پایین فرم را بزنید. انتخاب متریال تا آن زمان ذخیره نمی‌شود.
+                      </div>}
                       <Form.Item name={block.id} noStyle>
                         <GridTable
                           block={block}
                           initialData={formData[block.id] || []}
                           mode="local"
+                          orderQuantity={module.id === 'production_orders' ? Number(currentValues.quantity) || 0 : 0}
                           moduleId={module.id}
                           relationOptions={relationOptions}
                           dynamicOptions={dynamicOptions}

@@ -1,0 +1,23 @@
+import * as assert from 'node:assert/strict';
+import { getHandoverCurrentQuantity, getHandoverPersonAmounts } from '../utils/productionHandoverSummary';
+import { applyDeliveryRowFieldUpdate } from '../utils/productionDeliveryRows';
+
+const row = {key:'one',mainQuantity:12,subQuantity:1200,deliveredQty:12,mainUnit:'متر طول',subUnit:'سانتیمتر طول'};
+const group = {key:'thread',deliveryType:'bulk' as const,totalHandoverQty:999,deliveryRows:[row]};
+assert.equal(getHandoverCurrentQuantity(group),12,'cached totals must not override current rows');
+const updated = applyDeliveryRowFieldUpdate(row,group,'mainQuantity','۲۰');
+assert.equal(updated.deliveredQty,20);
+assert.equal(updated.subQuantity,2000,'secondary quantity must follow a changed main quantity when units are convertible');
+assert.equal(applyDeliveryRowFieldUpdate(updated,group,'mainQuantity',0).subQuantity,0);
+assert.equal(getHandoverCurrentQuantity({...group,deliveryRows:[updated]}),20);
+assert.equal(getHandoverCurrentQuantity({...group,deliveryRows:[updated,{...row,mainQuantity:5}]}),25);
+assert.equal(getHandoverCurrentQuantity({...group,deliveryRows:[]}),0,'deleting all rows must not revive previous quantities');
+assert.equal(getHandoverCurrentQuantity({...group,deliveryRows:[{...row,mainQuantity:0}]}),0);
+const pieceGroup = {deliveryType:'piece' as const};
+const piece = applyDeliveryRowFieldUpdate({length:10,width:5,quantity:2,mainQuantity:100},pieceGroup,'quantity',3);
+assert.equal(getHandoverCurrentQuantity({...pieceGroup,deliveryRows:[piece]}),150);
+assert.equal(getHandoverCurrentQuantity({pieces:[{sourceQty:8}]}),8,'legacy forms without rows remain readable');
+const amounts = getHandoverPersonAmounts([{...group,deliveryRows:[updated,{...row,mainQuantity:3,mainUnit:'عدد'}]}]);
+assert.deepEqual(amounts.map(a=>a.quantity),[20,3],'incompatible units must not be combined in confirmation summary');
+assert.deepEqual(getHandoverPersonAmounts([group]).map(a=>a.quantity),[12]);
+console.log('PASS handover current rows, edits, additions, deletions, zero, piece quantities and per-person unit summaries.');

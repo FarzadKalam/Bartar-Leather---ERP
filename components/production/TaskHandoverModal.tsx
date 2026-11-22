@@ -1,3 +1,6 @@
+import HandoverAmountSummary from './HandoverAmountSummary';
+import { getHandoverCurrentQuantity } from '../../utils/productionHandoverSummary';
+import './deliveryModal.css';
 import ResizableTable from '../ResizableTable';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Input, InputNumber, Modal, Popover, Radio, Segmented, Select, Tag } from 'antd';
@@ -418,12 +421,14 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
   return (
     <Modal
       title="فرم تحویل کالا"
-      width="min(1440px, calc(100vw - 16px))"
+      width={1440}
+      className="production-delivery-modal"
+      zIndex={11000}
       open={open}
       onCancel={onCancel}
       confirmLoading={loading}
       destroyOnHidden
-      styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }}
+      styles={{ body: { overflowY: 'auto', overflowX: 'hidden' } }}
       footer={[
         <Button key="cancel" onClick={onCancel}>
           انصراف
@@ -433,7 +438,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
         </Button>,
       ]}
     >
-      <div className="space-y-4">
+      <div className="production-delivery-content space-y-4" dir="rtl">
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
           <div className="space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -539,7 +544,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                   )
               )
             );
-            const currentDeliveredQty = Math.max(0, parseNumberInput(group.totalHandoverQty));
+            const currentDeliveredQty = getHandoverCurrentQuantity(group);
             const totalDeliveredWithHistory = previousDeliveredQty + currentDeliveredQty;
             const requiredOrderQty = Math.max(0, parseNumberInput(group.totalOrderQty || group.totalSourceQty));
             const currentSubQuantity = (group.deliveryRows || []).reduce(
@@ -571,10 +576,10 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
 
             return (
               <div key={group.key} className={containerClass}>
-                <div className={`sticky top-0 z-30 px-3 py-2 flex items-center justify-between gap-2 ${headerToneClass}`}>
+                <div className={`px-3 py-2 flex items-center justify-between gap-2 ${headerToneClass}`}>
                   <div className="min-w-0">
                     <div className="text-xs">دسته‌بندی: {group.categoryLabel || '-'}</div>
-                    <div className="text-base sm:text-lg leading-6 font-bold truncate">
+                    <div className="text-base sm:text-lg leading-6 font-bold whitespace-normal break-words">
                       محصول: {group.selectedProductName || '-'}
                       {group.selectedProductCode ? ` (${group.selectedProductCode})` : ''}
                     </div>
@@ -582,12 +587,12 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                       مورد نیاز کل سفارش: <span className="font-semibold">{toQty(requiredOrderQty)}</span>
                       {consumptionUnitLabel ? <span className="font-semibold mr-1">{consumptionUnitLabel}</span> : null}
                       <span className="mx-1">|</span>
-                      {locked ? 'مقدار این فرم: ' : 'تحویل شده کل: '}<span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
+                      مقدار این فرم: <span className="font-semibold">{toQty(currentDeliveredQty)}</span>
                       {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                       {subUnitLabel ? (
                         <>
                           <span className="mx-1">/</span>
-                          <span className="font-semibold">{toQty(totalSubQuantity)}</span>
+                          <span className="font-semibold">{toQty(currentSubQuantity)}</span>
                           <span className="font-semibold mr-1">{subUnitLabel}</span>
                         </>
                       ) : null}
@@ -1041,6 +1046,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                               <div className="flex gap-1 items-center">
                                 <InputNumber
                                   value={value}
+                                  aria-label="مقدار واحد اصلی تحویل"
                                   className="w-full persian-number"
                                   stringMode
                                   formatter={(v) => formatGroupedInput(v)}
@@ -1222,7 +1228,8 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                       })()}
 
                       {(() => {
-                        const diff = totalDeliveredWithHistory - Math.max(0, parseNumberInput(group.totalSourceQty));
+                        const comparisonQty = trafficType === 'incoming' ? requiredOrderQty : Math.max(0, parseNumberInput(group.totalSourceQty));
+                        const diff = totalDeliveredWithHistory - comparisonQty;
                         const subDiff = totalSubQuantity - requiredSubQuantity;
                         const diffClass =
                           diff > 0 ? 'text-green-700 font-semibold' : diff < 0 ? 'text-red-700 font-semibold' : 'text-gray-700 font-medium';
@@ -1244,7 +1251,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                           <div className="text-xs flex flex-col gap-2 text-gray-700">
                             <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
                               <span>
-                                {locked ? 'جمع تحویل این فرم: ' : 'جمع مقدار تحویل جدید: '}<span className="font-semibold">{toQty(currentDeliveredQty)}</span>
+                                جمع مقدار این فرم: <span className="font-semibold">{toQty(currentDeliveredQty)}</span>
                                 {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                               </span>
                               <span>
@@ -1252,16 +1259,16 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
                                 {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                               </span>
                               <span>
-                                تحویل شده کل: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
+                                مجموع این فرم و تحویل‌های قبلی: <span className="font-semibold">{toQty(totalDeliveredWithHistory)}</span>
                                 {deliveryUnitLabel ? <span className="font-semibold mr-1">{deliveryUnitLabel}</span> : null}
                               </span>
                               <span className={diffClass}>
-                                اختلاف مقدار تحویل شده با مقدار دریافتی: {toQty(diff)}
+                                {trafficType === 'incoming' ? 'اختلاف با مقدار مورد نیاز سفارش: ' : 'اختلاف با ورودی این مرحله: '}{toQty(diff)}
                                 {deliveryUnitLabel ? <span className="mr-1">{deliveryUnitLabel}</span> : null}
                               </span>
-                              {subUnitLabel ? (
+                              {subUnitLabel && requiredSubQuantity > 0 ? (
                                 <span className={subDiff > 0 ? 'text-green-700 font-semibold' : subDiff < 0 ? 'text-red-700 font-semibold' : 'text-gray-700 font-medium'}>
-                                  اختلاف مقدار تحویل شده با مقدار دریافتی (واحد فرعی): {toQty(subDiff)}
+                                  اختلاف با مقدار مرجع (واحد فرعی): {toQty(subDiff)}
                                   <span className="mr-1">{subUnitLabel}</span>
                                 </span>
                               ) : null}
@@ -1371,6 +1378,7 @@ const TaskHandoverModal: React.FC<TaskHandoverModalProps> = ({
           <div className="text-xs text-gray-700">
             تحویل‌گیرنده: <span className="font-medium">{receiverName || '-'}</span>
           </div>
+          <HandoverAmountSummary groups={groups} giverConfirmed={giverConfirmation.confirmed} receiverConfirmed={receiverConfirmation.confirmed} />
           <div className="flex flex-col md:flex-row gap-2">
             {giverConfirmation.confirmed ? (
               <div className="text-xs rounded border border-green-200 bg-green-50 text-green-700 px-3 py-2">

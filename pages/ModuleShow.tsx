@@ -2116,13 +2116,13 @@ const ModuleShow: React.FC = () => {
         if (Object.keys(postPayload).length > 0) {
           await supabase.from('production_orders').update(postPayload).eq('id', inserted.id);
         }
-        const hasDraftStages = Array.isArray(values?.production_stages_draft) && values.production_stages_draft.length > 0;
-        if (hasDraftStages) {
-          await supabase.from('production_lines').insert({
+        {
+          const { error: lineError } = await supabase.from('production_lines').insert({
             production_order_id: inserted.id,
             line_no: 1,
-            quantity: 0,
+            quantity: Number(values.quantity) || 0,
           });
+          if (lineError) throw lineError;
         }
         if (values?.bom_id) {
           await syncBomFilesToOrder(String(values.bom_id), String(inserted.id));

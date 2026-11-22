@@ -1,3 +1,5 @@
+import './productionHandoverSummary.test';
+import './materialRowCalculations.test';
 import { bomRouteGroups, connectBomGroup, refreshBomRoutes } from '../utils/bomGroupRoutes';
 import './productionStageExecution.test';
 import './bomExcelRoutes.test';

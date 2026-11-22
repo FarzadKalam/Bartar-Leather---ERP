@@ -68,6 +68,8 @@ export async function commitProduction(command: Command) {
     }
   }
   const { error } = await supabase.rpc('commit_production_operation', { command: { ...command, factors } });
+  if (error?.code === '42703' && /notes|stage_task_id/.test(error.message))
+    throw new Error('ساختار پایگاه داده برای ثبت تحویل کامل نیست. مهاجرت تکمیلی حواله‌های تولید باید نصب شود؛ عملیات ثبت نشد.');
   if (error?.code === 'PGRST202') throw new Error('نسخهٔ پایگاه داده برای ثبت عملیات جدید تولید آماده نیست.');
   if (error) throw new Error(/\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/i.test(error.message) ? 'ثبت عملیات تولید ناموفق بود. گردش و موجودی بسته‌ها را بررسی کنید.' : error.message);
 }

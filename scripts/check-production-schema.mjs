@@ -8,7 +8,7 @@ const api = VITE_SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/';
 async function checkSchema() {
   for (const query of [
     'production_orders?select=production_revision,production_on_hold,production_returned_at&limit=0',
-    'stock_transfers?select=production_event_index&limit=0',
+    'stock_transfers?select=production_event_index,notes,stage_task_id,source_task_id,destination_task_id,sender_id,receiver_id,delivered_at&limit=0',
   ]) {
     const response = await fetch(api + query, { headers, signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error('Cannot verify production columns on ' + query.split('?')[0] + ' (HTTP ' + response.status + ')');
