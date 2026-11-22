@@ -1,5 +1,30 @@
 import { materialCostPerItem } from './bomMaterialCost';
-import { convertBetweenUnits } from './unitConversions';
+import { convertBetweenUnits, normalizeUnitValue } from './unitConversions';
+
+export function materialPieceForProduct(piece: any, product: any) {
+  const from = normalizeUnitValue(piece.main_unit);
+  const to = normalizeUnitValue(product.main_unit) || from;
+  let quantity = piece.quantity;
+  if (from && to && from !== to) {
+    if (Number(piece.length) && Number(piece.width)) {
+      throw new Error('واحد ماده با واحد ابعاد قطعه متفاوت است؛ ابتدا واحد و ابعاد را بررسی کنید.');
+    }
+    const converted = convertBetweenUnits(Number(quantity) || 0, from, to);
+    if (!Number.isFinite(converted)) throw new Error('واحد ماده با مصرف قطعه سازگار نیست؛ مقدار قبلی حفظ شد.');
+    quantity = converted;
+  }
+  return { ...piece, quantity, main_unit: to || null,
+    sub_unit: product.sub_unit || piece.sub_unit,
+    waste_rate: product.waste_rate ?? piece.waste_rate,
+    unit_price: product.main_unit_price ?? product.buy_price ?? piece.unit_price,
+    sub_unit_price: product.sub_unit_price ?? product.sub_buy_price ?? piece.sub_unit_price };
+}
+
+export function materialCategoryChange(row: any, category: string | null) {
+  const header = { ...row.header, category };
+  for (const key of Object.keys(header)) if (key.startsWith('selected_product_')) header[key] = null;
+  return { header, specs: {}, specs_locked: false, collapsed: false, pieces: row.pieces };
+}
 
 export function materialRowsForPersistence(rows: any[], moduleId?: string) {
   return rows.map(row => {

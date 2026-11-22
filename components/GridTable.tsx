@@ -1,4 +1,4 @@
-import { calculateMaterialRow, materialRowsForPersistence } from '../utils/materialRowCalculations';
+import { calculateMaterialRow, materialRowsForPersistence, materialPieceForProduct, materialCategoryChange } from '../utils/materialRowCalculations';
 import ResizableTable from './ResizableTable';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Checkbox, Empty, Input, InputNumber, Modal, Popover, Radio, Select, Spin, Typography, message } from 'antd';
@@ -673,8 +673,6 @@ const GridTable: React.FC<GridTableProps> = ({
         message.warning('محصول مادر قابل انتخاب در جدول قطعات نیست. یک متغیر محصول را انتخاب کنید.');
         return;
       }
-      const productMainUnit = product?.main_unit ? String(product.main_unit) : null;
-      const productSubUnit = product?.sub_unit ? String(product.sub_unit) : null;
 
       row.header = {
         ...row.header,
@@ -698,20 +696,14 @@ const GridTable: React.FC<GridTableProps> = ({
       row.specs = specs;
       row.specs_locked = true;
 
-      const pieces = (row.pieces || []).map((piece: any) => ({
-        ...piece,
-        waste_rate: product?.waste_rate ?? piece.waste_rate,
-        main_unit: productMainUnit ?? piece.main_unit,
-        sub_unit: productSubUnit ?? piece.sub_unit,
-        unit_price: product?.main_unit_price ?? product?.buy_price ?? piece.unit_price,
-        sub_unit_price: product?.sub_unit_price ?? product?.sub_buy_price ?? piece.sub_unit_price,
-      }));
+      const pieces = (row.pieces || []).map((piece: any) => materialPieceForProduct(piece, product));
       row.pieces = pieces;
 
       nextData[rowIndex] = applyCalculations(row);
       updateGrid(nextData);
     } catch (err) {
       console.error(err);
+      message.error(err instanceof Error ? err.message : "انتخاب ماده انجام نشد؛ اطلاعات قبلی حفظ شد.");
     }
   };
 
@@ -1315,7 +1307,7 @@ const GridTable: React.FC<GridTableProps> = ({
                   {rowCanEdit ? (
                     <Select
                       value={categoryValue}
-                      onChange={(val) => updateRow(rowIndex, { header: { ...row.header, category: val }, specs: {}, pieces: [{ key: createPieceKey(), ...defaultPiece() }], collapsed: false })}
+                      onChange={(val) => updateRow(rowIndex, materialCategoryChange(row, val))}
                       options={categories.map((c) => ({ label: c.label, value: c.value }))}
                       placeholder="انتخاب کنید"
                       className="min-w-[160px]"
