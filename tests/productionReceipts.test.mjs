@@ -41,6 +41,19 @@ try {
   const logs=(await db.query('select sender_id,receiver_id from stock_transfers order by created_at')).rows;
   assert.equal(logs[0].sender_id,ids.sender); assert.equal(logs[0].receiver_id,null);
   assert.equal(logs[1].sender_id,null); assert.equal(logs[1].receiver_id,ids.receiver);
+  const confirmations=async()=> (await db.query('select receipt_phase,is_sender_confirmed,is_receiver_confirmed from stock_transfers order by created_at')).rows;
+  assert.deepEqual(await confirmations(),[
+    {receipt_phase:'send',is_sender_confirmed:true,is_receiver_confirmed:false},
+    {receipt_phase:'receive',is_sender_confirmed:false,is_receiver_confirmed:true},
+    {receipt_phase:'receive',is_sender_confirmed:false,is_receiver_confirmed:true},
+  ]);
+  await db.exec('alter table stock_transfers disable trigger sync_receipt_transfer_confirmation; update stock_transfers set is_sender_confirmed=false,is_receiver_confirmed=false; alter table stock_transfers enable trigger sync_receipt_transfer_confirmation');
+  const snapshot=JSON.stringify((await db.query('select * from product_inventory order by id')).rows);
+  const repair=await readFile(new URL('../migrations/20261122_production_transfer_confirmations.sql',import.meta.url),'utf8');
+  await db.exec(repair); const repaired=await confirmations(); await db.exec(repair);
+  assert.deepEqual(await confirmations(),repaired);
+  assert.equal(repaired[0].is_sender_confirmed,true); assert.equal(repaired[1].is_receiver_confirmed,true);
+  assert.equal(JSON.stringify((await db.query('select * from product_inventory order by id')).rows),snapshot);
   await user(ids.sender); await save(draft(90)); const insufficient=(await list())[0];
   await assert.rejects(action(insufficient.id,0,'send'),/کافی نیست/);
   assert.equal(await stock(ids.source),80); assert.equal((await list())[0].status,'draft');

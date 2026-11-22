@@ -25,7 +25,7 @@ export async function receiptDatabase() {
     create table tasks(id uuid primary key,name text,related_production_order uuid,production_shelf_id uuid,recurrence_info jsonb,assignee_id uuid,assignee_role_id uuid,assignee_type text);
     create table stock_transfers(id uuid primary key default gen_random_uuid(),created_at timestamptz default now(),transfer_type text,
       product_id uuid,required_qty numeric,delivered_qty numeric,production_order_id uuid,from_shelf_id uuid,to_shelf_id uuid,bundle_id uuid,
-      source_bundle_id uuid,target_bundle_id uuid,source_task_id uuid,destination_task_id uuid,sender_id uuid,receiver_id uuid,delivered_at timestamptz);
+      is_sender_confirmed boolean default false,is_receiver_confirmed boolean default false,source_bundle_id uuid,target_bundle_id uuid,source_task_id uuid,destination_task_id uuid,sender_id uuid,receiver_id uuid,delivered_at timestamptz);
     insert into org_roles values('${ids.role}','برش‌کار','{}');
     insert into profiles values('${ids.sender}','انباردار','editor',null),('${ids.receiver}','تحویل‌گیرنده','editor','${ids.role}'),('${ids.other}','کاربر دیگر','editor',null),('${ids.admin}','مدیر','admin',null);
     insert into products values('${ids.product}','چرم عسلی پاکباز','فوت مربع',100,100,'standalone',null);
@@ -36,7 +36,7 @@ export async function receiptDatabase() {
     insert into production_orders(id,name,status,quantity,production_group_order_id) values('${ids.order}','۵ بایگان آزمایشی','pending',5,'${ids.group}');
     insert into tasks values('${ids.task}','برش اول','${ids.order}','${ids.stage}',null,'${ids.receiver}',null,'user');
   `);
-  for (const name of ['20260915_enforce_single_shelf_per_bundle','20261024_production_bundle_numbering','20261114_production_operations','20261121_production_transfer_metadata','20261122_production_receipts','20261122_production_receipt_permissions']) {
+  for (const name of ['20260915_enforce_single_shelf_per_bundle','20261024_production_bundle_numbering','20261114_production_operations','20261121_production_transfer_metadata','20261122_production_receipts','20261122_production_receipt_permissions','20261122_production_transfer_confirmations']) {
     await db.exec(await readFile(new URL(`../../migrations/${name}.sql`,import.meta.url),'utf8'));
   }
   const user=async id=>db.query("select set_config('test.user',$1,false)",[id]);
