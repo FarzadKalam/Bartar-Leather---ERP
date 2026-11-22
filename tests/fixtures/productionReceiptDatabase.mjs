@@ -7,6 +7,7 @@ export async function receiptDatabase() {
   const ids = Object.fromEntries(['sender','receiver','other','admin','role','order','source','stage','bundle','product','task','group'].map(k=>[k,randomUUID()]));
   await db.exec(`
     create role anon; create role authenticated; create schema auth;
+    alter default privileges in schema public grant execute on functions to anon,authenticated;
     create function auth.uid() returns uuid language sql as $$ select nullif(current_setting('test.user',true),'')::uuid $$;
     create function has_module_permission(text,text) returns boolean language sql as $$select coalesce(current_setting('test.permission',true),'on')='on'$$;
     create table org_roles(id uuid primary key,title text,permissions jsonb);
@@ -35,7 +36,7 @@ export async function receiptDatabase() {
     insert into production_orders(id,name,status,quantity,production_group_order_id) values('${ids.order}','۵ بایگان آزمایشی','pending',5,'${ids.group}');
     insert into tasks values('${ids.task}','برش اول','${ids.order}','${ids.stage}',null,'${ids.receiver}',null,'user');
   `);
-  for (const name of ['20260915_enforce_single_shelf_per_bundle','20261024_production_bundle_numbering','20261114_production_operations','20261121_production_transfer_metadata','20261122_production_receipts']) {
+  for (const name of ['20260915_enforce_single_shelf_per_bundle','20261024_production_bundle_numbering','20261114_production_operations','20261121_production_transfer_metadata','20261122_production_receipts','20261122_production_receipt_permissions']) {
     await db.exec(await readFile(new URL(`../../migrations/${name}.sql`,import.meta.url),'utf8'));
   }
   const user=async id=>db.query("select set_config('test.user',$1,false)",[id]);

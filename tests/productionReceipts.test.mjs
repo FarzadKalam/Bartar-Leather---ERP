@@ -90,6 +90,12 @@ try {
   await db.exec('grant usage on schema auth to authenticated; grant select,update,delete on product_inventory to authenticated; set role authenticated');
   assert.ok(Array.isArray(await list()),'receipt RPC works with the actual authenticated database role');
   await assert.rejects(db.query('select * from production_receipts'),/permission denied/);
+  await assert.rejects(db.query('select project_production_receipt($1)',[ids.order]),/permission denied/);
+  await db.exec('reset role');
+  await db.exec('set role anon');
+  await assert.rejects(db.query('select list_production_receipts($1)',[[ids.order]]),/permission denied/);
+  await assert.rejects(db.query('select commit_production_operation($1)',['{}']),/permission denied/);
+  await assert.rejects(db.query('select project_production_receipt($1)',[ids.order]),/permission denied/);
   await db.exec('reset role');
   console.log('Production receipt transactions passed: draft, dispatch, partial receipt, retries, stock conservation, permissions, legacy, rollback, migration repeat.');
 } finally { await db.close(); }
